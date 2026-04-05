@@ -17,13 +17,16 @@ func main() {
 		log.Fatalf("configuration error: %v", err)
 	}
 
-	cli := newDockerClient()
-	defer cli.close()
+	cli, err := newDockerClient()
+	if err != nil {
+		log.Fatalf("failed to create Docker client: %v", err)
+	}
+	defer cli.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	info, err := cli.info(ctx)
+	info, err := cli.Info(ctx)
 	if err != nil {
 		log.Fatalf("failed to connect to Docker: %v", err)
 	}

@@ -2,26 +2,23 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/image"
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestCheckImageUpdateNoChange(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1.45/images/create", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"Already exists"}`))
-	})
-	mux.HandleFunc("/v1.45/images/", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(dockerImageInspect{ID: "sha256:samedigest"})
-	})
-
-	cli, cleanup := newTestDockerServer(t, mux)
-	defer cleanup()
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:samedigest"}, nil, nil
+		},
+	}
 
 	info := ContainerInfo{
 		Image:       "nginx:latest",
@@ -34,17 +31,11 @@ func TestCheckImageUpdateNoChange(t *testing.T) {
 }
 
 func TestCheckImageUpdateChanged(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1.45/images/create", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"Pull complete"}`))
-	})
-	mux.HandleFunc("/v1.45/images/", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(dockerImageInspect{ID: "sha256:newdigest"})
-	})
-
-	cli, cleanup := newTestDockerServer(t, mux)
-	defer cleanup()
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
+		},
+	}
 
 	info := ContainerInfo{
 		Image:       "nginx:latest",
@@ -57,18 +48,29 @@ func TestCheckImageUpdateChanged(t *testing.T) {
 }
 
 func TestCheckImageUpdatePullError(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1.45/images/create", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"message":"pull failed"}`))
-	})
-
-	cli, cleanup := newTestDockerServer(t, mux)
-	defer cleanup()
-
-	info := ContainerInfo{
-		Image: "broken:latest",
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return nil, errors.New("pull failed")
+		},
 	}
+
+	info := ContainerInfo{Image: "broken:latest"}
+
+	_, err := checkImageUpdate(context.Background(), cli, info)
+	require.NotNil(t, err)
+}
+
+func TestCheckImageUpdateInspectError(t *testing.T) {
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{}, nil, errors.New("inspect failed")
+		},
+	}
+
+	info := ContainerInfo{Image: "broken:latest"}
 
 	_, err := checkImageUpdate(context.Background(), cli, info)
 	require.NotNil(t, err)

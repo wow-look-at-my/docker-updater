@@ -8,7 +8,7 @@ import (
 )
 
 // runUpdateCheck checks all monitored containers for updates and applies them.
-func runUpdateCheck(ctx context.Context, cli *dockerClient, cfg Config) []UpdateResult {
+func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config) []UpdateResult {
 	containers, err := listMonitoredContainers(ctx, cli, cfg.Label)
 	if err != nil {
 		log.Printf("error listing containers: %v", err)
@@ -47,7 +47,7 @@ func runUpdateCheck(ctx context.Context, cli *dockerClient, cfg Config) []Update
 	return results
 }
 
-func checkAndUpdateImage(ctx context.Context, cli *dockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
+func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
 	result.OldRef = info.ImageDigest
 
 	newDigest, err := checkImageUpdate(ctx, cli, info)
@@ -81,7 +81,7 @@ func checkAndUpdateImage(ctx context.Context, cli *dockerClient, info ContainerI
 	return result
 }
 
-func checkAndUpdateGit(ctx context.Context, cli *dockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
+func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
 	newSHA, err := checkGitUpdate(info)
 	if err != nil {
 		result.Error = err
@@ -116,7 +116,7 @@ func checkAndUpdateGit(ctx context.Context, cli *dockerClient, info ContainerInf
 }
 
 // runLoop runs the main update loop until a signal is received.
-func runLoop(ctx context.Context, cli *dockerClient, cfg Config, sigCh <-chan os.Signal) {
+func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
 
 	// Run first check immediately.

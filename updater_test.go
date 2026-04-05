@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestRunUpdateCheckNoContainers(t *testing.T) {
@@ -18,9 +22,8 @@ func TestRunUpdateCheckNoContainers(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	results := runUpdateCheck(context.Background(), cli, cfg)
-	if len(results) != 0 {
-		t.Errorf("expected no results, got %d", len(results))
-	}
+	assert.Equal(t, 0, len(results))
+
 }
 
 func TestRunUpdateCheckImageUpToDate(t *testing.T) {
@@ -28,9 +31,9 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	mux.HandleFunc("/v1.45/containers/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]dockerContainer{
 			{
-				ID:    "container1",
-				Names: []string{"/web"},
-				Image: "nginx:latest",
+				ID:	"container1",
+				Names:	[]string{"/web"},
+				Image:	"nginx:latest",
 				Labels: map[string]string{
 					"docker-updater.enable": "true",
 				},
@@ -39,8 +42,8 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	})
 	mux.HandleFunc("/v1.45/containers/container1/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(dockerContainerInspect{
-			ID:    "container1",
-			Image: "sha256:currentdigest",
+			ID:	"container1",
+			Image:	"sha256:currentdigest",
 		})
 	})
 	mux.HandleFunc("/v1.45/images/create", func(w http.ResponseWriter, _ *http.Request) {
@@ -57,15 +60,12 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	cfg := Config{Label: "docker-updater.enable"}
 	results := runUpdateCheck(context.Background(), cli, cfg)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Updated {
-		t.Error("expected not updated (image is current)")
-	}
-	if results[0].Error != nil {
-		t.Errorf("unexpected error: %v", results[0].Error)
-	}
+	require.Equal(t, 1, len(results))
+
+	assert.False(t, results[0].Updated)
+
+	assert.Nil(t, results[0].Error)
+
 }
 
 func TestRunUpdateCheckImageDryRun(t *testing.T) {
@@ -73,9 +73,9 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	mux.HandleFunc("/v1.45/containers/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode([]dockerContainer{
 			{
-				ID:    "container2",
-				Names: []string{"/app"},
-				Image: "myapp:latest",
+				ID:	"container2",
+				Names:	[]string{"/app"},
+				Image:	"myapp:latest",
 				Labels: map[string]string{
 					"docker-updater.enable": "true",
 				},
@@ -84,8 +84,8 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	})
 	mux.HandleFunc("/v1.45/containers/container2/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(dockerContainerInspect{
-			ID:    "container2",
-			Image: "sha256:olddigest",
+			ID:	"container2",
+			Image:	"sha256:olddigest",
 		})
 	})
 	mux.HandleFunc("/v1.45/images/create", func(w http.ResponseWriter, _ *http.Request) {
@@ -102,41 +102,37 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	cfg := Config{Label: "docker-updater.enable", DryRun: true}
 	results := runUpdateCheck(context.Background(), cli, cfg)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if !results[0].Updated {
-		t.Error("expected updated=true in dry-run")
-	}
-	if !results[0].DryRun {
-		t.Error("expected dry_run=true")
-	}
-	if results[0].NewRef != "sha256:newdigest" {
-		t.Errorf("expected new digest, got %q", results[0].NewRef)
-	}
+	require.Equal(t, 1, len(results))
+
+	assert.True(t, results[0].Updated)
+
+	assert.True(t, results[0].DryRun)
+
+	assert.Equal(t, "sha256:newdigest", results[0].NewRef)
+
 }
 
 func TestCheckAndUpdateImageUpdate(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1.45/containers/oldcontainer/json", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(dockerContainerInspect{
-			ID:    "oldcontainer",
-			Image: "sha256:olddigest",
-			Name:  "/web",
+			ID:	"oldcontainer",
+			Image:	"sha256:olddigest",
+			Name:	"/web",
 			Config: struct {
-				Image        string            `json:"Image"`
-				Env          []string          `json:"Env"`
-				Cmd          []string          `json:"Cmd"`
-				Entrypoint   []string          `json:"Entrypoint"`
-				WorkingDir   string            `json:"WorkingDir"`
-				Labels       map[string]string `json:"Labels"`
-				ExposedPorts map[string]any    `json:"ExposedPorts"`
-				Volumes      map[string]any    `json:"Volumes"`
-				User         string            `json:"User"`
+				Image		string			`json:"Image"`
+				Env		[]string		`json:"Env"`
+				Cmd		[]string		`json:"Cmd"`
+				Entrypoint	[]string		`json:"Entrypoint"`
+				WorkingDir	string			`json:"WorkingDir"`
+				Labels		map[string]string	`json:"Labels"`
+				ExposedPorts	map[string]any		`json:"ExposedPorts"`
+				Volumes		map[string]any		`json:"Volumes"`
+				User		string			`json:"User"`
 			}{
 				Image: "nginx:latest",
 			},
-			HostConfig: json.RawMessage(`{}`),
+			HostConfig:	json.RawMessage(`{}`),
 		})
 	})
 	mux.HandleFunc("/v1.45/containers/oldcontainer/stop", func(w http.ResponseWriter, _ *http.Request) {
@@ -166,21 +162,89 @@ func TestCheckAndUpdateImageUpdate(t *testing.T) {
 	defer cleanup()
 
 	info := ContainerInfo{
-		ID:          "oldcontainer",
-		Name:        "web",
-		Image:       "nginx:latest",
-		ImageDigest: "sha256:olddigest",
-		Mode:        UpdateModeImage,
+		ID:		"oldcontainer",
+		Name:		"web",
+		Image:		"nginx:latest",
+		ImageDigest:	"sha256:olddigest",
+		Mode:		UpdateModeImage,
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
 	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
 
-	if !result.Updated {
-		t.Error("expected updated=true")
+	assert.True(t, result.Updated)
+
+	assert.Nil(t, result.Error)
+
+}
+
+func TestCheckAndUpdateGitFirstRun(t *testing.T) {
+	// Reset git ref store.
+	gitRefStore.Lock()
+	gitRefStore.refs = make(map[string]string)
+	gitRefStore.Unlock()
+
+	// Set up a test git server.
+	gitMux := http.NewServeMux()
+	gitMux.HandleFunc("/info/refs", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("001e# service=git-upload-pack\n"))
+		w.Write([]byte("0000\n"))
+		w.Write([]byte("003fab3def1234567890ab3def1234567890ab3def12 refs/heads/main\n"))
+		w.Write([]byte("0000\n"))
+	})
+	gitServer := httptest.NewServer(gitMux)
+	defer gitServer.Close()
+
+	dockerMux := http.NewServeMux()
+	dockerMux.HandleFunc("/v1.45/containers/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]dockerContainer{
+			{
+				ID:    "gitcontainer1",
+				Names: []string{"/git-app"},
+				Image: "myapp:latest",
+				Labels: map[string]string{
+					"docker-updater.enable":   "true",
+					"docker-updater.mode":     "git",
+					"docker-updater.git-repo": gitServer.URL,
+				},
+			},
+		})
+	})
+	dockerMux.HandleFunc("/v1.45/containers/gitcontainer1/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(dockerContainerInspect{
+			ID:    "gitcontainer1",
+			Image: "sha256:digest",
+		})
+	})
+
+	cli, cleanup := newTestDockerServer(t, dockerMux)
+	defer cleanup()
+
+	cfg := Config{Label: "docker-updater.enable"}
+	results := runUpdateCheck(context.Background(), cli, cfg)
+
+	require.Equal(t, 1, len(results))
+	// First run should not trigger update (no previous ref to compare).
+	assert.False(t, results[0].Updated)
+}
+
+func TestCheckAndUpdateGitNoRepo(t *testing.T) {
+	gitRefStore.Lock()
+	gitRefStore.refs = make(map[string]string)
+	gitRefStore.Unlock()
+
+	info := ContainerInfo{
+		ID:   "no-repo-container",
+		Name: "no-repo",
+		Mode: UpdateModeGit,
+		// GitRepo intentionally empty.
 	}
-	if result.Error != nil {
-		t.Errorf("unexpected error: %v", result.Error)
-	}
+
+	cfg := Config{}
+	result := UpdateResult{Container: info}
+	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+
+	require.NotNil(t, result.Error)
+	assert.False(t, result.Updated)
 }

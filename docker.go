@@ -299,7 +299,7 @@ func recreateContainer(ctx context.Context, cli *dockerClient, info ContainerInf
 		return fmt.Errorf("inspecting container %s: %w", info.Name, err)
 	}
 
-	log.Printf("stopping container %s (%s)", info.Name, info.ID[:12])
+	log.Printf("stopping container %s (%s)", info.Name, shortID(info.ID))
 	if err := cli.stopContainer(ctx, info.ID, 30); err != nil {
 		return fmt.Errorf("stopping container %s: %w", info.Name, err)
 	}
@@ -349,6 +349,6 @@ func recreateContainer(ctx context.Context, cli *dockerClient, info ContainerInf
 		return fmt.Errorf("starting container %s: %w", info.Name, err)
 	}
 
-	log.Printf("container %s updated and started (%s)", info.Name, newID[:12])
+	log.Printf("container %s updated and started (%s)", info.Name, shortID(newID))
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestLoadConfigDefaults(t *testing.T) {
@@ -20,25 +22,18 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 
 	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Nil(t, err)
 
-	if cfg.Interval != 5*time.Minute {
-		t.Errorf("expected interval 5m, got %v", cfg.Interval)
-	}
-	if cfg.Label != "docker-updater.enable" {
-		t.Errorf("expected label docker-updater.enable, got %q", cfg.Label)
-	}
-	if cfg.WebhookType != "generic" {
-		t.Errorf("expected webhook type generic, got %q", cfg.WebhookType)
-	}
-	if cfg.DryRun {
-		t.Error("expected dry run false")
-	}
-	if cfg.WebhookURL != "" {
-		t.Errorf("expected empty webhook URL, got %q", cfg.WebhookURL)
-	}
+	assert.Equal(t, 5*time.Minute, cfg.Interval)
+
+	assert.Equal(t, "docker-updater.enable", cfg.Label)
+
+	assert.Equal(t, "generic", cfg.WebhookType)
+
+	assert.False(t, cfg.DryRun)
+
+	assert.Equal(t, "", cfg.WebhookURL)
+
 }
 
 func TestLoadConfigCustom(t *testing.T) {
@@ -49,62 +44,50 @@ func TestLoadConfigCustom(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_DRY_RUN", "true")
 
 	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Nil(t, err)
 
-	if cfg.Interval != 10*time.Second {
-		t.Errorf("expected interval 10s, got %v", cfg.Interval)
-	}
-	if cfg.Label != "custom.label" {
-		t.Errorf("expected label custom.label, got %q", cfg.Label)
-	}
-	if cfg.WebhookURL != "https://example.com/hook" {
-		t.Errorf("expected webhook URL, got %q", cfg.WebhookURL)
-	}
-	if cfg.WebhookType != "discord" {
-		t.Errorf("expected discord, got %q", cfg.WebhookType)
-	}
-	if !cfg.DryRun {
-		t.Error("expected dry run true")
-	}
+	assert.Equal(t, 10*time.Second, cfg.Interval)
+
+	assert.Equal(t, "custom.label", cfg.Label)
+
+	assert.Equal(t, "https://example.com/hook", cfg.WebhookURL)
+
+	assert.Equal(t, "discord", cfg.WebhookType)
+
+	assert.True(t, cfg.DryRun)
+
 }
 
 func TestLoadConfigInvalidInterval(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_INTERVAL", "notaduration")
 
 	_, err := loadConfig()
-	if err == nil {
-		t.Fatal("expected error for invalid interval")
-	}
+	require.NotNil(t, err)
+
 }
 
 func TestLoadConfigInvalidWebhookType(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_WEBHOOK_TYPE", "teams")
 
 	_, err := loadConfig()
-	if err == nil {
-		t.Fatal("expected error for invalid webhook type")
-	}
+	require.NotNil(t, err)
+
 }
 
 func TestLoadConfigInvalidDryRun(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_DRY_RUN", "notabool")
 
 	_, err := loadConfig()
-	if err == nil {
-		t.Fatal("expected error for invalid dry run")
-	}
+	require.NotNil(t, err)
+
 }
 
 func TestLoadConfigSlackWebhookType(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_WEBHOOK_TYPE", "slack")
 
 	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.WebhookType != "slack" {
-		t.Errorf("expected slack, got %q", cfg.WebhookType)
-	}
+	require.Nil(t, err)
+
+	assert.Equal(t, "slack", cfg.WebhookType)
+
 }

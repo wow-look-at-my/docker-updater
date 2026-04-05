@@ -259,8 +259,8 @@ func listMonitoredContainers(ctx context.Context, cli *dockerClient, label strin
 		}
 
 		mode := UpdateModeImage
-		if m := c.Labels["docker-updater.mode"]; m == "git" {
-			mode = UpdateModeGit
+		if m := c.Labels["docker-updater.mode"]; m != "" {
+			mode = UpdateMode(m)
 		}
 
 		info := ContainerInfo{

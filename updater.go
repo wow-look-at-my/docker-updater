@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 )
 
@@ -112,6 +113,29 @@ func checkAndUpdateGit(ctx context.Context, cli *dockerClient, info ContainerInf
 
 	result.Updated = true
 	return result
+}
+
+// runLoop runs the main update loop until a signal is received.
+func runLoop(ctx context.Context, cli *dockerClient, cfg Config, sigCh <-chan os.Signal) {
+	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
+
+	// Run first check immediately.
+	results := runUpdateCheck(ctx, cli, cfg)
+	sendWebhookNotifications(cfg, results)
+
+	ticker := time.NewTicker(cfg.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			results := runUpdateCheck(ctx, cli, cfg)
+			sendWebhookNotifications(cfg, results)
+		case sig := <-sigCh:
+			log.Printf("received signal %v, shutting down", sig)
+			return
+		}
+	}
 }
 
 func shortID(id string) string {

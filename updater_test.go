@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
@@ -247,4 +250,108 @@ func TestCheckAndUpdateGitNoRepo(t *testing.T) {
 
 	require.NotNil(t, result.Error)
 	assert.False(t, result.Updated)
+}
+
+func TestCheckAndUpdateGitDryRun(t *testing.T) {
+	gitRefStore.Lock()
+	gitRefStore.refs = make(map[string]string)
+	gitRefStore.Unlock()
+
+	callCount := 0
+	gitServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		sha := "ab3def1234567890ab3def1234567890ab3def12"
+		if callCount > 1 {
+			sha = "ff3def1234567890ff3def1234567890ff3def12"
+		}
+		w.Write([]byte("001e# service=git-upload-pack\n"))
+		w.Write([]byte("0000\n"))
+		w.Write([]byte("003f" + sha + " refs/heads/main\n"))
+		w.Write([]byte("0000\n"))
+	}))
+	defer gitServer.Close()
+
+	info := ContainerInfo{
+		ID:      "git-dry-container",
+		Name:    "git-dry",
+		Mode:    UpdateModeGit,
+		GitRepo: gitServer.URL,
+		GitRef:  "refs/heads/main",
+	}
+
+	cfg := Config{DryRun: true}
+
+	// First call sets baseline.
+	result := UpdateResult{Container: info, DryRun: true}
+	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	assert.False(t, result.Updated)
+
+	// Second call detects change.
+	result = UpdateResult{Container: info, DryRun: true}
+	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	assert.True(t, result.Updated)
+	assert.True(t, result.DryRun)
+}
+
+func TestRunUpdateCheckUnknownMode(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1.45/containers/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]dockerContainer{
+			{
+				ID:    "unknown1",
+				Names: []string{"/unknown-mode"},
+				Image: "test:latest",
+				Labels: map[string]string{
+					"docker-updater.enable": "true",
+					"docker-updater.mode":   "unknown",
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/v1.45/containers/unknown1/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(dockerContainerInspect{ID: "unknown1", Image: "sha256:digest"})
+	})
+
+	cli, cleanup := newTestDockerServer(t, mux)
+	defer cleanup()
+
+	cfg := Config{Label: "docker-updater.enable"}
+	results := runUpdateCheck(context.Background(), cli, cfg)
+	// Unknown mode containers are skipped, not added to results.
+	assert.Equal(t, 0, len(results))
+}
+
+func TestRunLoop(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1.45/containers/json", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode([]dockerContainer{})
+	})
+
+	cli, cleanup := newTestDockerServer(t, mux)
+	defer cleanup()
+
+	cfg := Config{
+		Label:    "docker-updater.enable",
+		Interval: 100 * time.Millisecond,
+	}
+
+	sigCh := make(chan os.Signal, 1)
+
+	// Run the loop in a goroutine and signal it to stop.
+	done := make(chan struct{})
+	go func() {
+		runLoop(context.Background(), cli, cfg, sigCh)
+		close(done)
+	}()
+
+	// Let it run one tick, then signal.
+	time.Sleep(150 * time.Millisecond)
+	sigCh <- syscall.SIGTERM
+
+	select {
+	case <-done:
+		// OK - loop exited.
+	case <-time.After(2 * time.Second):
+		t.Fatal("runLoop did not exit after signal")
+	}
 }

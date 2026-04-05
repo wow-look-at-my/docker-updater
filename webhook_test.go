@@ -3,8 +3,12 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
 	"github.com/wow-look-at-my/testify/assert"
 	"github.com/wow-look-at-my/testify/require"
 )
@@ -175,4 +179,108 @@ func TestSendWebhookNotificationsNoUpdates(t *testing.T) {
 	sendWebhookNotifications(cfg, []UpdateResult{
 		{Updated: false},
 	})
+}
+
+func TestSendWebhookNotificationsGeneric(t *testing.T) {
+	var received []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		WebhookURL:  server.URL,
+		WebhookType: "generic",
+	}
+	results := []UpdateResult{
+		{
+			Container: ContainerInfo{Name: "web", Image: "nginx:latest"},
+			Updated:   true,
+			OldRef:    "sha256:old1234567890123",
+			NewRef:    "sha256:new1234567890123",
+		},
+	}
+
+	sendWebhookNotifications(cfg, results)
+
+	require.NotEqual(t, 0, len(received))
+	var p genericPayload
+	require.NoError(t, json.Unmarshal(received, &p))
+	assert.Equal(t, 1, len(p.Updates))
+}
+
+func TestSendWebhookNotificationsDiscord(t *testing.T) {
+	var received []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		WebhookURL:  server.URL,
+		WebhookType: "discord",
+	}
+	results := []UpdateResult{
+		{
+			Container: ContainerInfo{Name: "app", Image: "app:latest"},
+			Updated:   true,
+		},
+	}
+
+	sendWebhookNotifications(cfg, results)
+
+	require.NotEqual(t, 0, len(received))
+	var p map[string]any
+	require.NoError(t, json.Unmarshal(received, &p))
+	assert.NotNil(t, p["embeds"])
+}
+
+func TestSendWebhookNotificationsSlack(t *testing.T) {
+	var received []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		WebhookURL:  server.URL,
+		WebhookType: "slack",
+	}
+	results := []UpdateResult{
+		{
+			Container: ContainerInfo{Name: "worker", Image: "worker:v2"},
+			Error:     errors.New("test error"),
+		},
+	}
+
+	sendWebhookNotifications(cfg, results)
+
+	require.NotEqual(t, 0, len(received))
+	var p map[string]any
+	require.NoError(t, json.Unmarshal(received, &p))
+	assert.NotNil(t, p["blocks"])
+}
+
+func TestSendWebhookNotificationsServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg := Config{
+		WebhookURL:  server.URL,
+		WebhookType: "generic",
+	}
+	results := []UpdateResult{
+		{
+			Container: ContainerInfo{Name: "test", Image: "test:latest"},
+			Updated:   true,
+		},
+	}
+
+	// Should not panic on server error.
+	sendWebhookNotifications(cfg, results)
 }

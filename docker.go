@@ -77,10 +77,9 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
-		if pc := c.Labels["docker-updater.pre-check"]; pc != "" {
-			info.PreCheck = PreCheckType(pc)
-			info.PreCheckURL = c.Labels["docker-updater.pre-check.url"]
-			info.PreCheckCommand = c.Labels["docker-updater.pre-check.command"]
+		info.PreCheckURL = c.Labels["docker-updater.pre-check.url"]
+		info.PreCheckCommand = c.Labels["docker-updater.pre-check.command"]
+		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
 			info.PreCheckTimeout = 30 * time.Second
 			if t := c.Labels["docker-updater.pre-check.timeout"]; t != "" {
 				if d, err := time.ParseDuration(t); err == nil {
@@ -89,10 +88,18 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
-		// Get current image digest from inspection.
+		// Get current image digest and container IP from inspection.
 		inspect, err := cli.ContainerInspect(ctx, c.ID)
 		if err == nil {
 			info.ImageDigest = inspect.Image
+			if strings.HasPrefix(info.PreCheckURL, ":") && inspect.NetworkSettings != nil {
+				for _, net := range inspect.NetworkSettings.Networks {
+					if net.IPAddress != "" {
+						info.PreCheckURL = "http://" + net.IPAddress + info.PreCheckURL
+						break
+					}
+				}
+			}
 		}
 
 		monitored = append(monitored, info)

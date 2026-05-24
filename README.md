@@ -6,6 +6,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
+- **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **Dry-run mode**: Monitor for updates without applying them
 - **Scratch image**: No external dependencies at runtime
@@ -14,9 +15,12 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 ```bash
 docker run -d \
+  --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/wow-look-at-my/docker-updater
 ```
+
+Host networking is recommended so docker-updater can reach containers' pre-check endpoints directly via their bridge IPs, without joining every container's network.
 
 ## Configuration
 
@@ -42,8 +46,6 @@ labels:
   # Git mode only:
   docker-updater.git-repo: "https://github.com/user/repo"
   docker-updater.git-ref: "refs/heads/main"
-  # Optional: pre-update check (see below)
-  docker-updater.pre-check: "http"  # or "exec"
 ```
 
 ### Image Mode (default)
@@ -58,31 +60,35 @@ Checks a git remote for new commits on the tracked ref using the smart HTTP prot
 
 Before applying an update, docker-updater can verify that the container is ready to be updated. This prevents updates during critical operations like database migrations or active request processing.
 
-Two check types are supported:
+The check type is inferred from which label is set -- no separate type label needed.
 
 #### HTTP Check
 
-Sends an HTTP GET request to a URL. The container is only updated if the response status is 2xx. This is the recommended approach -- it works with any container regardless of whether it has a shell, and is especially useful for bare metal containers where `docker exec` is cumbersome.
+Set `docker-updater.pre-check.url` to send an HTTP GET before updating. The container is only updated if the response status is 2xx.
 
 ```yaml
 labels:
   docker-updater.enable: "true"
-  docker-updater.pre-check: "http"
-  docker-updater.pre-check.url: "http://myapp:8080/ready-to-update"
+  docker-updater.pre-check.url: ":8080/ready-to-update"
   docker-updater.pre-check.timeout: "10s"  # optional, default 30s
 ```
 
+URLs starting with `:` (port prefix) are resolved using the container's bridge IP at runtime. docker-updater inspects the container, finds its IP, and constructs the full URL (e.g., `http://172.17.0.5:8080/ready-to-update`). This requires docker-updater to run with `--network host`.
+
+Full URLs (e.g., `http://myapp:8080/ready`) are used as-is and require docker-updater to share a network with the target container.
+
 #### Exec Check
 
-Runs a command inside the container via `docker exec`. The container is only updated if the command exits with code 0.
+Set `docker-updater.pre-check.command` to run a command inside the container via `docker exec`. The container is only updated if the command exits with code 0. The command is run via `sh -c`, so the container must have a shell.
 
 ```yaml
 labels:
   docker-updater.enable: "true"
-  docker-updater.pre-check: "exec"
   docker-updater.pre-check.command: "/check-ready.sh"
   docker-updater.pre-check.timeout: "15s"  # optional, default 30s
 ```
+
+If both `url` and `command` are set, the HTTP check takes precedence.
 
 If a pre-check fails, the update is skipped for that cycle and retried on the next interval. Skipped updates are reported in webhook notifications.
 
@@ -92,6 +98,7 @@ If a pre-check fails, the update is skipped for that cycle and retried on the ne
 services:
   docker-updater:
     image: ghcr.io/wow-look-at-my/docker-updater
+    network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -100,9 +107,8 @@ services:
       DOCKER_UPDATER_WEBHOOK_TYPE: "discord"
 
   my-app:
-    image: nginx:latest
+    image: myapp:latest
     labels:
       docker-updater.enable: "true"
-      docker-updater.pre-check: "http"
-      docker-updater.pre-check.url: "http://my-app:80/health"
+      docker-updater.pre-check.url: ":8080/ready-to-update"
 ```

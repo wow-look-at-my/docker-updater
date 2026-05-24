@@ -383,7 +383,6 @@ func TestListMonitoredContainersPreCheck(t *testing.T) {
 					Image: "myapp:latest",
 					Labels: map[string]string{
 						"docker-updater.enable":            "true",
-						"docker-updater.pre-check":         "http",
 						"docker-updater.pre-check.url":     "http://localhost:8080/ready",
 						"docker-updater.pre-check.timeout": "10s",
 					},
@@ -393,8 +392,7 @@ func TestListMonitoredContainersPreCheck(t *testing.T) {
 					Names: []string{"/exec-app"},
 					Image: "otherapp:latest",
 					Labels: map[string]string{
-						"docker-updater.enable":          "true",
-						"docker-updater.pre-check":       "exec",
+						"docker-updater.enable":            "true",
 						"docker-updater.pre-check.command": "/check-ready.sh",
 					},
 				},
@@ -411,13 +409,44 @@ func TestListMonitoredContainersPreCheck(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 2, len(containers))
 
-	assert.Equal(t, PreCheckHTTP, containers[0].PreCheck)
 	assert.Equal(t, "http://localhost:8080/ready", containers[0].PreCheckURL)
 	assert.Equal(t, 10*time.Second, containers[0].PreCheckTimeout)
 
-	assert.Equal(t, PreCheckExec, containers[1].PreCheck)
 	assert.Equal(t, "/check-ready.sh", containers[1].PreCheckCommand)
 	assert.Equal(t, 30*time.Second, containers[1].PreCheckTimeout)
+}
+
+func TestListMonitoredContainersPreCheckURLResolve(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{
+					ID:    "resolve-check",
+					Names: []string{"/resolve-app"},
+					Image: "myapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":        "true",
+						"docker-updater.pre-check.url": ":8080/ready-to-update",
+					},
+				},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				NetworkSettings: &types.NetworkSettings{
+					Networks: map[string]*network.EndpointSettings{
+						"bridge": {IPAddress: "172.17.0.5"},
+					},
+				},
+			}, nil
+		},
+	}
+
+	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(containers))
+	assert.Equal(t, "http://172.17.0.5:8080/ready-to-update", containers[0].PreCheckURL)
 }
 
 func TestRecreateContainerInspectError(t *testing.T) {

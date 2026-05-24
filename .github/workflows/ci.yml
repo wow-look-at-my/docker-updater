@@ -5,7 +5,8 @@ on:
 
 permissions:
   id-token: write
-  contents: write
+  contents: read
+  packages: write
   actions: read
 
 jobs:
@@ -14,4 +15,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: wow-look-at-my/go-toolchain@v1
+
+  publish-ghcr:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: go-build
+          path: build
+      - name: Log in to ghcr.io
+        if: github.ref == 'refs/heads/master'
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          BUILD_ARGS="--build-arg VERSION=${GITHUB_SHA}"
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            docker buildx build ${BUILD_ARGS} --push -t "${IMAGE}:latest" .
+          else
+            docker buildx build ${BUILD_ARGS} .
+          fi
+
+  publish-buildhost:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master

@@ -27,6 +27,7 @@ type mockDocker struct {
 	containerRemoveFn    func(ctx context.Context, id string, options container.RemoveOptions) error
 	containerCreateFn    func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
 	containerStartFn     func(ctx context.Context, id string, options container.StartOptions) error
+	containerRenameFn      func(ctx context.Context, containerID string, newName string) error
 	containerExecCreateFn  func(ctx context.Context, containerID string, options container.ExecOptions) (types.IDResponse, error)
 	containerExecStartFn   func(ctx context.Context, execID string, config container.ExecStartOptions) error
 	containerExecInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
@@ -79,6 +80,13 @@ func (m *mockDocker) ContainerCreate(ctx context.Context, config *container.Conf
 func (m *mockDocker) ContainerStart(ctx context.Context, id string, options container.StartOptions) error {
 	if m.containerStartFn != nil {
 		return m.containerStartFn(ctx, id, options)
+	}
+	return nil
+}
+
+func (m *mockDocker) ContainerRename(ctx context.Context, containerID string, newName string) error {
+	if m.containerRenameFn != nil {
+		return m.containerRenameFn(ctx, containerID, newName)
 	}
 	return nil
 }
@@ -458,4 +466,138 @@ func TestRecreateContainerInspectError(t *testing.T) {
 
 	err := recreateContainer(context.Background(), cli, ContainerInfo{ID: "old123456789", Name: "test"}, "img")
 	require.NotNil(t, err)
+}
+
+func TestListMonitoredContainersRolling(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{
+					ID:    "rolling-1",
+					Names: []string{"/rolling-app"},
+					Image: "myapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":  "true",
+						"docker-updater.rolling": "true",
+					},
+				},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+			}, nil
+		},
+	}
+
+	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(containers))
+	assert.True(t, containers[0].Rolling)
+}
+
+func TestRollingUpdateContainer(t *testing.T) {
+	var stoppedID, removedID, renamedID, renamedTo string
+
+	inspectCount := 0
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config: &container.Config{Image: "myapp:latest"},
+					NetworkSettings: &types.NetworkSettings{
+						Networks: map[string]*network.EndpointSettings{
+							"internal": {Aliases: []string{"backend"}},
+						},
+					},
+				}, nil
+			}
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
+					},
+				},
+			}, nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, name string) (container.CreateResponse, error) {
+			assert.Equal(t, "myapp-next", name)
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerStopFn: func(_ context.Context, id string, _ container.StopOptions) error {
+			stoppedID = id
+			return nil
+		},
+		containerRemoveFn: func(_ context.Context, id string, _ container.RemoveOptions) error {
+			removedID = id
+			return nil
+		},
+		containerRenameFn: func(_ context.Context, id string, newName string) error {
+			renamedID = id
+			renamedTo = newName
+			return nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:      "old123456789",
+		Name:    "myapp",
+		Image:   "myapp:latest",
+		Rolling: true,
+	}
+
+	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+	assert.Equal(t, "old123456789", stoppedID)
+	assert.Equal(t, "old123456789", removedID)
+	assert.Equal(t, "new123456789", renamedID)
+	assert.Equal(t, "myapp", renamedTo)
+}
+
+func TestRollingUpdateContainerHealthTimeout(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			if id == "old123456789" {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config:          &container.Config{Image: "myapp:latest"},
+					NetworkSettings: &types.NetworkSettings{},
+				}, nil
+			}
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "starting"},
+					},
+				},
+			}, nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:      "old123456789",
+		Name:    "myapp",
+		Image:   "myapp:latest",
+		Rolling: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := rollingUpdateContainer(ctx, cli, info, "myapp:latest")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "not healthy")
 }

@@ -26,6 +26,7 @@ type DockerClient interface {
 	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
 	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	ContainerRename(ctx context.Context, containerID string, newContainerName string) error
 	ContainerExecCreate(ctx context.Context, container string, options container.ExecOptions) (types.IDResponse, error)
 	ContainerExecStart(ctx context.Context, execID string, config container.ExecStartOptions) error
 	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
@@ -87,6 +88,8 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 				}
 			}
 		}
+
+		info.Rolling = c.Labels["docker-updater.rolling"] == "true"
 
 		// Get current image digest and container IP from inspection.
 		inspect, err := cli.ContainerInspect(ctx, c.ID)
@@ -178,4 +181,92 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 
 	log.Printf("container %s updated and started (%s)", info.Name, shortID(created.ID))
 	return nil
+}
+
+// rollingUpdateContainer starts a new container before stopping the old one,
+// enabling zero-downtime updates when a reverse proxy routes by health.
+func rollingUpdateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, newImage string) error {
+	inspect, err := cli.ContainerInspect(ctx, info.ID)
+	if err != nil {
+		return fmt.Errorf("inspecting container %s: %w", info.Name, err)
+	}
+
+	config := inspect.Config
+	config.Image = newImage
+
+	hostConfig := inspect.HostConfig
+	hostConfig.PortBindings = nil
+
+	networkingConfig := &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{},
+	}
+	for netName, netSettings := range inspect.NetworkSettings.Networks {
+		networkingConfig.EndpointsConfig[netName] = &network.EndpointSettings{
+			Aliases: netSettings.Aliases,
+		}
+	}
+
+	nextName := info.Name + "-next"
+	log.Printf("container %s: starting rolling update with image %s", info.Name, newImage)
+
+	created, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, nextName)
+	if err != nil {
+		return fmt.Errorf("creating next container %s: %w", nextName, err)
+	}
+
+	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+		return fmt.Errorf("starting next container %s: %w", nextName, err)
+	}
+
+	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
+		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
+		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+		return fmt.Errorf("next container %s not healthy: %w", nextName, err)
+	}
+
+	log.Printf("container %s: next container healthy, draining old", info.Name)
+	timeout := 300
+	if err := cli.ContainerStop(ctx, info.ID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return fmt.Errorf("stopping old container %s: %w", info.Name, err)
+	}
+	if err := cli.ContainerRemove(ctx, info.ID, container.RemoveOptions{}); err != nil {
+		return fmt.Errorf("removing old container %s: %w", info.Name, err)
+	}
+
+	if err := cli.ContainerRename(ctx, created.ID, info.Name); err != nil {
+		return fmt.Errorf("renaming %s to %s: %w", nextName, info.Name, err)
+	}
+
+	log.Printf("container %s: rolling update complete (%s)", info.Name, shortID(created.ID))
+	return nil
+}
+
+func waitHealthy(ctx context.Context, cli DockerClient, containerID string, timeout time.Duration) error {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return fmt.Errorf("timed out after %s", timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			inspect, err := cli.ContainerInspect(ctx, containerID)
+			if err != nil {
+				return fmt.Errorf("inspecting container: %w", err)
+			}
+			if inspect.State == nil || !inspect.State.Running {
+				return fmt.Errorf("container exited")
+			}
+			if inspect.State.Health == nil {
+				return nil
+			}
+			if inspect.State.Health.Status == "healthy" {
+				return nil
+			}
+		}
+	}
 }

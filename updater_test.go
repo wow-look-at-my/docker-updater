@@ -113,15 +113,27 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 }
 
 func TestCheckAndUpdateImageUpdate(t *testing.T) {
+	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config:          &container.Config{Image: "nginx:latest"},
+					NetworkSettings: &types.NetworkSettings{},
+				}, nil
+			}
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{
-					Image:      "sha256:olddigest",
-					HostConfig: &container.HostConfig{},
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
+					},
 				},
-				Config:          &container.Config{Image: "nginx:latest"},
-				NetworkSettings: &types.NetworkSettings{},
 			}, nil
 		},
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
@@ -318,6 +330,7 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 	}))
 	defer server.Close()
 
+	inspectCount := 0
 	cli := &mockDocker{
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("")), nil
@@ -326,13 +339,24 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
 		},
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config:          &container.Config{Image: "myapp:latest"},
+					NetworkSettings: &types.NetworkSettings{},
+				}, nil
+			}
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{
-					Image:      "sha256:olddigest",
-					HostConfig: &container.HostConfig{},
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
+					},
 				},
-				Config:          &container.Config{Image: "myapp:latest"},
-				NetworkSettings: &types.NetworkSettings{},
 			}, nil
 		},
 		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {

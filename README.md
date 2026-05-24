@@ -42,6 +42,8 @@ labels:
   # Git mode only:
   docker-updater.git-repo: "https://github.com/user/repo"
   docker-updater.git-ref: "refs/heads/main"
+  # Optional: pre-update check (see below)
+  docker-updater.pre-check: "http"  # or "exec"
 ```
 
 ### Image Mode (default)
@@ -51,6 +53,38 @@ Polls the container registry for new image digests. When a newer digest is found
 ### Git Mode
 
 Checks a git remote for new commits on the tracked ref using the smart HTTP protocol (no git binary required). When a new commit is detected, the container is recreated with a fresh image pull.
+
+### Pre-Update Checks
+
+Before applying an update, docker-updater can verify that the container is ready to be updated. This prevents updates during critical operations like database migrations or active request processing.
+
+Two check types are supported:
+
+#### HTTP Check
+
+Sends an HTTP GET request to a URL. The container is only updated if the response status is 2xx. This is the recommended approach -- it works with any container regardless of whether it has a shell, and is especially useful for bare metal containers where `docker exec` is cumbersome.
+
+```yaml
+labels:
+  docker-updater.enable: "true"
+  docker-updater.pre-check: "http"
+  docker-updater.pre-check.url: "http://myapp:8080/ready-to-update"
+  docker-updater.pre-check.timeout: "10s"  # optional, default 30s
+```
+
+#### Exec Check
+
+Runs a command inside the container via `docker exec`. The container is only updated if the command exits with code 0.
+
+```yaml
+labels:
+  docker-updater.enable: "true"
+  docker-updater.pre-check: "exec"
+  docker-updater.pre-check.command: "/check-ready.sh"
+  docker-updater.pre-check.timeout: "15s"  # optional, default 30s
+```
+
+If a pre-check fails, the update is skipped for that cycle and retried on the next interval. Skipped updates are reported in webhook notifications.
 
 ## Docker Compose Example
 
@@ -69,4 +103,6 @@ services:
     image: nginx:latest
     labels:
       docker-updater.enable: "true"
+      docker-updater.pre-check: "http"
+      docker-updater.pre-check.url: "http://my-app:80/health"
 ```

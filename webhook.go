@@ -15,10 +15,9 @@ func sendWebhookNotifications(cfg Config, results []UpdateResult) {
 		return
 	}
 
-	// Only notify about actual updates or errors.
 	var notable []UpdateResult
 	for _, r := range results {
-		if r.Updated || r.Error != nil {
+		if r.Updated || r.Error != nil || r.Skipped {
 			notable = append(notable, r)
 		}
 	}
@@ -63,13 +62,15 @@ type genericPayload struct {
 }
 
 type genericUpdateItem struct {
-	Container string `json:"container"`
-	Image     string `json:"image"`
-	Updated   bool   `json:"updated"`
-	OldRef    string `json:"old_ref,omitempty"`
-	NewRef    string `json:"new_ref,omitempty"`
-	Error     string `json:"error,omitempty"`
-	DryRun    bool   `json:"dry_run"`
+	Container  string `json:"container"`
+	Image      string `json:"image"`
+	Updated    bool   `json:"updated"`
+	OldRef     string `json:"old_ref,omitempty"`
+	NewRef     string `json:"new_ref,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DryRun     bool   `json:"dry_run"`
+	Skipped    bool   `json:"skipped,omitempty"`
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 func buildGenericPayload(results []UpdateResult) ([]byte, error) {
@@ -79,12 +80,14 @@ func buildGenericPayload(results []UpdateResult) ([]byte, error) {
 
 	for _, r := range results {
 		item := genericUpdateItem{
-			Container: r.Container.Name,
-			Image:     r.Container.Image,
-			Updated:   r.Updated,
-			OldRef:    shortID(r.OldRef),
-			NewRef:    shortID(r.NewRef),
-			DryRun:    r.DryRun,
+			Container:  r.Container.Name,
+			Image:      r.Container.Image,
+			Updated:    r.Updated,
+			OldRef:     shortID(r.OldRef),
+			NewRef:     shortID(r.NewRef),
+			DryRun:     r.DryRun,
+			Skipped:    r.Skipped,
+			SkipReason: r.SkipReason,
 		}
 		if r.Error != nil {
 			item.Error = r.Error.Error()
@@ -101,6 +104,8 @@ func buildDiscordPayload(results []UpdateResult) ([]byte, error) {
 		value := "up-to-date"
 		if r.Error != nil {
 			value = fmt.Sprintf("error: %v", r.Error)
+		} else if r.Skipped {
+			value = fmt.Sprintf("skipped: %s", r.SkipReason)
 		} else if r.Updated {
 			value = fmt.Sprintf("%s -> %s", shortID(r.OldRef), shortID(r.NewRef))
 			if r.DryRun {
@@ -145,6 +150,8 @@ func buildSlackPayload(results []UpdateResult) ([]byte, error) {
 		status := ":white_check_mark: up-to-date"
 		if r.Error != nil {
 			status = fmt.Sprintf(":x: error: %v", r.Error)
+		} else if r.Skipped {
+			status = fmt.Sprintf(":warning: skipped: %s", r.SkipReason)
 		} else if r.Updated {
 			status = fmt.Sprintf(":arrows_counterclockwise: %s -> %s", shortID(r.OldRef), shortID(r.NewRef))
 			if r.DryRun {

@@ -13,5 +13,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: wow-look-at-my/go-toolchain@v1
-        with:
-          autorelease: 'true'
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master

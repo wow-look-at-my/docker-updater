@@ -10,15 +10,6 @@ const (
 	UpdateModeGit   UpdateMode = "git"
 )
 
-// PreCheckType determines how a container is checked before updating.
-type PreCheckType string
-
-const (
-	PreCheckNone PreCheckType = ""
-	PreCheckHTTP PreCheckType = "http"
-	PreCheckExec PreCheckType = "exec"
-)
-
 // ContainerInfo holds metadata about a monitored container.
 type ContainerInfo struct {
 	ID          string
@@ -32,8 +23,9 @@ type ContainerInfo struct {
 	GitRepo string
 	GitRef  string
 
-	// Pre-update check fields
-	PreCheck        PreCheckType
+	// Pre-update check fields.
+	// If PreCheckURL is set, an HTTP GET is sent and 2xx means ready.
+	// Otherwise if PreCheckCommand is set, it is exec'd via sh -c.
 	PreCheckURL     string
 	PreCheckCommand string
 	PreCheckTimeout time.Duration

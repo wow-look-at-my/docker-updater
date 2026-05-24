@@ -11,19 +11,15 @@ import (
 )
 
 func runPreCheck(ctx context.Context, cli DockerClient, info ContainerInfo) error {
-	switch info.PreCheck {
-	case PreCheckHTTP:
+	if info.PreCheckURL != "" {
 		return runHTTPCheck(ctx, info)
-	case PreCheckExec:
-		return runExecCheck(ctx, cli, info)
-	default:
-		return fmt.Errorf("unknown pre-check type %q", info.PreCheck)
 	}
+	return runExecCheck(ctx, cli, info)
 }
 
 func runHTTPCheck(ctx context.Context, info ContainerInfo) error {
 	if info.PreCheckURL == "" {
-		return fmt.Errorf("pre-check type is http but no docker-updater.pre-check.url label set")
+		return fmt.Errorf("pre-check url is empty")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, info.PreCheckTimeout)
@@ -50,7 +46,7 @@ func runHTTPCheck(ctx context.Context, info ContainerInfo) error {
 
 func runExecCheck(ctx context.Context, cli DockerClient, info ContainerInfo) error {
 	if info.PreCheckCommand == "" {
-		return fmt.Errorf("pre-check type is exec but no docker-updater.pre-check.command label set")
+		return fmt.Errorf("pre-check command is empty")
 	}
 
 	execConfig := container.ExecOptions{

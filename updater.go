@@ -65,7 +65,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 	result.NewRef = newDigest
 	log.Printf("container %s: image update available (%s -> %s)", info.Name, shortID(info.ImageDigest), shortID(newDigest))
 
-	if info.PreCheck != PreCheckNone {
+	if info.PreCheckURL != "" || info.PreCheckCommand != "" {
 		if err := runPreCheck(ctx, cli, info); err != nil {
 			result.Skipped = true
 			result.SkipReason = err.Error()
@@ -106,7 +106,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 	result.NewRef = newSHA
 	log.Printf("container %s: git update detected (new SHA: %s)", info.Name, shortID(newSHA))
 
-	if info.PreCheck != PreCheckNone {
+	if info.PreCheckURL != "" || info.PreCheckCommand != "" {
 		if err := runPreCheck(ctx, cli, info); err != nil {
 			result.Skipped = true
 			result.SkipReason = err.Error()

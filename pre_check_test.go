@@ -21,7 +21,6 @@ func TestRunHTTPCheckSuccess(t *testing.T) {
 
 	info := ContainerInfo{
 		Name:            "test",
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     server.URL + "/ready",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -38,7 +37,6 @@ func TestRunHTTPCheckNon2xx(t *testing.T) {
 
 	info := ContainerInfo{
 		Name:            "test",
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     server.URL + "/ready",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -51,19 +49,17 @@ func TestRunHTTPCheckNon2xx(t *testing.T) {
 func TestRunHTTPCheckNoURL(t *testing.T) {
 	info := ContainerInfo{
 		Name:            "test",
-		PreCheck:        PreCheckHTTP,
 		PreCheckTimeout: 5 * time.Second,
 	}
 
-	err := runPreCheck(context.Background(), nil, info)
+	err := runHTTPCheck(context.Background(), info)
 	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no docker-updater.pre-check.url")
+	assert.Contains(t, err.Error(), "url is empty")
 }
 
 func TestRunHTTPCheckConnectionError(t *testing.T) {
 	info := ContainerInfo{
 		Name:            "test",
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     "http://127.0.0.1:1/nonexistent",
 		PreCheckTimeout: 1 * time.Second,
 	}
@@ -87,7 +83,6 @@ func TestRunExecCheckSuccess(t *testing.T) {
 	info := ContainerInfo{
 		ID:              "container-1",
 		Name:            "test",
-		PreCheck:        PreCheckExec,
 		PreCheckCommand: "/check.sh",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -106,7 +101,6 @@ func TestRunExecCheckNonZeroExit(t *testing.T) {
 	info := ContainerInfo{
 		ID:              "container-1",
 		Name:            "test",
-		PreCheck:        PreCheckExec,
 		PreCheckCommand: "/check.sh",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -119,13 +113,12 @@ func TestRunExecCheckNonZeroExit(t *testing.T) {
 func TestRunExecCheckNoCommand(t *testing.T) {
 	info := ContainerInfo{
 		Name:            "test",
-		PreCheck:        PreCheckExec,
 		PreCheckTimeout: 5 * time.Second,
 	}
 
-	err := runPreCheck(context.Background(), nil, info)
+	err := runExecCheck(context.Background(), nil, info)
 	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no docker-updater.pre-check.command")
+	assert.Contains(t, err.Error(), "command is empty")
 }
 
 func TestRunExecCheckTimeout(t *testing.T) {
@@ -138,7 +131,6 @@ func TestRunExecCheckTimeout(t *testing.T) {
 	info := ContainerInfo{
 		ID:              "container-1",
 		Name:            "test",
-		PreCheck:        PreCheckExec,
 		PreCheckCommand: "/slow-check.sh",
 		PreCheckTimeout: 1 * time.Second,
 	}
@@ -148,15 +140,21 @@ func TestRunExecCheckTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "timed out")
 }
 
-func TestRunPreCheckUnknownType(t *testing.T) {
+func TestRunPreCheckURLTakesPrecedence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
 	info := ContainerInfo{
-		Name:     "test",
-		PreCheck: PreCheckType("unknown"),
+		Name:            "test",
+		PreCheckURL:     server.URL + "/ready",
+		PreCheckCommand: "/should-not-run.sh",
+		PreCheckTimeout: 5 * time.Second,
 	}
 
 	err := runPreCheck(context.Background(), nil, info)
-	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "unknown pre-check type")
+	assert.Nil(t, err)
 }
 
 func TestRunHTTPCheck2xxRange(t *testing.T) {
@@ -167,7 +165,6 @@ func TestRunHTTPCheck2xxRange(t *testing.T) {
 
 		info := ContainerInfo{
 			Name:            "test",
-			PreCheck:        PreCheckHTTP,
 			PreCheckURL:     server.URL,
 			PreCheckTimeout: 5 * time.Second,
 		}

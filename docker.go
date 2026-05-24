@@ -179,7 +179,13 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		return fmt.Errorf("starting container %s: %w", info.Name, err)
 	}
 
-	log.Printf("container %s updated and started (%s)", info.Name, shortID(created.ID))
+	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
+		log.Printf("container %s: new container not healthy, stopping (%s)", info.Name, shortID(created.ID))
+		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
+		return fmt.Errorf("container %s not healthy after update: %w", info.Name, err)
+	}
+
+	log.Printf("container %s updated and healthy (%s)", info.Name, shortID(created.ID))
 	return nil
 }
 
@@ -262,7 +268,7 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string, time
 				return fmt.Errorf("container exited")
 			}
 			if inspect.State.Health == nil {
-				return nil
+				return fmt.Errorf("no healthcheck defined")
 			}
 			if inspect.State.Health.Status == "healthy" {
 				return nil

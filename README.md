@@ -48,6 +48,12 @@ labels:
   docker-updater.git-ref: "refs/heads/main"
 ```
 
+### Healthcheck Requirement
+
+All containers monitored by docker-updater **must** define a `HEALTHCHECK` in their Dockerfile. After starting the replacement container, docker-updater waits up to 60 seconds for it to report healthy. If the container does not reach a healthy state, docker-updater stops it and reports the failure via webhook notifications.
+
+This applies to both standard recreate and rolling update modes.
+
 ### Image Mode (default)
 
 Polls the container registry for new image digests. When a newer digest is found, the container is recreated with the updated image.
@@ -131,6 +137,11 @@ services:
 
   my-app:
     image: myapp:latest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     labels:
       docker-updater.enable: "true"
       docker-updater.pre-check.url: ":8080/ready-to-update"

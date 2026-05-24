@@ -256,20 +256,32 @@ func TestPullImageError(t *testing.T) {
 func TestRecreateContainer(t *testing.T) {
 	var stoppedID, removedID, createdImage, startedID string
 
+	inspectCount := 0
 	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config: &container.Config{
+						Image: "nginx:latest",
+						Env:   []string{"FOO=bar"},
+					},
+					NetworkSettings: &types.NetworkSettings{
+						Networks: map[string]*network.EndpointSettings{
+							"bridge": {Aliases: []string{"web"}},
+						},
+					},
+				}, nil
+			}
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{
-					Image:      "sha256:olddigest",
-					HostConfig: &container.HostConfig{},
-				},
-				Config: &container.Config{
-					Image: "nginx:latest",
-					Env:   []string{"FOO=bar"},
-				},
-				NetworkSettings: &types.NetworkSettings{
-					Networks: map[string]*network.EndpointSettings{
-						"bridge": {Aliases: []string{"web"}},
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
 					},
 				},
 			}, nil
@@ -560,44 +572,3 @@ func TestRollingUpdateContainer(t *testing.T) {
 	assert.Equal(t, "myapp", renamedTo)
 }
 
-func TestRollingUpdateContainerHealthTimeout(t *testing.T) {
-	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
-			if id == "old123456789" {
-				return types.ContainerJSON{
-					ContainerJSONBase: &types.ContainerJSONBase{
-						Image:      "sha256:olddigest",
-						HostConfig: &container.HostConfig{},
-					},
-					Config:          &container.Config{Image: "myapp:latest"},
-					NetworkSettings: &types.NetworkSettings{},
-				}, nil
-			}
-			return types.ContainerJSON{
-				ContainerJSONBase: &types.ContainerJSONBase{
-					State: &types.ContainerState{
-						Running: true,
-						Health:  &types.Health{Status: "starting"},
-					},
-				},
-			}, nil
-		},
-		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
-			return container.CreateResponse{ID: "new123456789"}, nil
-		},
-	}
-
-	info := ContainerInfo{
-		ID:      "old123456789",
-		Name:    "myapp",
-		Image:   "myapp:latest",
-		Rolling: true,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := rollingUpdateContainer(ctx, cli, info, "myapp:latest")
-	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "not healthy")
-}

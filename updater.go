@@ -65,12 +65,14 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 	result.NewRef = newDigest
 	log.Printf("container %s: image update available (%s -> %s)", info.Name, shortID(info.ImageDigest), shortID(newDigest))
 
-	if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-		if err := runPreCheck(ctx, cli, info); err != nil {
-			result.Skipped = true
-			result.SkipReason = err.Error()
-			log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
-			return result
+	if !info.Rolling {
+		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
+			if err := runPreCheck(ctx, cli, info); err != nil {
+				result.Skipped = true
+				result.SkipReason = err.Error()
+				log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
+				return result
+			}
 		}
 	}
 
@@ -80,7 +82,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 		return result
 	}
 
-	if err := recreateContainer(ctx, cli, info, info.Image); err != nil {
+	if err := updateContainer(ctx, cli, info); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -106,12 +108,14 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 	result.NewRef = newSHA
 	log.Printf("container %s: git update detected (new SHA: %s)", info.Name, shortID(newSHA))
 
-	if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-		if err := runPreCheck(ctx, cli, info); err != nil {
-			result.Skipped = true
-			result.SkipReason = err.Error()
-			log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
-			return result
+	if !info.Rolling {
+		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
+			if err := runPreCheck(ctx, cli, info); err != nil {
+				result.Skipped = true
+				result.SkipReason = err.Error()
+				log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
+				return result
+			}
 		}
 	}
 
@@ -121,9 +125,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 		return result
 	}
 
-	// For git mode, we re-pull the image (assumes image is built from the repo
-	// and tagged accordingly, e.g. via CI) then recreate.
-	if err := recreateContainer(ctx, cli, info, info.Image); err != nil {
+	if err := updateContainer(ctx, cli, info); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -131,6 +133,13 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 
 	result.Updated = true
 	return result
+}
+
+func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo) error {
+	if info.Rolling {
+		return rollingUpdateContainer(ctx, cli, info, info.Image)
+	}
+	return recreateContainer(ctx, cli, info, info.Image)
 }
 
 // runLoop runs the main update loop until a signal is received.

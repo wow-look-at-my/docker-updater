@@ -92,6 +92,29 @@ If both `url` and `command` are set, the HTTP check takes precedence.
 
 If a pre-check fails, the update is skipped for that cycle and retried on the next interval. Skipped updates are reported in webhook notifications.
 
+### Rolling Updates (Zero-Downtime)
+
+Set `docker-updater.rolling: "true"` to start the new container before stopping the old one. This eliminates downtime when a reverse proxy (e.g., nginx) routes traffic by DNS or health.
+
+```yaml
+labels:
+  docker-updater.enable: "true"
+  docker-updater.rolling: "true"
+```
+
+The rolling update flow:
+1. New container is created with a temporary name, same networks and aliases
+2. docker-updater waits for Docker's HEALTHCHECK to report healthy (up to 60s)
+3. Old container receives SIGTERM and drains existing connections
+4. Old container is removed, new container is renamed to the original name
+
+Requirements:
+- The container must have a `HEALTHCHECK` in its Dockerfile
+- A reverse proxy must route traffic via Docker DNS (network alias), not published ports
+- The container must not publish host ports (the proxy owns port bindings)
+
+Pre-checks are skipped for rolling updates -- the old container drains naturally via graceful shutdown.
+
 ## Docker Compose Example
 
 ```yaml

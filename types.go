@@ -29,6 +29,9 @@ type ContainerInfo struct {
 	PreCheckURL     string
 	PreCheckCommand string
 	PreCheckTimeout time.Duration
+
+	// Rolling update: start new container before stopping old.
+	Rolling bool
 }
 
 // UpdateResult records the outcome of an update check/action.

@@ -299,7 +299,6 @@ func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
 		Image:           "myapp:latest",
 		ImageDigest:     "sha256:olddigest",
 		Mode:            UpdateModeImage,
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     server.URL + "/ready",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -347,7 +346,6 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 		Image:           "myapp:latest",
 		ImageDigest:     "sha256:olddigest",
 		Mode:            UpdateModeImage,
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     server.URL + "/ready",
 		PreCheckTimeout: 5 * time.Second,
 	}
@@ -390,7 +388,6 @@ func TestCheckAndUpdateGitPreCheckFails(t *testing.T) {
 		Mode:            UpdateModeGit,
 		GitRepo:         gitServer.URL,
 		GitRef:          "refs/heads/main",
-		PreCheck:        PreCheckHTTP,
 		PreCheckURL:     preCheckServer.URL + "/ready",
 		PreCheckTimeout: 5 * time.Second,
 	}

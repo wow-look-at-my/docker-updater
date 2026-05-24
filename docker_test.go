@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -19,15 +20,18 @@ import (
 
 // mockDocker implements DockerClient for testing.
 type mockDocker struct {
-	infoFn             func(ctx context.Context) (system.Info, error)
-	containerListFn    func(ctx context.Context, options container.ListOptions) ([]types.Container, error)
-	containerInspectFn func(ctx context.Context, id string) (types.ContainerJSON, error)
-	containerStopFn    func(ctx context.Context, id string, options container.StopOptions) error
-	containerRemoveFn  func(ctx context.Context, id string, options container.RemoveOptions) error
-	containerCreateFn  func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
-	containerStartFn   func(ctx context.Context, id string, options container.StartOptions) error
-	imagePullFn        func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
-	imageInspectFn     func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
+	infoFn               func(ctx context.Context) (system.Info, error)
+	containerListFn      func(ctx context.Context, options container.ListOptions) ([]types.Container, error)
+	containerInspectFn   func(ctx context.Context, id string) (types.ContainerJSON, error)
+	containerStopFn      func(ctx context.Context, id string, options container.StopOptions) error
+	containerRemoveFn    func(ctx context.Context, id string, options container.RemoveOptions) error
+	containerCreateFn    func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
+	containerStartFn     func(ctx context.Context, id string, options container.StartOptions) error
+	containerExecCreateFn  func(ctx context.Context, containerID string, options container.ExecOptions) (types.IDResponse, error)
+	containerExecStartFn   func(ctx context.Context, execID string, config container.ExecStartOptions) error
+	containerExecInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
+	imagePullFn          func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
+	imageInspectFn       func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
 }
 
 func (m *mockDocker) Info(ctx context.Context) (system.Info, error) {
@@ -77,6 +81,27 @@ func (m *mockDocker) ContainerStart(ctx context.Context, id string, options cont
 		return m.containerStartFn(ctx, id, options)
 	}
 	return nil
+}
+
+func (m *mockDocker) ContainerExecCreate(ctx context.Context, containerID string, options container.ExecOptions) (types.IDResponse, error) {
+	if m.containerExecCreateFn != nil {
+		return m.containerExecCreateFn(ctx, containerID, options)
+	}
+	return types.IDResponse{ID: "exec-id"}, nil
+}
+
+func (m *mockDocker) ContainerExecStart(ctx context.Context, execID string, config container.ExecStartOptions) error {
+	if m.containerExecStartFn != nil {
+		return m.containerExecStartFn(ctx, execID, config)
+	}
+	return nil
+}
+
+func (m *mockDocker) ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error) {
+	if m.containerExecInspectFn != nil {
+		return m.containerExecInspectFn(ctx, execID)
+	}
+	return container.ExecInspect{Running: false, ExitCode: 0}, nil
 }
 
 func (m *mockDocker) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
@@ -346,6 +371,53 @@ func TestRecreateContainerStartError(t *testing.T) {
 
 	err := recreateContainer(context.Background(), cli, ContainerInfo{ID: "old123456789", Name: "test"}, "img")
 	require.NotNil(t, err)
+}
+
+func TestListMonitoredContainersPreCheck(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{
+					ID:    "http-check",
+					Names: []string{"/http-app"},
+					Image: "myapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":            "true",
+						"docker-updater.pre-check":         "http",
+						"docker-updater.pre-check.url":     "http://localhost:8080/ready",
+						"docker-updater.pre-check.timeout": "10s",
+					},
+				},
+				{
+					ID:    "exec-check",
+					Names: []string{"/exec-app"},
+					Image: "otherapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":          "true",
+						"docker-updater.pre-check":       "exec",
+						"docker-updater.pre-check.command": "/check-ready.sh",
+					},
+				},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+			}, nil
+		},
+	}
+
+	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
+	require.Nil(t, err)
+	require.Equal(t, 2, len(containers))
+
+	assert.Equal(t, PreCheckHTTP, containers[0].PreCheck)
+	assert.Equal(t, "http://localhost:8080/ready", containers[0].PreCheckURL)
+	assert.Equal(t, 10*time.Second, containers[0].PreCheckTimeout)
+
+	assert.Equal(t, PreCheckExec, containers[1].PreCheck)
+	assert.Equal(t, "/check-ready.sh", containers[1].PreCheckCommand)
+	assert.Equal(t, 30*time.Second, containers[1].PreCheckTimeout)
 }
 
 func TestRecreateContainerInspectError(t *testing.T) {

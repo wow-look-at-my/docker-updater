@@ -278,6 +278,139 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 	assert.Equal(t, 0, len(results))
 }
 
+func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:              "precheck-container",
+		Name:            "precheck-app",
+		Image:           "myapp:latest",
+		ImageDigest:     "sha256:olddigest",
+		Mode:            UpdateModeImage,
+		PreCheck:        PreCheckHTTP,
+		PreCheckURL:     server.URL + "/ready",
+		PreCheckTimeout: 5 * time.Second,
+	}
+
+	cfg := Config{Label: "docker-updater.enable"}
+	result := UpdateResult{Container: info}
+	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
+
+	assert.False(t, result.Updated)
+	assert.True(t, result.Skipped)
+	assert.Contains(t, result.SkipReason, "status 503")
+}
+
+func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					Image:      "sha256:olddigest",
+					HostConfig: &container.HostConfig{},
+				},
+				Config:          &container.Config{Image: "myapp:latest"},
+				NetworkSettings: &types.NetworkSettings{},
+			}, nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new-container"}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:              "precheck-container",
+		Name:            "precheck-app",
+		Image:           "myapp:latest",
+		ImageDigest:     "sha256:olddigest",
+		Mode:            UpdateModeImage,
+		PreCheck:        PreCheckHTTP,
+		PreCheckURL:     server.URL + "/ready",
+		PreCheckTimeout: 5 * time.Second,
+	}
+
+	cfg := Config{Label: "docker-updater.enable"}
+	result := UpdateResult{Container: info}
+	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
+
+	assert.True(t, result.Updated)
+	assert.False(t, result.Skipped)
+}
+
+func TestCheckAndUpdateGitPreCheckFails(t *testing.T) {
+	gitRefStore.Lock()
+	gitRefStore.refs = make(map[string]string)
+	gitRefStore.Unlock()
+
+	callCount := 0
+	gitServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		sha := "ab3def1234567890ab3def1234567890ab3def12"
+		if callCount > 1 {
+			sha = "ff3def1234567890ff3def1234567890ff3def12"
+		}
+		w.Write([]byte("001e# service=git-upload-pack\n"))
+		w.Write([]byte("0000\n"))
+		w.Write([]byte("003f" + sha + " refs/heads/main\n"))
+		w.Write([]byte("0000\n"))
+	}))
+	defer gitServer.Close()
+
+	preCheckServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer preCheckServer.Close()
+
+	info := ContainerInfo{
+		ID:              "git-precheck",
+		Name:            "git-precheck-app",
+		Mode:            UpdateModeGit,
+		GitRepo:         gitServer.URL,
+		GitRef:          "refs/heads/main",
+		PreCheck:        PreCheckHTTP,
+		PreCheckURL:     preCheckServer.URL + "/ready",
+		PreCheckTimeout: 5 * time.Second,
+	}
+
+	cfg := Config{}
+
+	// First call seeds the ref store.
+	result := UpdateResult{Container: info}
+	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	assert.False(t, result.Updated)
+	assert.False(t, result.Skipped)
+
+	// Second call detects change but pre-check fails.
+	result = UpdateResult{Container: info}
+	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	assert.False(t, result.Updated)
+	assert.True(t, result.Skipped)
+	assert.Contains(t, result.SkipReason, "status 503")
+}
+
 func TestRunLoop(t *testing.T) {
 	cli := &mockDocker{}
 

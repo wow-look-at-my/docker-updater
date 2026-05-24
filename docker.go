@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -25,6 +26,9 @@ type DockerClient interface {
 	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
 	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
 	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	ContainerExecCreate(ctx context.Context, container string, options container.ExecOptions) (types.IDResponse, error)
+	ContainerExecStart(ctx context.Context, execID string, config container.ExecStartOptions) error
+	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
 	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 	ImageInspectWithRaw(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
 	Close() error
@@ -70,6 +74,18 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			info.GitRef = c.Labels["docker-updater.git-ref"]
 			if info.GitRef == "" {
 				info.GitRef = "refs/heads/main"
+			}
+		}
+
+		if pc := c.Labels["docker-updater.pre-check"]; pc != "" {
+			info.PreCheck = PreCheckType(pc)
+			info.PreCheckURL = c.Labels["docker-updater.pre-check.url"]
+			info.PreCheckCommand = c.Labels["docker-updater.pre-check.command"]
+			info.PreCheckTimeout = 30 * time.Second
+			if t := c.Labels["docker-updater.pre-check.timeout"]; t != "" {
+				if d, err := time.ParseDuration(t); err == nil {
+					info.PreCheckTimeout = d
+				}
 			}
 		}
 

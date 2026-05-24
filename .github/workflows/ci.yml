@@ -5,7 +5,8 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
+  actions: read
 
 jobs:
   test:
@@ -13,3 +14,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: wow-look-at-my/go-toolchain@v1
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master

@@ -65,6 +65,15 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 	result.NewRef = newDigest
 	log.Printf("container %s: image update available (%s -> %s)", info.Name, shortID(info.ImageDigest), shortID(newDigest))
 
+	if info.PreCheck != PreCheckNone {
+		if err := runPreCheck(ctx, cli, info); err != nil {
+			result.Skipped = true
+			result.SkipReason = err.Error()
+			log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
+			return result
+		}
+	}
+
 	if cfg.DryRun {
 		log.Printf("container %s: dry-run mode, skipping update", info.Name)
 		result.Updated = true
@@ -96,6 +105,15 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 
 	result.NewRef = newSHA
 	log.Printf("container %s: git update detected (new SHA: %s)", info.Name, shortID(newSHA))
+
+	if info.PreCheck != PreCheckNone {
+		if err := runPreCheck(ctx, cli, info); err != nil {
+			result.Skipped = true
+			result.SkipReason = err.Error()
+			log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
+			return result
+		}
+	}
 
 	if cfg.DryRun {
 		log.Printf("container %s: dry-run mode, skipping update", info.Name)

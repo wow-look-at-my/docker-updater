@@ -18,27 +18,7 @@ jobs:
 
   publish-ghcr:
     needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: go-build
-          path: build
-      - name: Log in to ghcr.io
-        if: github.ref == 'refs/heads/master'
-        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
-        run: |
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
-          BUILD_ARGS="--build-arg VERSION=${GITHUB_SHA}"
-          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
-            docker buildx build ${BUILD_ARGS} --push -t "${IMAGE}:latest" .
-          else
-            docker buildx build ${BUILD_ARGS} .
-          fi
+    uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
 
   publish-buildhost:
     needs: test

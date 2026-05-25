@@ -33,6 +33,7 @@ All configuration is via environment variables:
 | `DOCKER_UPDATER_WEBHOOK_URL` | | Webhook endpoint URL |
 | `DOCKER_UPDATER_WEBHOOK_TYPE` | `generic` | `generic`, `discord`, or `slack` |
 | `DOCKER_UPDATER_DRY_RUN` | `false` | Monitor only, don't update |
+| `DOCKER_UPDATER_CONFIG` | | Path to Docker `config.json` for private registry auth |
 
 ## Container Labels
 
@@ -130,10 +131,12 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.docker/config.json:/config.json:ro
     environment:
       DOCKER_UPDATER_INTERVAL: "10m"
       DOCKER_UPDATER_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
       DOCKER_UPDATER_WEBHOOK_TYPE: "discord"
+      DOCKER_UPDATER_CONFIG: "/config.json"
 
   my-app:
     image: myapp:latest

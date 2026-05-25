@@ -8,7 +8,7 @@ import (
 )
 
 // runUpdateCheck checks all monitored containers for updates and applies them.
-func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config) []UpdateResult {
+func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver) []UpdateResult {
 	containers, err := listMonitoredContainers(ctx, cli, cfg.Label)
 	if err != nil {
 		log.Printf("error listing containers: %v", err)
@@ -33,7 +33,7 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config) []UpdateR
 
 		switch info.Mode {
 		case UpdateModeImage:
-			result = checkAndUpdateImage(ctx, cli, info, cfg, result)
+			result = checkAndUpdateImage(ctx, cli, info, cfg, result, resolveAuth)
 		case UpdateModeGit:
 			result = checkAndUpdateGit(ctx, cli, info, cfg, result)
 		default:
@@ -47,10 +47,10 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config) []UpdateR
 	return results
 }
 
-func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
+func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
 	result.OldRef = info.ImageDigest
 
-	newDigest, err := checkImageUpdate(ctx, cli, info)
+	newDigest, err := checkImageUpdate(ctx, cli, info, resolveAuth)
 	if err != nil {
 		result.Error = err
 		log.Printf("container %s: error checking image: %v", info.Name, err)
@@ -143,11 +143,11 @@ func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo) 
 }
 
 // runLoop runs the main update loop until a signal is received.
-func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal) {
+func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
 
 	// Run first check immediately.
-	results := runUpdateCheck(ctx, cli, cfg)
+	results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
 	sendWebhookNotifications(cfg, results)
 
 	ticker := time.NewTicker(cfg.Interval)
@@ -156,7 +156,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 	for {
 		select {
 		case <-ticker.C:
-			results := runUpdateCheck(ctx, cli, cfg)
+			results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
 			sendWebhookNotifications(cfg, results)
 		case sig := <-sigCh:
 			log.Printf("received signal %v, shutting down", sig)

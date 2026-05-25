@@ -16,6 +16,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		"DOCKER_UPDATER_WEBHOOK_URL",
 		"DOCKER_UPDATER_WEBHOOK_TYPE",
 		"DOCKER_UPDATER_DRY_RUN",
+		"DOCKER_UPDATER_CONFIG",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -33,6 +34,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	assert.False(t, cfg.DryRun)
 
 	assert.Equal(t, "", cfg.WebhookURL)
+
+	assert.Equal(t, "", cfg.ConfigPath)
 
 }
 
@@ -79,6 +82,16 @@ func TestLoadConfigInvalidDryRun(t *testing.T) {
 
 	_, err := loadConfig()
 	require.NotNil(t, err)
+
+}
+
+func TestLoadConfigDockerConfig(t *testing.T) {
+	t.Setenv("DOCKER_UPDATER_CONFIG", "/path/to/config.json")
+
+	cfg, err := loadConfig()
+	require.Nil(t, err)
+
+	assert.Equal(t, "/path/to/config.json", cfg.ConfigPath)
 
 }
 

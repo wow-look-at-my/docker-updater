@@ -25,7 +25,7 @@ func TestCheckImageUpdateNoChange(t *testing.T) {
 		ImageDigest: "sha256:samedigest",
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info)
+	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, "", newDigest)
 }
@@ -42,7 +42,7 @@ func TestCheckImageUpdateChanged(t *testing.T) {
 		ImageDigest: "sha256:olddigest",
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info)
+	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:newdigest", newDigest)
 }
@@ -56,7 +56,7 @@ func TestCheckImageUpdatePullError(t *testing.T) {
 
 	info := ContainerInfo{Image: "broken:latest"}
 
-	_, err := checkImageUpdate(context.Background(), cli, info)
+	_, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.NotNil(t, err)
 }
 
@@ -72,6 +72,6 @@ func TestCheckImageUpdateInspectError(t *testing.T) {
 
 	info := ContainerInfo{Image: "broken:latest"}
 
-	_, err := checkImageUpdate(context.Background(), cli, info)
+	_, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.NotNil(t, err)
 }

@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -237,7 +240,8 @@ func TestPullImage(t *testing.T) {
 		},
 	}
 
-	digest, err := pullImage(context.Background(), cli, "nginx:latest")
+	noAuth := newAuthResolver(nil)
+	digest, err := pullImage(context.Background(), cli, "nginx:latest", noAuth)
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:newdigest123", digest)
 }
@@ -249,8 +253,116 @@ func TestPullImageError(t *testing.T) {
 		},
 	}
 
-	_, err := pullImage(context.Background(), cli, "broken:latest")
+	noAuth := newAuthResolver(nil)
+	_, err := pullImage(context.Background(), cli, "broken:latest", noAuth)
 	require.NotNil(t, err)
+}
+
+func TestPullImageWithAuth(t *testing.T) {
+	var capturedAuth string
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, opts image.PullOptions) (io.ReadCloser, error) {
+			capturedAuth = opts.RegistryAuth
+			return io.NopCloser(strings.NewReader(`{"status":"Pull complete"}`)), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:authdigest"}, nil, nil
+		},
+	}
+
+	cfg := &dockerConfig{
+		Auths: map[string]dockerAuthEntry{
+			"ghcr.io": {Auth: "dXNlcjp0b2tlbg=="},
+		},
+	}
+	resolver := newAuthResolver(cfg)
+
+	digest, err := pullImage(context.Background(), cli, "ghcr.io/org/image:latest", resolver)
+	require.Nil(t, err)
+	assert.Equal(t, "sha256:authdigest", digest)
+	assert.NotEmpty(t, capturedAuth)
+}
+
+func TestPullImageAnonymousFallback(t *testing.T) {
+	var capturedAuth string
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, opts image.PullOptions) (io.ReadCloser, error) {
+			capturedAuth = opts.RegistryAuth
+			return io.NopCloser(strings.NewReader(`{"status":"Pull complete"}`)), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:anondigest"}, nil, nil
+		},
+	}
+
+	cfg := &dockerConfig{
+		Auths: map[string]dockerAuthEntry{
+			"ghcr.io": {Auth: "dXNlcjp0b2tlbg=="},
+		},
+	}
+	resolver := newAuthResolver(cfg)
+
+	digest, err := pullImage(context.Background(), cli, "nginx:latest", resolver)
+	require.Nil(t, err)
+	assert.Equal(t, "sha256:anondigest", digest)
+	assert.Empty(t, capturedAuth)
+}
+
+func TestRegistryFromImage(t *testing.T) {
+	tests := []struct {
+		image    string
+		expected string
+	}{
+		{"nginx:latest", "https://index.docker.io/v1/"},
+		{"library/nginx:latest", "https://index.docker.io/v1/"},
+		{"docker.io/library/nginx:latest", "https://index.docker.io/v1/"},
+		{"ghcr.io/org/image:latest", "ghcr.io"},
+		{"ghcr.io/org/image:v1.2.3", "ghcr.io"},
+		{"ghcr.io/org/image@sha256:abc123", "ghcr.io"},
+		{"myregistry.com:5000/myimage:v1", "myregistry.com:5000"},
+		{"registry.example.com/app:latest", "registry.example.com"},
+		{"ubuntu", "https://index.docker.io/v1/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			assert.Equal(t, tt.expected, registryFromImage(tt.image))
+		})
+	}
+}
+
+func TestLoadDockerConfig(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "config-*.json")
+	require.Nil(t, err)
+	_, err = f.WriteString(`{"auths":{"ghcr.io":{"auth":"dXNlcjp0b2tlbg=="},"https://index.docker.io/v1/":{"auth":"ZG9ja2VyOnBhc3M="}}}`)
+	require.Nil(t, err)
+	f.Close()
+
+	cfg, err := loadDockerConfig(f.Name())
+	require.Nil(t, err)
+	assert.Equal(t, 2, len(cfg.Auths))
+	assert.Equal(t, "dXNlcjp0b2tlbg==", cfg.Auths["ghcr.io"].Auth)
+	assert.Equal(t, "ZG9ja2VyOnBhc3M=", cfg.Auths["https://index.docker.io/v1/"].Auth)
+}
+
+func TestLoadDockerConfigMissing(t *testing.T) {
+	_, err := loadDockerConfig("/nonexistent/config.json")
+	require.NotNil(t, err)
+}
+
+func TestEncodeRegistryAuth(t *testing.T) {
+	entry := dockerAuthEntry{Auth: "dXNlcjp0b2tlbg=="}
+	encoded, err := encodeRegistryAuth(entry, "ghcr.io")
+	require.Nil(t, err)
+	assert.NotEmpty(t, encoded)
+
+	decoded, err := base64.URLEncoding.DecodeString(encoded)
+	require.Nil(t, err)
+	var result map[string]string
+	require.Nil(t, json.Unmarshal(decoded, &result))
+	assert.Equal(t, "user", result["username"])
+	assert.Equal(t, "token", result["password"])
+	assert.Equal(t, "ghcr.io", result["serveraddress"])
 }
 
 func TestRecreateContainer(t *testing.T) {

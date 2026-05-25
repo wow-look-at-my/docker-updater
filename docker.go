@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -37,6 +40,96 @@ type DockerClient interface {
 
 func newDockerClient() (DockerClient, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+}
+
+// AuthResolver returns a base64-encoded RegistryAuth string for the given
+// image name, or empty string for anonymous pulls.
+type AuthResolver func(imageName string) string
+
+type dockerConfig struct {
+	Auths map[string]dockerAuthEntry `json:"auths"`
+}
+
+type dockerAuthEntry struct {
+	Auth string `json:"auth"`
+}
+
+func loadDockerConfig(path string) (*dockerConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading docker config %s: %w", path, err)
+	}
+	var cfg dockerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing docker config %s: %w", path, err)
+	}
+	return &cfg, nil
+}
+
+func registryFromImage(imageName string) string {
+	ref := imageName
+	if at := strings.LastIndex(ref, "@"); at != -1 {
+		ref = ref[:at]
+	}
+	if colon := strings.LastIndex(ref, ":"); colon != -1 {
+		if !strings.Contains(ref[colon:], "/") {
+			ref = ref[:colon]
+		}
+	}
+
+	slash := strings.IndexByte(ref, '/')
+	if slash == -1 {
+		return "https://index.docker.io/v1/"
+	}
+
+	firstPart := ref[:slash]
+	if strings.ContainsAny(firstPart, ".:") {
+		if firstPart == "docker.io" {
+			return "https://index.docker.io/v1/"
+		}
+		return firstPart
+	}
+
+	return "https://index.docker.io/v1/"
+}
+
+func encodeRegistryAuth(entry dockerAuthEntry, serverAddress string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
+	if err != nil {
+		return "", fmt.Errorf("decoding auth for %s: %w", serverAddress, err)
+	}
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid auth format for %s", serverAddress)
+	}
+	authJSON, err := json.Marshal(map[string]string{
+		"username":      parts[0],
+		"password":      parts[1],
+		"serveraddress": serverAddress,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encoding auth for %s: %w", serverAddress, err)
+	}
+	return base64.URLEncoding.EncodeToString(authJSON), nil
+}
+
+func newAuthResolver(cfg *dockerConfig) AuthResolver {
+	if cfg == nil {
+		return func(string) string { return "" }
+	}
+	return func(imageName string) string {
+		registry := registryFromImage(imageName)
+		entry, ok := cfg.Auths[registry]
+		if !ok {
+			return ""
+		}
+		encoded, err := encodeRegistryAuth(entry, registry)
+		if err != nil {
+			log.Printf("warning: failed to encode auth for %s: %v", registry, err)
+			return ""
+		}
+		return encoded
+	}
 }
 
 // listMonitoredContainers returns containers that have the opt-in label set to "true".
@@ -112,8 +205,13 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 }
 
 // pullImage pulls the latest version of an image and returns the new digest.
-func pullImage(ctx context.Context, cli DockerClient, imageName string) (string, error) {
-	reader, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
+func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (string, error) {
+	opts := image.PullOptions{}
+	if auth := resolveAuth(imageName); auth != "" {
+		opts.RegistryAuth = auth
+	}
+
+	reader, err := cli.ImagePull(ctx, imageName, opts)
 	if err != nil {
 		return "", fmt.Errorf("pulling image %s: %w", imageName, err)
 	}

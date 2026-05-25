@@ -14,6 +14,7 @@ type Config struct {
 	WebhookURL  string
 	WebhookType string
 	DryRun      bool
+	ConfigPath  string
 }
 
 func loadConfig() (Config, error) {
@@ -53,6 +54,8 @@ func loadConfig() (Config, error) {
 		}
 		c.DryRun = b
 	}
+
+	c.ConfigPath = os.Getenv("DOCKER_UPDATER_CONFIG")
 
 	return c, nil
 }

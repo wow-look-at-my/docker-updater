@@ -25,7 +25,7 @@ func TestRunUpdateCheckNoContainers(t *testing.T) {
 	cli := &mockDocker{}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 	assert.Equal(t, 0, len(results))
 }
 
@@ -37,7 +37,7 @@ func TestRunUpdateCheckListError(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 	assert.Nil(t, results)
 }
 
@@ -69,7 +69,7 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
@@ -104,7 +104,7 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable", DryRun: true}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 
 	require.Equal(t, 1, len(results))
 	assert.True(t, results[0].Updated)
@@ -157,7 +157,7 @@ func TestCheckAndUpdateImageUpdate(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
+	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
 
 	assert.True(t, result.Updated)
 	assert.Nil(t, result.Error)
@@ -199,7 +199,7 @@ func TestCheckAndUpdateGitFirstRun(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
@@ -286,7 +286,7 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg)
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
 	assert.Equal(t, 0, len(results))
 }
 
@@ -317,7 +317,7 @@ func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
+	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
 
 	assert.False(t, result.Updated)
 	assert.True(t, result.Skipped)
@@ -376,7 +376,7 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result)
+	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
 
 	assert.True(t, result.Updated)
 	assert.False(t, result.Skipped)
@@ -444,7 +444,7 @@ func TestRunLoop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh)
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil))
 		close(done)
 	}()
 

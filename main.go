@@ -32,8 +32,20 @@ func main() {
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
 
+	var resolveAuth AuthResolver
+	if cfg.ConfigPath != "" {
+		dockerCfg, err := loadDockerConfig(cfg.ConfigPath)
+		if err != nil {
+			log.Fatalf("failed to load docker config: %v", err)
+		}
+		log.Printf("loaded registry credentials for %d registries", len(dockerCfg.Auths))
+		resolveAuth = newAuthResolver(dockerCfg)
+	} else {
+		resolveAuth = newAuthResolver(nil)
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	runLoop(ctx, cli, cfg, sigCh)
+	runLoop(ctx, cli, cfg, sigCh, resolveAuth)
 }

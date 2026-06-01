@@ -43,6 +43,8 @@ docker-updater serves a read-only web dashboard (default `:8080`) that lists
 **every** container on the host -- both the ones it auto-updates and the ones it
 doesn't -- so you can see your fleet at a glance:
 
+![docker-updater dashboard](docs/dashboard.png)
+
 - **Auto-update status**: whether a container is monitored, and in `image` or `git` mode
 - **State & uptime**: running/stopped, healthcheck status, and how long it has been up
 - **Last checked / last pulled**: when docker-updater last polled the registry and pulled the image

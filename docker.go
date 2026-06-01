@@ -400,9 +400,9 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	return nil
 }
 
-// waitHealthy polls containerID until Docker reports it healthy. Containers
-// without a HEALTHCHECK are considered healthy as soon as they are running.
-// The deadline is derived from the container's own HEALTHCHECK config.
+// waitHealthy polls containerID until Docker reports it healthy. The deadline
+// is derived from the container's own HEALTHCHECK config so callers don't
+// need to know or duplicate the timing parameters.
 func waitHealthy(ctx context.Context, cli DockerClient, containerID string) error {
 	initial, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -412,7 +412,7 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 		return fmt.Errorf("container exited")
 	}
 	if initial.State.Health == nil {
-		return nil // no HEALTHCHECK; running is sufficient
+		return fmt.Errorf("no healthcheck defined")
 	}
 	if initial.State.Health.Status == "healthy" {
 		return nil
@@ -438,7 +438,7 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 				return fmt.Errorf("container exited")
 			}
 			if inspect.State.Health == nil {
-				return nil
+				return fmt.Errorf("no healthcheck defined")
 			}
 			switch inspect.State.Health.Status {
 			case "healthy":

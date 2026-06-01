@@ -58,6 +58,7 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:currentdigest"},
+				Config:            &container.Config{Image: "nginx:latest"},
 			}, nil
 		},
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
@@ -93,6 +94,7 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:olddigest"},
+				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
 		},
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {

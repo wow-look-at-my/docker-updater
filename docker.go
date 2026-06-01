@@ -184,18 +184,49 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 
 		info.Rolling = c.Labels["docker-updater.rolling"] == "true"
 
-		// Get current image digest and container IP from inspection.
 		inspect, err := cli.ContainerInspect(ctx, c.ID)
-		if err == nil {
-			info.ImageDigest = inspect.Image
-			if strings.HasPrefix(info.PreCheckURL, ":") && inspect.NetworkSettings != nil {
-				for _, net := range inspect.NetworkSettings.Networks {
-					if net.IPAddress != "" {
-						info.PreCheckURL = "http://" + net.IPAddress + info.PreCheckURL
-						break
-					}
+		if err != nil {
+			// Without inspect data we cannot resolve a stable image reference.
+			// Image mode depends on it, so skip rather than poll a bad ref.
+			if mode == UpdateModeImage {
+				log.Printf("cannot resolve registry repository for container %s; skipping (inspect failed: %v)", name, err)
+				continue
+			}
+			monitored = append(monitored, info)
+			continue
+		}
+
+		// Resolve a ":"-prefixed pre-check URL to the container's bridge IP.
+		if strings.HasPrefix(info.PreCheckURL, ":") && inspect.NetworkSettings != nil {
+			for _, net := range inspect.NetworkSettings.Networks {
+				if net.IPAddress != "" {
+					info.PreCheckURL = "http://" + net.IPAddress + info.PreCheckURL
+					break
 				}
 			}
+		}
+
+		if mode == UpdateModeImage {
+			// Derive the registry reference from a stable, tag-independent
+			// source: Config.Image (what the container was created with),
+			// falling back to the running image's RepoDigests. This must not
+			// depend on the running image still carrying a repo tag, and must
+			// never poll the bare image ID that the container-list view
+			// degrades to once RepoTags is lost.
+			configImage := ""
+			if inspect.Config != nil {
+				configImage = inspect.Config.Image
+			}
+			repoDigests := runningRepoDigests(ctx, cli, inspect.Image)
+			ref, ok := resolveImageRef(configImage, repoDigests)
+			if !ok {
+				log.Printf("cannot resolve registry repository for container %s; skipping", name)
+				continue
+			}
+			info.Image = ref
+			info.ImageDigest = imageIdentity(repoDigests, inspect.Image, repositoryOf(ref))
+		} else {
+			info.ImageDigest = inspect.Image
 		}
 
 		monitored = append(monitored, info)
@@ -204,8 +235,31 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 	return monitored, nil
 }
 
-// pullImage pulls the latest version of an image and returns the new digest.
+// runningRepoDigests returns the RepoDigests of the running image, used to
+// recover the registry repository and the running manifest digest. It returns
+// nil if the image has no ID or cannot be inspected.
+func runningRepoDigests(ctx context.Context, cli DockerClient, imageID string) []string {
+	if imageID == "" {
+		return nil
+	}
+	img, _, err := cli.ImageInspectWithRaw(ctx, imageID)
+	if err != nil {
+		return nil
+	}
+	return img.RepoDigests
+}
+
+// pullImage pulls the latest version of an image and returns its identity
+// (the registry manifest digest, falling back to the content ID).
 func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (string, error) {
+	// Never issue a pull/manifest request against a bare image ID (e.g.
+	// "sha256:..."): it is not a registry repository and the daemon rejects it
+	// with "pull access denied". Callers resolve a real reference first; this
+	// guard enforces the invariant so a bad reference can never reach the daemon.
+	if !hasRepository(imageName) {
+		return "", fmt.Errorf("cannot pull %q: not a registry repository reference", imageName)
+	}
+
 	opts := image.PullOptions{}
 	if auth := resolveAuth(imageName); auth != "" {
 		opts.RegistryAuth = auth
@@ -222,13 +276,13 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 		return "", fmt.Errorf("reading pull response for %s: %w", imageName, err)
 	}
 
-	// Inspect the pulled image to get its digest.
+	// Inspect the pulled image to get its freshly-resolved registry digest.
 	inspect, _, err := cli.ImageInspectWithRaw(ctx, imageName)
 	if err != nil {
 		return "", fmt.Errorf("inspecting pulled image %s: %w", imageName, err)
 	}
 
-	return inspect.ID, nil
+	return imageIdentity(inspect.RepoDigests, inspect.ID, repositoryOf(imageName)), nil
 }
 
 // recreateContainer stops the old container, creates a new one with the same

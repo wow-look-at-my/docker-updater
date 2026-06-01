@@ -167,6 +167,7 @@ func TestListMonitoredContainers(t *testing.T) {
 		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:imagedigest123"},
+				Config:            &container.Config{Image: "nginx:latest"},
 			}, nil
 		},
 	}
@@ -533,6 +534,7 @@ func TestListMonitoredContainersPreCheck(t *testing.T) {
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
 		},
 	}
@@ -566,6 +568,7 @@ func TestListMonitoredContainersPreCheckURLResolve(t *testing.T) {
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				Config:            &container.Config{Image: "myapp:latest"},
 				NetworkSettings: &types.NetworkSettings{
 					Networks: map[string]*network.EndpointSettings{
 						"bridge": {IPAddress: "172.17.0.5"},
@@ -610,6 +613,7 @@ func TestListMonitoredContainersRolling(t *testing.T) {
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
 		},
 	}

@@ -3,6 +3,7 @@ module github.com/wow-look-at-my/docker-updater
 go 1.25.0
 
 require (
+	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/wow-look-at-my/testify v0.0.0-20260217010200-5fd2c08e3abb
@@ -12,7 +13,6 @@ require (
 	github.com/Microsoft/go-winio v0.4.21 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

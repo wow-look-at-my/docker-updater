@@ -331,7 +331,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		return fmt.Errorf("starting container %s: %w", info.Name, err)
 	}
 
-	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
+	if err := waitHealthy(ctx, cli, created.ID); err != nil {
 		log.Printf("container %s: new container not healthy, stopping (%s)", info.Name, shortID(created.ID))
 		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
 		return fmt.Errorf("container %s not healthy after update: %w", info.Name, err)
@@ -377,7 +377,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		return fmt.Errorf("starting next container %s: %w", nextName, err)
 	}
 
-	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
+	if err := waitHealthy(ctx, cli, created.ID); err != nil {
 		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
 		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
 		return fmt.Errorf("next container %s not healthy: %w", nextName, err)
@@ -400,7 +400,25 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	return nil
 }
 
-func waitHealthy(ctx context.Context, cli DockerClient, containerID string, timeout time.Duration) error {
+// waitHealthy polls containerID until Docker reports it healthy. The deadline
+// is derived from the container's own HEALTHCHECK config so callers don't
+// need to know or duplicate the timing parameters.
+func waitHealthy(ctx context.Context, cli DockerClient, containerID string) error {
+	initial, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("inspecting container: %w", err)
+	}
+	if initial.State == nil || !initial.State.Running {
+		return fmt.Errorf("container exited")
+	}
+	if initial.State.Health == nil {
+		return fmt.Errorf("no healthcheck defined")
+	}
+	if initial.State.Health.Status == "healthy" {
+		return nil
+	}
+
+	timeout := healthCheckTimeout(initial)
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -422,9 +440,40 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string, time
 			if inspect.State.Health == nil {
 				return fmt.Errorf("no healthcheck defined")
 			}
-			if inspect.State.Health.Status == "healthy" {
+			switch inspect.State.Health.Status {
+			case "healthy":
 				return nil
+			case "unhealthy":
+				return fmt.Errorf("container unhealthy")
 			}
 		}
 	}
+}
+
+// healthCheckTimeout returns the maximum time to wait for a container to become
+// healthy, derived from its HEALTHCHECK config: start-period + retries*interval
+// + one probe timeout as buffer. Falls back to 5 minutes if not configured.
+func healthCheckTimeout(inspect types.ContainerJSON) time.Duration {
+	const fallback = 5 * time.Minute
+	if inspect.Config == nil || inspect.Config.Healthcheck == nil {
+		return fallback
+	}
+	hc := inspect.Config.Healthcheck
+	interval := hc.Interval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	retries := hc.Retries
+	if retries <= 0 {
+		retries = 3
+	}
+	probeTimeout := hc.Timeout
+	if probeTimeout <= 0 {
+		probeTimeout = 30 * time.Second
+	}
+	total := hc.StartPeriod + time.Duration(retries)*interval + probeTimeout
+	if total < 30*time.Second {
+		return 30 * time.Second
+	}
+	return total
 }

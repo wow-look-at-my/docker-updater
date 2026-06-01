@@ -77,9 +77,11 @@ labels:
 
 ### Healthcheck Requirement
 
-All containers monitored by docker-updater **must** define a `HEALTHCHECK` in their Dockerfile. After starting the replacement container, docker-updater waits up to 60 seconds for it to report healthy. If the container does not reach a healthy state, docker-updater stops it and reports the failure via webhook notifications.
+All containers monitored by docker-updater **must** define a `HEALTHCHECK` in their Dockerfile. After starting the replacement container, docker-updater waits for Docker to report it `healthy`. If the container becomes `unhealthy`, the update is rolled back immediately.
 
-This applies to both standard recreate and rolling update modes.
+The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`), so slow-starting containers only need the right `HEALTHCHECK` parameters — no extra labels needed.
+
+If the container fails to become healthy, docker-updater stops it and reports the failure via webhook notifications.
 
 ### Image Mode (default)
 
@@ -139,7 +141,7 @@ labels:
 
 The rolling update flow:
 1. New container is created with a temporary name, same networks and aliases
-2. docker-updater waits for Docker's HEALTHCHECK to report healthy (up to 60s)
+2. docker-updater waits for Docker's HEALTHCHECK to report healthy
 3. Old container receives SIGTERM and drains existing connections
 4. Old container is removed, new container is renamed to the original name
 

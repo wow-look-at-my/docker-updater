@@ -1,0 +1,453 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/wow-look-at-my/testify/assert"
+	"github.com/wow-look-at-my/testify/require"
+)
+
+func TestMain(m *testing.M) {
+	// Speed up health-check polling so the suite finishes well within the
+	// global 30s test timeout. Production code still uses the 2s defaults.
+	healthCheckPollInterval = 10 * time.Millisecond
+	execPollInterval = 10 * time.Millisecond
+	os.Exit(m.Run())
+}
+
+// baseInspect returns a ContainerJSON for the initial inspect of the old container.
+func baseInspect() types.ContainerJSON {
+	return types.ContainerJSON{
+		ContainerJSONBase: &types.ContainerJSONBase{
+			Image:      "sha256:olddigest",
+			HostConfig: &container.HostConfig{},
+		},
+		Config:          &container.Config{Image: "myapp:latest"},
+		NetworkSettings: &types.NetworkSettings{},
+	}
+}
+
+// --- recreateContainer: HTTP health check ---
+
+func TestRecreateContainerHTTPHealthSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		HealthCheckURL:     srv.URL + "/health",
+		HealthCheckTimeout: 10 * time.Second,
+	}
+
+	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+}
+
+func TestRecreateContainerHTTPHealthTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	var stoppedID string
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerStopFn: func(_ context.Context, id string, _ container.StopOptions) error {
+			stoppedID = id
+			return nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		HealthCheckURL:     srv.URL + "/health",
+		HealthCheckTimeout: 50 * time.Millisecond,
+	}
+
+	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "not healthy")
+	assert.Equal(t, "new123456789", stoppedID)
+}
+
+// --- recreateContainer: exec health check ---
+
+func TestRecreateContainerExecHealthSuccess(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerExecInspectFn: func(_ context.Context, _ string) (container.ExecInspect, error) {
+			return container.ExecInspect{Running: false, ExitCode: 0}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                   "old123456789",
+		Name:                 "myapp",
+		Image:                "myapp:latest",
+		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout:   10 * time.Second,
+	}
+
+	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+}
+
+func TestRecreateContainerExecHealthTimeout(t *testing.T) {
+	var stoppedID string
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerStopFn: func(_ context.Context, id string, _ container.StopOptions) error {
+			stoppedID = id
+			return nil
+		},
+		containerExecInspectFn: func(_ context.Context, _ string) (container.ExecInspect, error) {
+			return container.ExecInspect{Running: false, ExitCode: 1}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                   "old123456789",
+		Name:                 "myapp",
+		Image:                "myapp:latest",
+		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout:   50 * time.Millisecond,
+	}
+
+	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "not healthy")
+	assert.Equal(t, "new123456789", stoppedID)
+}
+
+// --- rollingUpdateContainer: HTTP health check ---
+
+func TestRollingUpdateContainerHTTPHealthSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		Rolling:            true,
+		HealthCheckURL:     srv.URL + "/health",
+		HealthCheckTimeout: 10 * time.Second,
+	}
+
+	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+}
+
+func TestRollingUpdateContainerHTTPHealthTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		Rolling:            true,
+		HealthCheckURL:     srv.URL + "/health",
+		HealthCheckTimeout: 50 * time.Millisecond,
+	}
+
+	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "not healthy")
+}
+
+// --- rollingUpdateContainer: exec health check ---
+
+func TestRollingUpdateContainerExecHealthSuccess(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerExecInspectFn: func(_ context.Context, _ string) (container.ExecInspect, error) {
+			return container.ExecInspect{Running: false, ExitCode: 0}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                   "old123456789",
+		Name:                 "myapp",
+		Image:                "myapp:latest",
+		Rolling:              true,
+		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout:   10 * time.Second,
+	}
+
+	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+}
+
+func TestRollingUpdateContainerExecHealthTimeout(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return baseInspect(), nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerExecInspectFn: func(_ context.Context, _ string) (container.ExecInspect, error) {
+			return container.ExecInspect{Running: false, ExitCode: 1}, nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:                   "old123456789",
+		Name:                 "myapp",
+		Image:                "myapp:latest",
+		Rolling:              true,
+		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout:   50 * time.Millisecond,
+	}
+
+	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.NotNil(t, err)
+	assert.Contains(t, err.Error(), "not healthy")
+}
+
+// --- dockerHealthBudget ---
+
+func TestDockerHealthBudget(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				Config: &container.Config{
+					Healthcheck: &container.HealthConfig{
+						Interval:    10 * time.Second,
+						Retries:     3,
+						StartPeriod: 30 * time.Second,
+					},
+				},
+			}, nil
+		},
+	}
+
+	budget := dockerHealthBudget(context.Background(), cli, "test-container")
+	// 30s + 3×10s + 10s buffer = 70s
+	assert.Equal(t, 70*time.Second, budget)
+}
+
+func TestDockerHealthBudgetDefaultRetries(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				Config: &container.Config{
+					Healthcheck: &container.HealthConfig{
+						Interval:    5 * time.Second,
+						Retries:     0, // 0 → default 3
+						StartPeriod: 15 * time.Second,
+					},
+				},
+			}, nil
+		},
+	}
+
+	budget := dockerHealthBudget(context.Background(), cli, "test-container")
+	// 15s + 3×5s + 10s buffer = 40s
+	assert.Equal(t, 40*time.Second, budget)
+}
+
+func TestDockerHealthBudgetFallbackOnInspectError(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{}, errors.New("inspect failed")
+		},
+	}
+
+	budget := dockerHealthBudget(context.Background(), cli, "test-container")
+	assert.Equal(t, 60*time.Second, budget)
+}
+
+func TestDockerHealthBudgetFallbackNoHealthcheck(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				Config: &container.Config{Healthcheck: nil},
+			}, nil
+		},
+	}
+
+	budget := dockerHealthBudget(context.Background(), cli, "test-container")
+	assert.Equal(t, 60*time.Second, budget)
+}
+
+func TestDockerHealthBudgetFallbackZeroValues(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				Config: &container.Config{
+					Healthcheck: &container.HealthConfig{},
+				},
+			}, nil
+		},
+	}
+
+	budget := dockerHealthBudget(context.Background(), cli, "test-container")
+	assert.Equal(t, 60*time.Second, budget)
+}
+
+// --- listMonitoredContainers: health-check label parsing ---
+
+func TestListMonitoredContainersHealthCheck(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{
+					ID:    "http-hc",
+					Names: []string{"/http-app"},
+					Image: "myapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":               "true",
+						"docker-updater.health-check.url":     "http://localhost:8080/health",
+						"docker-updater.health-check.timeout": "30s",
+					},
+				},
+				{
+					ID:    "exec-hc",
+					Names: []string{"/exec-app"},
+					Image: "otherapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":                "true",
+						"docker-updater.health-check.command":  "/check.sh",
+						"docker-updater.health-check.timeout":  "45s",
+					},
+				},
+				{
+					ID:    "no-hc",
+					Names: []string{"/plain-app"},
+					Image: "plainapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable": "true",
+					},
+				},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				Config:            &container.Config{Image: "myapp:latest"},
+			}, nil
+		},
+	}
+
+	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
+	require.Nil(t, err)
+	require.Equal(t, 3, len(containers))
+
+	// HTTP health check
+	assert.Equal(t, "http://localhost:8080/health", containers[0].HealthCheckURL)
+	assert.Empty(t, containers[0].HealthCheckCommand)
+	assert.Equal(t, 30*time.Second, containers[0].HealthCheckTimeout)
+
+	// Exec health check
+	assert.Empty(t, containers[1].HealthCheckURL)
+	assert.Equal(t, "/check.sh", containers[1].HealthCheckCommand)
+	assert.Equal(t, 45*time.Second, containers[1].HealthCheckTimeout)
+
+	// No health check — timeout should be zero (not set)
+	assert.Empty(t, containers[2].HealthCheckURL)
+	assert.Empty(t, containers[2].HealthCheckCommand)
+	assert.Equal(t, time.Duration(0), containers[2].HealthCheckTimeout)
+}
+
+func TestListMonitoredContainersHealthCheckURLResolve(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{
+					ID:    "resolve-hc",
+					Names: []string{"/resolve-app"},
+					Image: "myapp:latest",
+					Labels: map[string]string{
+						"docker-updater.enable":           "true",
+						"docker-updater.health-check.url": ":8080/health",
+					},
+				},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
+				Config:            &container.Config{Image: "myapp:latest"},
+				NetworkSettings: &types.NetworkSettings{
+					Networks: map[string]*network.EndpointSettings{
+						"bridge": {IPAddress: "172.17.0.8"},
+					},
+				},
+			}, nil
+		},
+	}
+
+	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
+	require.Nil(t, err)
+	require.Equal(t, 1, len(containers))
+	assert.Equal(t, "http://172.17.0.8:8080/health", containers[0].HealthCheckURL)
+}

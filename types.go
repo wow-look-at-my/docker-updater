@@ -32,6 +32,14 @@ type ContainerInfo struct {
 
 	// Rolling update: start new container before stopping old.
 	Rolling bool
+
+	// Post-update health check fields.
+	// If HealthCheckURL is set, HTTP GET is polled until 2xx.
+	// Otherwise if HealthCheckCommand is set, it is exec'd via sh -c.
+	// Falls back to Docker HEALTHCHECK status when neither is set.
+	HealthCheckURL     string
+	HealthCheckCommand string
+	HealthCheckTimeout time.Duration
 }
 
 // UpdateResult records the outcome of an update check/action.

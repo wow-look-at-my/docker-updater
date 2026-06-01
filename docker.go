@@ -184,6 +184,17 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 
 		info.Rolling = c.Labels["docker-updater.rolling"] == "true"
 
+		info.HealthCheckURL = c.Labels["docker-updater.health-check.url"]
+		info.HealthCheckCommand = c.Labels["docker-updater.health-check.command"]
+		if info.HealthCheckURL != "" || info.HealthCheckCommand != "" {
+			info.HealthCheckTimeout = 60 * time.Second
+			if t := c.Labels["docker-updater.health-check.timeout"]; t != "" {
+				if d, err := time.ParseDuration(t); err == nil {
+					info.HealthCheckTimeout = d
+				}
+			}
+		}
+
 		inspect, err := cli.ContainerInspect(ctx, c.ID)
 		if err != nil {
 			// Without inspect data we cannot resolve a stable image reference.
@@ -201,6 +212,16 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			for _, net := range inspect.NetworkSettings.Networks {
 				if net.IPAddress != "" {
 					info.PreCheckURL = "http://" + net.IPAddress + info.PreCheckURL
+					break
+				}
+			}
+		}
+
+		// Apply the same resolution for health-check URL.
+		if strings.HasPrefix(info.HealthCheckURL, ":") && inspect.NetworkSettings != nil {
+			for _, net := range inspect.NetworkSettings.Networks {
+				if net.IPAddress != "" {
+					info.HealthCheckURL = "http://" + net.IPAddress + info.HealthCheckURL
 					break
 				}
 			}
@@ -331,8 +352,8 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		return fmt.Errorf("starting container %s: %w", info.Name, err)
 	}
 
-	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
-		log.Printf("container %s: new container not healthy, stopping (%s)", info.Name, shortID(created.ID))
+	if err := waitPostUpdateHealthy(ctx, cli, created.ID, info); err != nil {
+		log.Printf("container %s: post-update health check failed, stopping (%s): %v", info.Name, shortID(created.ID), err)
 		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
 		return fmt.Errorf("container %s not healthy after update: %w", info.Name, err)
 	}
@@ -377,7 +398,8 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		return fmt.Errorf("starting next container %s: %w", nextName, err)
 	}
 
-	if err := waitHealthy(ctx, cli, created.ID, 60*time.Second); err != nil {
+	if err := waitPostUpdateHealthy(ctx, cli, created.ID, info); err != nil {
+		log.Printf("container %s: post-update health check failed for next container (%s): %v", info.Name, shortID(created.ID), err)
 		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
 		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
 		return fmt.Errorf("next container %s not healthy: %w", nextName, err)

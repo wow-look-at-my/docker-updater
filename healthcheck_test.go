@@ -63,7 +63,6 @@ func TestRecreateContainerHealthTimeout(t *testing.T) {
 }
 
 func TestRecreateContainerNoHealthcheck(t *testing.T) {
-	var stoppedID string
 	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
@@ -90,10 +89,6 @@ func TestRecreateContainerNoHealthcheck(t *testing.T) {
 		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
 			return container.CreateResponse{ID: "new123456789"}, nil
 		},
-		containerStopFn: func(_ context.Context, id string, _ container.StopOptions) error {
-			stoppedID = id
-			return nil
-		},
 	}
 
 	info := ContainerInfo{
@@ -102,10 +97,9 @@ func TestRecreateContainerNoHealthcheck(t *testing.T) {
 		Image: "nginx:latest",
 	}
 
+	// Containers without a HEALTHCHECK are healthy as soon as they are running.
 	err := recreateContainer(context.Background(), cli, info, "nginx:latest")
-	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no healthcheck defined")
-	assert.Equal(t, "new123456789", stoppedID)
+	require.Nil(t, err)
 }
 
 func TestRollingUpdateContainerNoHealthcheck(t *testing.T) {
@@ -144,9 +138,94 @@ func TestRollingUpdateContainerNoHealthcheck(t *testing.T) {
 		Rolling: true,
 	}
 
+	// Containers without a HEALTHCHECK are healthy as soon as they are running.
 	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
+}
+
+func TestHealthCheckTimeout(t *testing.T) {
+	t.Run("nil config returns fallback", func(t *testing.T) {
+		assert.Equal(t, 5*time.Minute, healthCheckTimeout(types.ContainerJSON{}))
+	})
+
+	t.Run("nil healthcheck returns fallback", func(t *testing.T) {
+		assert.Equal(t, 5*time.Minute, healthCheckTimeout(types.ContainerJSON{
+			Config: &container.Config{},
+		}))
+	})
+
+	t.Run("custom config", func(t *testing.T) {
+		inspect := types.ContainerJSON{
+			Config: &container.Config{
+				Healthcheck: &container.HealthConfig{
+					StartPeriod: 2 * time.Minute,
+					Interval:    10 * time.Second,
+					Timeout:     5 * time.Second,
+					Retries:     3,
+				},
+			},
+		}
+		// 2m + (3 * 10s) + 5s = 2m35s
+		assert.Equal(t, 2*time.Minute+35*time.Second, healthCheckTimeout(inspect))
+	})
+
+	t.Run("zero fields use defaults", func(t *testing.T) {
+		inspect := types.ContainerJSON{
+			Config: &container.Config{
+				Healthcheck: &container.HealthConfig{
+					// All zero — should use defaults: 30s interval, 3 retries, 30s timeout
+				},
+			},
+		}
+		// 0 + (3 * 30s) + 30s = 2m
+		assert.Equal(t, 2*time.Minute, healthCheckTimeout(inspect))
+	})
+}
+
+func TestRecreateContainerUnhealthy(t *testing.T) {
+	var stoppedID string
+	inspectCount := 0
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config:          &container.Config{Image: "nginx:latest"},
+					NetworkSettings: &types.NetworkSettings{},
+				}, nil
+			}
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "unhealthy"},
+					},
+				},
+			}, nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerStopFn: func(_ context.Context, id string, _ container.StopOptions) error {
+			stoppedID = id
+			return nil
+		},
+	}
+
+	info := ContainerInfo{
+		ID:    "old123456789",
+		Name:  "test-app",
+		Image: "nginx:latest",
+	}
+
+	err := recreateContainer(context.Background(), cli, info, "nginx:latest")
 	require.NotNil(t, err)
-	assert.Contains(t, err.Error(), "no healthcheck defined")
+	assert.Contains(t, err.Error(), "not healthy")
+	assert.Equal(t, "new123456789", stoppedID)
 }
 
 func TestRollingUpdateContainerHealthTimeout(t *testing.T) {

@@ -75,11 +75,14 @@ labels:
   docker-updater.git-ref: "refs/heads/main"
 ```
 
-### Healthcheck Requirement
+### Health Checking
 
-All containers monitored by docker-updater **must** define a `HEALTHCHECK` in their Dockerfile. After starting the replacement container, docker-updater waits up to 60 seconds for it to report healthy. If the container does not reach a healthy state, docker-updater stops it and reports the failure via webhook notifications.
+After starting the replacement container, docker-updater waits for it to become ready:
 
-This applies to both standard recreate and rolling update modes.
+- **With a `HEALTHCHECK`**: waits for Docker to report the container `healthy`. If it becomes `unhealthy`, the update is rolled back immediately. The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + timeout`), so no extra label is needed.
+- **Without a `HEALTHCHECK`**: the container is considered ready as soon as it is running.
+
+If the container fails to become ready, docker-updater stops it and reports the failure via webhook notifications.
 
 ### Image Mode (default)
 
@@ -139,12 +142,11 @@ labels:
 
 The rolling update flow:
 1. New container is created with a temporary name, same networks and aliases
-2. docker-updater waits for Docker's HEALTHCHECK to report healthy (up to 60s)
+2. docker-updater waits for the new container to become ready (see Health Checking above)
 3. Old container receives SIGTERM and drains existing connections
 4. Old container is removed, new container is renamed to the original name
 
 Requirements:
-- The container must have a `HEALTHCHECK` in its Dockerfile
 - A reverse proxy must route traffic via Docker DNS (network alias), not published ports
 - The container must not publish host ports (the proxy owns port bindings)
 

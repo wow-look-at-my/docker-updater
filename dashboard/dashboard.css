@@ -62,7 +62,7 @@ body {
 .card-accent .card-num { color: var(--accent); }
 .card-error .card-num { color: var(--red); }
 
-main { padding: 0 24px 24px; }
+main { padding: 0 24px 24px; overflow-x: hidden; }
 
 table {
   width: 100%;
@@ -122,6 +122,59 @@ tbody tr:hover { background: var(--bg-row); }
 .up-na { color: var(--text-dim); }
 
 .detail { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 320px; word-break: break-word; }
+
+.exited-section {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+
+.exited-section summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exited-section summary::-webkit-details-marker { display: none; }
+.exited-section summary::before {
+  content: "▶";
+  font-size: 10px;
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.exited-section[open] summary::before { transform: rotate(90deg); }
+
+.exited-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--border);
+}
+.exited-table thead th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-row);
+}
+.exited-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  opacity: 0.65;
+}
+.exited-table tbody tr:last-child td { border-bottom: none; }
 
 .error-banner {
   background: rgba(248,81,73,0.12);

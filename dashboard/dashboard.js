@@ -107,7 +107,8 @@ function upstreamCell(c) {
 }
 
 function row(c) {
-  const imageCell = el("td", null,
+  const nameCell = el("td", null,
+    el("span", { class: "cname" }, c.name || "—"),
     el("div", { class: "cimage" }, c.image || "—"),
     c.image_id ? el("div", { class: "cref" }, c.image_id) : null,
   );
@@ -117,8 +118,7 @@ function row(c) {
   const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 
   return el("tr", null,
-    el("td", null, el("span", { class: "cname" }, c.name || "—")),
-    imageCell,
+    nameCell,
     autoUpdateCell(c),
     stateCell(c),
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
@@ -157,8 +157,20 @@ function render(data) {
   setText("next-cycle", nextCycle ? "Next check " + nextCycle : "");
   setText("refreshed", "Updated " + new Date(data.generated_at).toLocaleTimeString());
 
+  const isExited = (c) => c.state === "exited" || c.state === "dead";
+  const active = containers.filter((c) => !isExited(c));
+  const exited = containers.filter(isExited);
+
   const tbody = document.getElementById("rows");
-  tbody.replaceChildren(...containers.map(row));
+  tbody.replaceChildren(...active.map(row));
+
+  const exitedTbody = document.getElementById("exited-rows");
+  exitedTbody.replaceChildren(...exited.map(row));
+
+  const exitedSection = document.getElementById("exited-section");
+  exitedSection.classList.toggle("hidden", exited.length === 0);
+  document.getElementById("exited-summary").textContent =
+    exited.length + " exited container" + (exited.length !== 1 ? "s" : "");
 
   document.getElementById("empty").classList.toggle("hidden", containers.length > 0);
 }

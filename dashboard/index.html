@@ -35,7 +35,6 @@
       <thead>
         <tr>
           <th>Container</th>
-          <th>Image</th>
           <th>Auto-update</th>
           <th>State</th>
           <th>Uptime</th>
@@ -47,6 +46,23 @@
       <tbody id="rows"></tbody>
     </table>
     <p id="empty" class="empty hidden">No containers found.</p>
+    <details id="exited-section" class="exited-section hidden">
+      <summary id="exited-summary"></summary>
+      <table class="exited-table">
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th>Auto-update</th>
+            <th>State</th>
+            <th>Uptime</th>
+            <th>Last checked</th>
+            <th>Last pulled</th>
+            <th>Upstream</th>
+          </tr>
+        </thead>
+        <tbody id="exited-rows"></tbody>
+      </table>
+    </details>
   </main>
 
   <footer>

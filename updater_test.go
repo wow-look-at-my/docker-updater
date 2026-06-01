@@ -444,7 +444,7 @@ func TestRunLoop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil))
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore())
 		close(done)
 	}()
 

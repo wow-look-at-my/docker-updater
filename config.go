@@ -9,19 +9,21 @@ import (
 
 // Config holds the service configuration parsed from environment variables.
 type Config struct {
-	Interval    time.Duration
-	Label       string
-	WebhookURL  string
-	WebhookType string
-	DryRun      bool
-	ConfigPath  string
+	Interval      time.Duration
+	Label         string
+	WebhookURL    string
+	WebhookType   string
+	DryRun        bool
+	ConfigPath    string
+	DashboardAddr string
 }
 
 func loadConfig() (Config, error) {
 	c := Config{
-		Interval:    5 * time.Minute,
-		Label:       "docker-updater.enable",
-		WebhookType: "generic",
+		Interval:      5 * time.Minute,
+		Label:         "docker-updater.enable",
+		WebhookType:   "generic",
+		DashboardAddr: ":8080",
 	}
 
 	if v := os.Getenv("DOCKER_UPDATER_INTERVAL"); v != "" {
@@ -56,6 +58,12 @@ func loadConfig() (Config, error) {
 	}
 
 	c.ConfigPath = os.Getenv("DOCKER_UPDATER_CONFIG")
+
+	// An unset variable keeps the default; an explicitly empty value disables
+	// the dashboard server.
+	if v, ok := os.LookupEnv("DOCKER_UPDATER_DASHBOARD_ADDR"); ok {
+		c.DashboardAddr = v
+	}
 
 	return c, nil
 }

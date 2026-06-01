@@ -45,4 +45,5 @@ type UpdateResult struct {
 	DryRun     bool
 	Skipped    bool
 	SkipReason string
+	Pulled     bool // a registry pull was performed during this check
 }

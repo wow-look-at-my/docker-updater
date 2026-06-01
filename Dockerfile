@@ -10,6 +10,9 @@ LABEL org.opencontainers.image.description="Automatic Docker container updater s
 COPY --from=gcr.io/distroless/static-debian12 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --chmod=755 build/docker-updater_linux_amd64 /docker-updater
 
+# Web dashboard / JSON API (DOCKER_UPDATER_DASHBOARD_ADDR, default :8080).
+EXPOSE 8080
+
 STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/docker-updater"]

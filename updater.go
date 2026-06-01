@@ -57,6 +57,9 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 		return result
 	}
 
+	// checkImageUpdate succeeded, which means the image was pulled from the registry.
+	result.Pulled = true
+
 	if newDigest == "" {
 		log.Printf("container %s: image up-to-date", info.Name)
 		return result
@@ -142,12 +145,15 @@ func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo) 
 	return recreateContainer(ctx, cli, info, info.Image)
 }
 
-// runLoop runs the main update loop until a signal is received.
-func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver) {
+// runLoop runs the main update loop until a signal is received. After every
+// cycle it records results into the store so the dashboard reflects the
+// updater's latest knowledge.
+func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
 
 	// Run first check immediately.
 	results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
+	store.Record(results, time.Now())
 	sendWebhookNotifications(cfg, results)
 
 	ticker := time.NewTicker(cfg.Interval)
@@ -157,6 +163,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 		select {
 		case <-ticker.C:
 			results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
+			store.Record(results, time.Now())
 			sendWebhookNotifications(cfg, results)
 		case sig := <-sigCh:
 			log.Printf("received signal %v, shutting down", sig)

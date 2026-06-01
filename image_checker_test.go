@@ -47,6 +47,55 @@ func TestCheckImageUpdateChanged(t *testing.T) {
 	assert.Equal(t, "sha256:newdigest", newDigest)
 }
 
+func TestCheckImageUpdateUntaggedUsesRepoDigests(t *testing.T) {
+	// The running image is untagged; the comparison is by registry manifest
+	// digest (RepoDigests) and detects the advanced tag.
+	repo := "ghcr.io/wow-look-at-my/buildhost"
+	oldManifest := "sha256:" + strings.Repeat("a", 64)
+	newManifest := "sha256:" + strings.Repeat("b", 64)
+
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{
+				ID:          "sha256:" + strings.Repeat("c", 64),
+				RepoDigests: []string{repo + "@" + newManifest},
+			}, nil, nil
+		},
+	}
+
+	info := ContainerInfo{
+		Image:       repo + ":latest",
+		ImageDigest: oldManifest, // running manifest digest, no tag required
+	}
+
+	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	require.Nil(t, err)
+	assert.Equal(t, newManifest, newDigest)
+}
+
+func TestCheckImageUpdateUntaggedNoChange(t *testing.T) {
+	repo := "ghcr.io/wow-look-at-my/buildhost"
+	manifest := "sha256:" + strings.Repeat("a", 64)
+
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{
+				ID:          "sha256:" + strings.Repeat("c", 64),
+				RepoDigests: []string{repo + "@" + manifest},
+			}, nil, nil
+		},
+	}
+
+	info := ContainerInfo{
+		Image:       repo + ":latest",
+		ImageDigest: manifest,
+	}
+
+	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	require.Nil(t, err)
+	assert.Equal(t, "", newDigest)
+}
+
 func TestCheckImageUpdatePullError(t *testing.T) {
 	cli := &mockDocker{
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {

@@ -62,10 +62,11 @@ body {
 .card-accent .card-num { color: var(--accent); }
 .card-error .card-num { color: var(--red); }
 
-main { padding: 0 24px 24px; overflow-x: hidden; }
+main { padding: 0 24px 24px; }
 
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -86,6 +87,7 @@ tbody td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg-row); }
@@ -155,6 +157,7 @@ tbody tr:hover { background: var(--bg-row); }
 
 .exited-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   border-top: 1px solid var(--border);
 }
@@ -172,6 +175,7 @@ tbody tr:hover { background: var(--bg-row); }
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+  overflow-wrap: anywhere;
   opacity: 0.65;
 }
 .exited-table tbody tr:last-child td { border-bottom: none; }

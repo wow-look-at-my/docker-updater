@@ -44,8 +44,16 @@ func main() {
 		resolveAuth = newAuthResolver(nil)
 	}
 
+	store := newStore()
+
+	if cfg.DashboardAddr != "" {
+		go newDashboardServer(cli, cfg, store).run(ctx)
+	} else {
+		log.Print("dashboard disabled (DOCKER_UPDATER_DASHBOARD_ADDR is empty)")
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	runLoop(ctx, cli, cfg, sigCh, resolveAuth)
+	runLoop(ctx, cli, cfg, sigCh, resolveAuth, store)
 }

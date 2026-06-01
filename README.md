@@ -7,6 +7,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
+- **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **Dry-run mode**: Monitor for updates without applying them
 - **Scratch image**: No external dependencies at runtime
@@ -34,6 +35,31 @@ All configuration is via environment variables:
 | `DOCKER_UPDATER_WEBHOOK_TYPE` | `generic` | `generic`, `discord`, or `slack` |
 | `DOCKER_UPDATER_DRY_RUN` | `false` | Monitor only, don't update |
 | `DOCKER_UPDATER_CONFIG` | | Path to Docker `config.json` for private registry auth |
+| `DOCKER_UPDATER_DASHBOARD_ADDR` | `:8080` | Listen address for the web dashboard; set empty to disable |
+
+## Dashboard
+
+docker-updater serves a read-only web dashboard (default `:8080`) that lists
+**every** container on the host -- both the ones it auto-updates and the ones it
+doesn't -- so you can see your fleet at a glance:
+
+![docker-updater dashboard](docs/dashboard.png)
+
+- **Auto-update status**: whether a container is monitored, and in `image` or `git` mode
+- **State & uptime**: running/stopped, healthcheck status, and how long it has been up
+- **Last checked / last pulled**: when docker-updater last polled the registry and pulled the image
+- **Upstream**: whether a newer image digest (or git commit) is available, or the last error
+
+The page auto-refreshes every few seconds. The same data is available as JSON at
+`/api/containers`, and `/healthz` returns `200 ok` for external liveness probes.
+
+With `--network host` (recommended), the dashboard is reachable on the host's
+port directly, e.g. `http://<host>:8080`. Without host networking, publish the
+port (`-p 8080:8080`). Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different address
+(e.g. `:9000`) to move it, or to an empty string to disable it entirely.
+
+Note that "last pulled" and "last checked" only apply to monitored containers;
+the tool never polls the registry for containers it isn't watching.
 
 ## Container Labels
 
@@ -128,7 +154,7 @@ Pre-checks are skipped for rolling updates -- the old container drains naturally
 services:
   docker-updater:
     image: ghcr.io/wow-look-at-my/docker-updater
-    network_mode: host
+    network_mode: host  # dashboard reachable at http://<host>:8080
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.docker/config.json:/config.json:ro
@@ -137,6 +163,7 @@ services:
       DOCKER_UPDATER_WEBHOOK_URL: "https://discord.com/api/webhooks/..."
       DOCKER_UPDATER_WEBHOOK_TYPE: "discord"
       DOCKER_UPDATER_CONFIG: "/config.json"
+      DOCKER_UPDATER_DASHBOARD_ADDR: ":8080"
 
   my-app:
     image: myapp:latest

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>docker-updater dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">&#x21bb;</span>
+      <h1>docker-updater</h1>
+    </div>
+    <div class="meta">
+      <span id="dry-run-badge" class="badge badge-dry hidden">DRY RUN</span>
+      <span id="last-cycle" class="meta-item" title="Last completed check cycle"></span>
+      <span id="next-cycle" class="meta-item" title="Next scheduled check"></span>
+      <span id="refreshed" class="meta-item"></span>
+    </div>
+  </header>
+
+  <section class="summary" id="summary">
+    <div class="card"><span class="card-num" id="stat-total">0</span><span class="card-label">containers</span></div>
+    <div class="card"><span class="card-num" id="stat-auto">0</span><span class="card-label">auto-updated</span></div>
+    <div class="card"><span class="card-num" id="stat-manual">0</span><span class="card-label">manual</span></div>
+    <div class="card card-accent"><span class="card-num" id="stat-updates">0</span><span class="card-label">updates available</span></div>
+    <div class="card card-error"><span class="card-num" id="stat-errors">0</span><span class="card-label">errors</span></div>
+  </section>
+
+  <main>
+    <div id="error-banner" class="error-banner hidden"></div>
+    <table id="containers">
+      <thead>
+        <tr>
+          <th>Container</th>
+          <th>Image</th>
+          <th>Auto-update</th>
+          <th>State</th>
+          <th>Uptime</th>
+          <th>Last checked</th>
+          <th>Last pulled</th>
+          <th>Upstream</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="empty hidden">No containers found.</p>
+  </main>
+
+  <footer>
+    <span>Auto-refreshing every <span id="refresh-interval">5</span>s &middot; check interval <span id="cfg-interval">&mdash;</span> &middot; label <code id="cfg-label">&mdash;</code></span>
+  </footer>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

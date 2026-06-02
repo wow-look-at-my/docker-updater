@@ -143,7 +143,7 @@ func TestPullImageRejectsBareImageID(t *testing.T) {
 	}
 
 	bareID := "sha256:" + strings.Repeat("3", 64)
-	_, err := pullImage(context.Background(), cli, bareID, newAuthResolver(nil))
+	_, _, err := pullImage(context.Background(), cli, bareID, newAuthResolver(nil))
 	require.NotNil(t, err)
 	assert.False(t, pullCalled, "daemon pull must never be invoked for a bare image ID")
 }

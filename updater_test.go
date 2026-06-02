@@ -75,6 +75,39 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
 	assert.Nil(t, results[0].Error)
+	assert.False(t, results[0].Pulled, "an up-to-date check pulls nothing and must not reset the last-pulled time")
+}
+
+func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
+	// When the pull fetches genuinely new content -- the tag resolves to a
+	// different local image after pulling -- result.Pulled must be true. Dry-run
+	// keeps the test on the pull/fetch path without the recreate handoff.
+	var inspects int
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			inspects++
+			if inspects == 1 { // before the pull: the old local image
+				return types.ImageInspect{ID: "sha256:olddigest"}, nil, nil
+			}
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil // after the pull
+		},
+	}
+
+	info := ContainerInfo{
+		Name:        "web",
+		Image:       "nginx:latest",
+		ImageDigest: "sha256:olddigest",
+		Mode:        UpdateModeImage,
+	}
+	cfg := Config{Label: "docker-updater.enable", DryRun: true}
+	result := checkAndUpdateImage(context.Background(), cli, info, cfg, UpdateResult{Container: info, DryRun: true}, newAuthResolver(nil))
+
+	assert.True(t, result.Pulled, "fetching new content must mark the image as pulled")
+	assert.True(t, result.Updated, "an update is available")
+	assert.Equal(t, "sha256:newdigest", result.NewRef)
 }
 
 func TestRunUpdateCheckImageDryRun(t *testing.T) {

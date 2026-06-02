@@ -25,7 +25,7 @@ func TestCheckImageUpdateNoChange(t *testing.T) {
 		ImageDigest: "sha256:samedigest",
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	newDigest, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, "", newDigest)
 }
@@ -42,9 +42,32 @@ func TestCheckImageUpdateChanged(t *testing.T) {
 		ImageDigest: "sha256:olddigest",
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	newDigest, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:newdigest", newDigest)
+}
+
+func TestCheckImageUpdateReportsFetched(t *testing.T) {
+	// fetched is threaded from the pull: it is true when the local image the tag
+	// resolves to changed across the pull, independent of whether the result
+	// differs from the running container's digest.
+	var inspects int
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			inspects++
+			if inspects == 1 {
+				return types.ImageInspect{ID: "sha256:olddigest"}, nil, nil
+			}
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
+		},
+	}
+
+	info := ContainerInfo{Image: "nginx:latest", ImageDigest: "sha256:olddigest"}
+
+	newDigest, fetched, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	require.Nil(t, err)
+	assert.Equal(t, "sha256:newdigest", newDigest)
+	assert.True(t, fetched)
 }
 
 func TestCheckImageUpdateUntaggedUsesRepoDigests(t *testing.T) {
@@ -68,7 +91,7 @@ func TestCheckImageUpdateUntaggedUsesRepoDigests(t *testing.T) {
 		ImageDigest: oldManifest, // running manifest digest, no tag required
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	newDigest, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, newManifest, newDigest)
 }
@@ -91,7 +114,7 @@ func TestCheckImageUpdateUntaggedNoChange(t *testing.T) {
 		ImageDigest: manifest,
 	}
 
-	newDigest, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	newDigest, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.Nil(t, err)
 	assert.Equal(t, "", newDigest)
 }
@@ -105,7 +128,7 @@ func TestCheckImageUpdatePullError(t *testing.T) {
 
 	info := ContainerInfo{Image: "broken:latest"}
 
-	_, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	_, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.NotNil(t, err)
 }
 
@@ -121,6 +144,6 @@ func TestCheckImageUpdateInspectError(t *testing.T) {
 
 	info := ContainerInfo{Image: "broken:latest"}
 
-	_, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
+	_, _, err := checkImageUpdate(context.Background(), cli, info, newAuthResolver(nil))
 	require.NotNil(t, err)
 }

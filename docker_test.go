@@ -242,9 +242,44 @@ func TestPullImage(t *testing.T) {
 	}
 
 	noAuth := newAuthResolver(nil)
-	digest, err := pullImage(context.Background(), cli, "nginx:latest", noAuth)
+	digest, _, err := pullImage(context.Background(), cli, "nginx:latest", noAuth)
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:newdigest123", digest)
+}
+
+func TestPullImageFetchedReportsNewContent(t *testing.T) {
+	// The reference resolves to one image before the pull and a different one
+	// after: the pull fetched new content, so fetched must be true.
+	var calls int
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			calls++
+			if calls == 1 {
+				return types.ImageInspect{ID: "sha256:oldlocal"}, nil, nil
+			}
+			return types.ImageInspect{ID: "sha256:newlocal"}, nil, nil
+		},
+	}
+
+	digest, fetched, err := pullImage(context.Background(), cli, "nginx:latest", newAuthResolver(nil))
+	require.Nil(t, err)
+	assert.Equal(t, "sha256:newlocal", digest)
+	assert.True(t, fetched, "content ID changed across the pull")
+}
+
+func TestPullImageFetchedFalseWhenUpToDate(t *testing.T) {
+	// The reference resolves to the same image before and after: the pull found
+	// the local image already current and downloaded nothing, so fetched is false.
+	cli := &mockDocker{
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:unchanged"}, nil, nil
+		},
+	}
+
+	digest, fetched, err := pullImage(context.Background(), cli, "nginx:latest", newAuthResolver(nil))
+	require.Nil(t, err)
+	assert.Equal(t, "sha256:unchanged", digest)
+	assert.False(t, fetched, "up-to-date pull must not report fetched content")
 }
 
 func TestPullImageError(t *testing.T) {
@@ -255,7 +290,7 @@ func TestPullImageError(t *testing.T) {
 	}
 
 	noAuth := newAuthResolver(nil)
-	_, err := pullImage(context.Background(), cli, "broken:latest", noAuth)
+	_, _, err := pullImage(context.Background(), cli, "broken:latest", noAuth)
 	require.NotNil(t, err)
 }
 
@@ -278,7 +313,7 @@ func TestPullImageWithAuth(t *testing.T) {
 	}
 	resolver := newAuthResolver(cfg)
 
-	digest, err := pullImage(context.Background(), cli, "ghcr.io/org/image:latest", resolver)
+	digest, _, err := pullImage(context.Background(), cli, "ghcr.io/org/image:latest", resolver)
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:authdigest", digest)
 	assert.NotEmpty(t, capturedAuth)
@@ -303,7 +338,7 @@ func TestPullImageAnonymousFallback(t *testing.T) {
 	}
 	resolver := newAuthResolver(cfg)
 
-	digest, err := pullImage(context.Background(), cli, "nginx:latest", resolver)
+	digest, _, err := pullImage(context.Background(), cli, "nginx:latest", resolver)
 	require.Nil(t, err)
 	assert.Equal(t, "sha256:anondigest", digest)
 	assert.Empty(t, capturedAuth)

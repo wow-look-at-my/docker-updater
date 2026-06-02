@@ -70,6 +70,17 @@ function stateCell(c) {
   return el("td", null, ...children);
 }
 
+// restartsCell renders Docker's restart count for the container. A nil count
+// (container could not be inspected) shows "—"; zero is dimmed as the unremarkable
+// healthy case; a positive count is highlighted to flag instability.
+function restartsCell(c) {
+  const n = c.restarts;
+  if (n === undefined || n === null) return el("td", { class: "up-na" }, "—");
+  if (n === 0) return el("td", { class: "up-na" }, "0");
+  const title = "Restarted " + n + " time" + (n !== 1 ? "s" : "") + " since the container was last (re)created";
+  return el("td", { class: "restarts-warn", title }, String(n));
+}
+
 function autoUpdateCell(c) {
   if (!c.auto_update) {
     return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, "Manual"));
@@ -125,6 +136,7 @@ function row(c) {
     autoUpdateCell(c),
     stateCell(c),
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
+    restartsCell(c),
     el("td", { class: lastChecked === "—" ? "up-na" : null }, lastChecked),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),

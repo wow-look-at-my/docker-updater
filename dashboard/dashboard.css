@@ -122,6 +122,7 @@ tbody tr:hover { background: var(--bg-row); }
 .up-available { color: var(--amber); font-weight: 600; }
 .up-error { color: var(--red); }
 .up-na { color: var(--text-dim); }
+.restarts-warn { color: var(--amber); font-weight: 600; }
 
 .detail { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 320px; word-break: break-word; }
 

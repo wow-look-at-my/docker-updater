@@ -7,7 +7,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
-- **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, last pull, and whether a newer image is upstream
+- **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, restart count, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **Dry-run mode**: Monitor for updates without applying them
 - **Scratch image**: No external dependencies at runtime
@@ -47,7 +47,8 @@ doesn't -- so you can see your fleet at a glance:
 
 - **Auto-update status**: whether a container is monitored, and in `image` or `git` mode
 - **State & uptime**: running/stopped, healthcheck status, and how long it has been up
-- **Last checked / last pulled**: when docker-updater last polled the registry and pulled the image
+- **Restarts**: Docker's restart count -- how many times the daemon's restart policy has restarted the container since it was last (re)created. Because docker-updater creates a fresh container on every pull, this reads as "restarts since the last pull" for monitored containers, and a non-zero value flags a crash-looping container
+- **Last checked / last pulled**: *last checked* is when docker-updater last polled the registry; *last pulled* is when it last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance "last pulled", so the column reflects genuine image changes rather than resetting every cycle
 - **Upstream**: whether a newer image digest (or git commit) is available, or the last error
 
 The page auto-refreshes every few seconds. The same data is available as JSON at

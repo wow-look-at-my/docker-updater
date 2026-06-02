@@ -50,15 +50,17 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
 	result.OldRef = info.ImageDigest
 
-	newDigest, err := checkImageUpdate(ctx, cli, info, resolveAuth)
+	newDigest, fetched, err := checkImageUpdate(ctx, cli, info, resolveAuth)
 	if err != nil {
 		result.Error = err
 		log.Printf("container %s: error checking image: %v", info.Name, err)
 		return result
 	}
 
-	// checkImageUpdate succeeded, which means the image was pulled from the registry.
-	result.Pulled = true
+	// Pulled reflects whether the pull actually fetched a newer image, not merely
+	// that a pull check ran. An up-to-date check downloads nothing and must not
+	// reset the "last pulled" timestamp.
+	result.Pulled = fetched
 
 	if newDigest == "" {
 		log.Printf("container %s: image up-to-date", info.Name)

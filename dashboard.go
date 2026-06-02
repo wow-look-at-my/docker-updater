@@ -83,6 +83,13 @@ type apiContainer struct {
 	Health  string `json:"health"`
 	Created int64  `json:"created"`
 
+	// Restarts is Docker's RestartCount: how many times the daemon's restart
+	// policy has restarted the container since it was created. docker-updater
+	// creates a fresh container on every pull/update, so for monitored
+	// containers this is effectively "restarts since the last pull". nil when
+	// the container could not be inspected.
+	Restarts *int `json:"restarts,omitempty"`
+
 	AutoUpdate bool   `json:"auto_update"`
 	Mode       string `json:"mode,omitempty"`
 
@@ -142,6 +149,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			Health:     parseHealth(c.Status),
 			Created:    c.Created,
 			AutoUpdate: c.Labels[s.cfg.Label] == "true",
+			Restarts:   restartCount(r.Context(), s.cli, c.ID),
 		}
 
 		if ac.AutoUpdate {
@@ -182,6 +190,18 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 	if err := enc.Encode(resp); err != nil {
 		log.Printf("dashboard: failed to encode response: %v", err)
 	}
+}
+
+// restartCount inspects a container and returns its Docker RestartCount, or nil
+// if the container cannot be inspected. RestartCount is not exposed by the
+// container-list endpoint, so a per-container inspect is required.
+func restartCount(ctx context.Context, cli DockerClient, id string) *int {
+	inspect, err := cli.ContainerInspect(ctx, id)
+	if err != nil || inspect.ContainerJSONBase == nil {
+		return nil
+	}
+	n := inspect.RestartCount
+	return &n
 }
 
 func containerName(names []string) string {

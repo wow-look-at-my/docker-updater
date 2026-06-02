@@ -93,8 +93,11 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg-row); }
 
 .cname { font-weight: 600; }
-.cimage { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
-.cref { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+/* Image/ref are allowed to run onto a single line and overflow the narrow
+   Container column, sliding under the (top-aligned) cells to its right rather
+   than word-wrapping into a tall stack. */
+.cimage { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; white-space: nowrap; }
+.cref { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; white-space: nowrap; }
 
 .badge {
   display: inline-block;

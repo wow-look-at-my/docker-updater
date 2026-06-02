@@ -109,8 +109,11 @@ function upstreamCell(c) {
 function row(c) {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
-    el("div", { class: "cimage" }, c.image || "—"),
-    c.image_id ? el("div", { class: "cref" }, c.image_id) : null,
+    el("div", { class: "cmeta" },
+      c.image || "—",
+      c.image_id ? " · " : null,
+      c.image_id ? el("span", { class: "cref" }, c.image_id) : null,
+    ),
   );
 
   const uptime = uptimeText(c);

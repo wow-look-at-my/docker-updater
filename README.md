@@ -9,6 +9,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, restart count, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
+- **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
 - **Dry-run mode**: Monitor for updates without applying them
 - **Scratch image**: No external dependencies at runtime
 
@@ -31,11 +32,14 @@ All configuration is via environment variables:
 |----------|---------|-------------|
 | `DOCKER_UPDATER_INTERVAL` | `5m` | Check interval (Go duration) |
 | `DOCKER_UPDATER_LABEL` | `docker-updater.enable` | Container opt-in label |
-| `DOCKER_UPDATER_WEBHOOK_URL` | | Webhook endpoint URL |
+| `DOCKER_UPDATER_WEBHOOK_URL` | | Outbound notification webhook endpoint URL |
 | `DOCKER_UPDATER_WEBHOOK_TYPE` | `generic` | `generic`, `discord`, or `slack` |
 | `DOCKER_UPDATER_DRY_RUN` | `false` | Monitor only, don't update |
 | `DOCKER_UPDATER_CONFIG` | | Path to Docker `config.json` for private registry auth |
 | `DOCKER_UPDATER_DASHBOARD_ADDR` | `:8080` | Listen address for the web dashboard; set empty to disable |
+| `DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR` | | Listen address for the inbound GitHub webhook (e.g. `:9000`); empty disables it |
+| `DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET` | | Shared secret for verifying GitHub webhook signatures; **required** when the webhook is enabled |
+| `DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES` | | Comma-separated allowlist of package names (or `namespace/name`) that may trigger a check; empty means any package. Most useful with an org-level webhook |
 
 ## Dashboard
 
@@ -61,6 +65,96 @@ port (`-p 8080:8080`). Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different addres
 
 Note that "last pulled" and "last checked" only apply to monitored containers;
 the tool never polls the registry for containers it isn't watching.
+
+## GitHub Webhook Trigger
+
+Normally docker-updater polls the registry every `DOCKER_UPDATER_INTERVAL`. With
+a short interval that means a lot of needless polling; with a long interval a
+freshly pushed image can sit unnoticed for a while. The inbound GitHub webhook
+closes that gap: when GitHub Packages publishes or updates a package (a ghcr
+image), it POSTs to docker-updater, which runs a check **immediately** instead
+of waiting out the rest of the interval.
+
+This endpoint is meant to be reachable from the public internet (GitHub has to
+reach it), so it is locked down:
+
+- **Authenticated.** Every request must carry a valid GitHub `X-Hub-Signature-256`
+  HMAC-SHA256 signature of the raw body, computed with your shared secret and
+  checked in constant time. Requests without a valid signature get `401` and are
+  ignored.
+- **Fail closed.** The listener refuses to start without
+  `DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET`; docker-updater will exit with a config
+  error rather than expose an unauthenticated trigger.
+- **Isolated.** It runs on its own listen address, separate from the dashboard,
+  so you can expose this port publicly while keeping the dashboard internal.
+- **Hardened.** POST-only, the body is size-capped (1 MiB), and unrelated events
+  are acknowledged but ignored. The `ping` GitHub sends on creation is answered
+  so the delivery shows healthy.
+
+A burst of deliveries (for example the several events a multi-arch push emits)
+coalesces into at most one pending check, and a webhook-triggered check realigns
+the interval timer so the next scheduled poll is a full interval later.
+
+### Enabling it
+
+Set both variables and publish the port:
+
+```yaml
+environment:
+  DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR: ":9000"
+  DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET: "use-a-long-random-string"
+```
+
+With `--network host` the endpoint is reachable on the host's port directly
+(e.g. `http://<host>:9000`); otherwise publish it (`-p 9000:9000`). Because the
+request carries a secret, terminate TLS in front of it (a reverse proxy such as
+nginx, Traefik, or Caddy) so deliveries travel over HTTPS. The webhook accepts
+any request path, so route whatever public path you like to it.
+
+### Configuring the webhook on GitHub
+
+In the repository (or organization) **Settings > Webhooks > Add webhook**:
+
+- **Payload URL**: your public URL, e.g. `https://updater.example.com/`
+- **Content type**: `application/json`
+- **Secret**: the same value as `DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET`
+- **Which events**: choose "Let me select individual events" and tick
+  **Packages** (only)
+
+GitHub sends a `ping` on save; a `200 pong` confirms the secret and URL are
+correct. From then on, each package publish/update triggers an immediate check.
+
+A valid delivery triggers a full check of all monitored containers (the same
+work a normal interval tick does), so you don't need to map the package to a
+specific container -- whichever containers have a newer image get updated.
+
+### Repository vs organization webhooks
+
+The webhook can be added on a single repository or on the whole organization
+(**Org Settings > Webhooks**). The authentication is identical either way -- the
+same secret and `X-Hub-Signature-256` signature -- so no extra configuration is
+needed for an org-level hook.
+
+The one behavioral difference: an **organization** webhook fires for *every*
+package event in the org, not just the image you have in mind. Each delivery
+runs a full check, which is harmless (checks are idempotent and bursts coalesce
+into at most one pending check) but can be more frequent than necessary if the
+org publishes many unrelated packages.
+
+To scope an org-level hook to just the images you care about, set
+`DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES` to a comma-separated allowlist of
+package names. Only matching deliveries trigger a check; the rest are
+acknowledged and ignored. Each entry matches either the bare package name or its
+`namespace/name` form (case-insensitive):
+
+```yaml
+environment:
+  # ghcr.io/wow-look-at-my/buildhost and .../docker-updater
+  DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES: "buildhost,wow-look-at-my/docker-updater"
+```
+
+Leave it empty (the default) to react to any package -- the right choice for a
+single-repository webhook.
 
 ## Container Labels
 
@@ -169,6 +263,9 @@ services:
       DOCKER_UPDATER_WEBHOOK_TYPE: "discord"
       DOCKER_UPDATER_CONFIG: "/config.json"
       DOCKER_UPDATER_DASHBOARD_ADDR: ":8080"
+      # Optional: let GitHub trigger a check the instant a ghcr image is pushed.
+      DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR: ":9000"
+      DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET: "use-a-long-random-string"
 
   my-app:
     image: myapp:latest

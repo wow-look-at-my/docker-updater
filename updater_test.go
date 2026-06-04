@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -479,13 +480,66 @@ func TestRunLoop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore())
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), nil)
 		close(done)
 	}()
 
 	time.Sleep(150 * time.Millisecond)
 	sigCh <- syscall.SIGTERM
 
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runLoop did not exit after signal")
+	}
+}
+
+// waitFor polls cond until it is true or the deadline elapses.
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
+// TestRunLoopWebhookTrigger proves a webhook trigger runs a check immediately,
+// without waiting for the (here, deliberately huge) interval to elapse.
+func TestRunLoopWebhookTrigger(t *testing.T) {
+	var checks atomic.Int64
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			checks.Add(1)
+			return nil, nil // no monitored containers; a check still ran
+		},
+	}
+
+	cfg := Config{
+		Label:    "docker-updater.enable",
+		Interval: time.Hour, // long enough that the ticker never fires in this test
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	trigger := make(chan struct{}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), trigger)
+		close(done)
+	}()
+
+	// The initial check runs once on startup.
+	waitFor(t, func() bool { return checks.Load() >= 1 }, "initial check did not run")
+
+	// Firing the trigger must run a second check despite the hour-long interval.
+	trigger <- struct{}{}
+	waitFor(t, func() bool { return checks.Load() >= 2 }, "webhook trigger did not run a check")
+
+	sigCh <- syscall.SIGTERM
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

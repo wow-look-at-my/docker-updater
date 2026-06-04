@@ -28,15 +28,25 @@ const maxWebhookBody = 1 << 20 // 1 MiB
 // operator can expose this port to the internet while keeping the dashboard
 // internal.
 type githubWebhookServer struct {
-	addr    string
-	secret  []byte
+	addr   string
+	secret []byte
+	// allow is an optional set of package identifiers (lowercased "name" and/or
+	// "namespace/name"). When non-empty, only matching packages trigger a check
+	// -- the knob for an org-level webhook that fires for every package. Empty
+	// means any package event triggers.
+	allow   map[string]struct{}
 	trigger chan<- struct{}
 }
 
-func newGitHubWebhookServer(addr, secret string, trigger chan<- struct{}) *githubWebhookServer {
+func newGitHubWebhookServer(addr, secret string, packages []string, trigger chan<- struct{}) *githubWebhookServer {
+	allow := make(map[string]struct{}, len(packages))
+	for _, p := range packages {
+		allow[strings.ToLower(p)] = struct{}{}
+	}
 	return &githubWebhookServer{
 		addr:    addr,
 		secret:  []byte(secret),
+		allow:   allow,
 		trigger: trigger,
 	}
 }
@@ -97,7 +107,18 @@ func (s *githubWebhookServer) handleWebhook(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("pong"))
 	case "package", "registry_package":
-		logPackageEvent(body)
+		pkg := parsePackage(body)
+		if !s.allowed(pkg) {
+			log.Printf("github webhook: package %q not in allowlist, ignoring", pkg.fullName())
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ignored (package not in allowlist)"))
+			return
+		}
+		if pkg.name != "" {
+			log.Printf("github webhook: package %q (%s) %s, triggering update check", pkg.fullName(), pkg.pkgType, pkg.action)
+		} else {
+			log.Print("github webhook: package event received, triggering update check")
+		}
 		s.fire()
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("update check triggered"))
@@ -135,20 +156,74 @@ func validSignature(secret, body []byte, sigHeader string) bool {
 	return hmac.Equal(mac.Sum(nil), want)
 }
 
-// logPackageEvent best-effort logs which package triggered the check. A parse
-// failure is non-fatal: the signature already proved the delivery is genuine,
-// so the check still fires.
-func logPackageEvent(body []byte) {
-	var p struct {
-		Action  string `json:"action"`
-		Package struct {
-			Name        string `json:"name"`
-			PackageType string `json:"package_type"`
-		} `json:"package"`
+// packageInfo is the subset of a GitHub package/registry_package payload the
+// updater cares about.
+type packageInfo struct {
+	action    string
+	name      string
+	namespace string
+	pkgType   string
+}
+
+// fullName returns "namespace/name" when both are present, else just the name.
+func (p packageInfo) fullName() string {
+	if p.namespace != "" && p.name != "" {
+		return p.namespace + "/" + p.name
 	}
-	if err := json.Unmarshal(body, &p); err != nil || p.Package.Name == "" {
-		log.Print("github webhook: package event received, triggering update check")
-		return
+	return p.name
+}
+
+// parsePackage best-effort extracts package identity from a webhook body. It
+// reads both the modern "package" event and the deprecated "registry_package"
+// event. A parse failure yields a zero value rather than an error: the signature
+// already proved the delivery genuine, so callers fail open and still trigger.
+func parsePackage(body []byte) packageInfo {
+	var raw struct {
+		Action  string         `json:"action"`
+		Package *packageFields `json:"package"`
+		// Deprecated event shape.
+		RegistryPackage *packageFields `json:"registry_package"`
 	}
-	log.Printf("github webhook: package %q (%s) %s, triggering update check", p.Package.Name, p.Package.PackageType, p.Action)
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return packageInfo{}
+	}
+	fields := raw.Package
+	if fields == nil {
+		fields = raw.RegistryPackage
+	}
+	if fields == nil {
+		return packageInfo{action: raw.Action}
+	}
+	return packageInfo{
+		action:    raw.Action,
+		name:      fields.Name,
+		namespace: fields.Namespace,
+		pkgType:   fields.PackageType,
+	}
+}
+
+type packageFields struct {
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	PackageType string `json:"package_type"`
+}
+
+// allowed reports whether a package event should trigger a check. With no
+// allowlist configured every package qualifies. With an allowlist, the package
+// must match by name or "namespace/name" (case-insensitive). An unparseable
+// name fails open: an authenticated delivery we can't classify still triggers,
+// since a missed trigger only delays the update to the next interval.
+func (s *githubWebhookServer) allowed(p packageInfo) bool {
+	if len(s.allow) == 0 || p.name == "" {
+		return true
+	}
+	if _, ok := s.allow[strings.ToLower(p.name)]; ok {
+		return true
+	}
+	if full := p.fullName(); full != p.name {
+		if _, ok := s.allow[strings.ToLower(full)]; ok {
+			return true
+		}
+	}
+	return false
 }

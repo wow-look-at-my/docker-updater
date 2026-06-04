@@ -39,6 +39,7 @@ All configuration is via environment variables:
 | `DOCKER_UPDATER_DASHBOARD_ADDR` | `:8080` | Listen address for the web dashboard; set empty to disable |
 | `DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR` | | Listen address for the inbound GitHub webhook (e.g. `:9000`); empty disables it |
 | `DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET` | | Shared secret for verifying GitHub webhook signatures; **required** when the webhook is enabled |
+| `DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES` | | Comma-separated allowlist of package names (or `namespace/name`) that may trigger a check; empty means any package. Most useful with an org-level webhook |
 
 ## Dashboard
 
@@ -126,6 +127,34 @@ correct. From then on, each package publish/update triggers an immediate check.
 A valid delivery triggers a full check of all monitored containers (the same
 work a normal interval tick does), so you don't need to map the package to a
 specific container -- whichever containers have a newer image get updated.
+
+### Repository vs organization webhooks
+
+The webhook can be added on a single repository or on the whole organization
+(**Org Settings > Webhooks**). The authentication is identical either way -- the
+same secret and `X-Hub-Signature-256` signature -- so no extra configuration is
+needed for an org-level hook.
+
+The one behavioral difference: an **organization** webhook fires for *every*
+package event in the org, not just the image you have in mind. Each delivery
+runs a full check, which is harmless (checks are idempotent and bursts coalesce
+into at most one pending check) but can be more frequent than necessary if the
+org publishes many unrelated packages.
+
+To scope an org-level hook to just the images you care about, set
+`DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES` to a comma-separated allowlist of
+package names. Only matching deliveries trigger a check; the rest are
+acknowledged and ignored. Each entry matches either the bare package name or its
+`namespace/name` form (case-insensitive):
+
+```yaml
+environment:
+  # ghcr.io/wow-look-at-my/buildhost and .../docker-updater
+  DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES: "buildhost,wow-look-at-my/docker-updater"
+```
+
+Leave it empty (the default) to react to any package -- the right choice for a
+single-repository webhook.
 
 ## Container Labels
 

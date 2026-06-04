@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,13 @@ type Config struct {
 	// publicly, so GitHubWebhookSecret is mandatory whenever it is enabled.
 	GitHubWebhookAddr   string
 	GitHubWebhookSecret string
+
+	// GitHubWebhookPackages optionally scopes which packages trigger a check.
+	// This matters for an org-level webhook, which fires for every package in
+	// the org: when non-empty, only deliveries whose package name (or its
+	// "namespace/name" form) is listed trigger a check; everything else is
+	// acknowledged but ignored. Empty means any package event triggers.
+	GitHubWebhookPackages []string
 }
 
 func loadConfig() (Config, error) {
@@ -81,6 +89,11 @@ func loadConfig() (Config, error) {
 	c.GitHubWebhookSecret = os.Getenv("DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET")
 	if c.GitHubWebhookAddr != "" && c.GitHubWebhookSecret == "" {
 		return c, fmt.Errorf("DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR is set but DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET is empty: refusing to expose an unauthenticated webhook")
+	}
+	for _, p := range strings.Split(os.Getenv("DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			c.GitHubWebhookPackages = append(c.GitHubWebhookPackages, p)
+		}
 	}
 
 	return c, nil

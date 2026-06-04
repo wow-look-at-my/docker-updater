@@ -53,7 +53,7 @@ func main() {
 	var trigger chan struct{}
 	if cfg.GitHubWebhookAddr != "" {
 		trigger = make(chan struct{}, 1)
-		go newGitHubWebhookServer(cfg.GitHubWebhookAddr, cfg.GitHubWebhookSecret, trigger).run(ctx)
+		go newGitHubWebhookServer(cfg.GitHubWebhookAddr, cfg.GitHubWebhookSecret, cfg.GitHubWebhookPackages, trigger).run(ctx)
 	} else {
 		log.Print("github webhook disabled (DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR is empty)")
 	}

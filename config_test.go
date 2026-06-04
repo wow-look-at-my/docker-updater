@@ -19,6 +19,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		"DOCKER_UPDATER_CONFIG",
 		"DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR",
 		"DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET",
+		"DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES",
 	} {
 		t.Setenv(key, "")
 		os.Unsetenv(key)
@@ -42,6 +43,8 @@ func TestLoadConfigDefaults(t *testing.T) {
 	assert.Equal(t, "", cfg.GitHubWebhookAddr)
 
 	assert.Equal(t, "", cfg.GitHubWebhookSecret)
+
+	assert.Equal(t, 0, len(cfg.GitHubWebhookPackages))
 
 }
 
@@ -132,5 +135,20 @@ func TestLoadConfigGitHubWebhookRequiresSecret(t *testing.T) {
 	// than silently exposing an unauthenticated endpoint.
 	_, err := loadConfig()
 	require.NotNil(t, err)
+
+}
+
+func TestLoadConfigGitHubWebhookPackages(t *testing.T) {
+	// Comma-separated, with surrounding whitespace and a stray empty entry.
+	t.Setenv("DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES", " buildhost , wow-look-at-my/docker-updater ,")
+
+	cfg, err := loadConfig()
+	require.Nil(t, err)
+
+	require.Equal(t, 2, len(cfg.GitHubWebhookPackages))
+
+	assert.Equal(t, "buildhost", cfg.GitHubWebhookPackages[0])
+
+	assert.Equal(t, "wow-look-at-my/docker-updater", cfg.GitHubWebhookPackages[1])
 
 }

@@ -150,23 +150,38 @@ func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo) 
 // runLoop runs the main update loop until a signal is received. After every
 // cycle it records results into the store so the dashboard reflects the
 // updater's latest knowledge.
-func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store) {
+//
+// trigger lets an external source (the GitHub webhook) request an immediate
+// check between ticks. It may be nil, in which case only the interval drives
+// checks.
+func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store, trigger <-chan struct{}) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
-
-	// Run first check immediately.
-	results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
-	store.Record(results, time.Now())
-	sendWebhookNotifications(cfg, results)
 
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 
+	// runCheck runs one full cycle and records/notifies. Shared by the first
+	// run, the interval tick, and the webhook trigger so all three behave
+	// identically.
+	runCheck := func() {
+		results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
+		store.Record(results, time.Now())
+		sendWebhookNotifications(cfg, results)
+	}
+
+	// Run first check immediately.
+	runCheck()
+
 	for {
 		select {
 		case <-ticker.C:
-			results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
-			store.Record(results, time.Now())
-			sendWebhookNotifications(cfg, results)
+			runCheck()
+		case <-trigger:
+			log.Print("webhook trigger received, running update check now")
+			runCheck()
+			// Realign the interval so the next scheduled check is a full
+			// interval after this one, rather than firing right on its heels.
+			ticker.Reset(cfg.Interval)
 		case sig := <-sigCh:
 			log.Printf("received signal %v, shutting down", sig)
 			return

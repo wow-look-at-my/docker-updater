@@ -16,6 +16,14 @@ type Config struct {
 	DryRun        bool
 	ConfigPath    string
 	DashboardAddr string
+
+	// Inbound GitHub webhook. When GitHubWebhookAddr is set, the updater
+	// listens on it for authenticated GitHub "package" deliveries (a ghcr image
+	// being published/updated) and runs a check immediately instead of waiting
+	// out the rest of the interval. The endpoint is meant to be exposed
+	// publicly, so GitHubWebhookSecret is mandatory whenever it is enabled.
+	GitHubWebhookAddr   string
+	GitHubWebhookSecret string
 }
 
 func loadConfig() (Config, error) {
@@ -63,6 +71,16 @@ func loadConfig() (Config, error) {
 	// the dashboard server.
 	if v, ok := os.LookupEnv("DOCKER_UPDATER_DASHBOARD_ADDR"); ok {
 		c.DashboardAddr = v
+	}
+
+	// Inbound GitHub webhook (opt-in: disabled unless an address is given).
+	// Because this listener is intended to be reachable from the public
+	// internet, refuse to start it without a secret -- an unauthenticated
+	// trigger endpoint would let anyone force update checks.
+	c.GitHubWebhookAddr = os.Getenv("DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR")
+	c.GitHubWebhookSecret = os.Getenv("DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET")
+	if c.GitHubWebhookAddr != "" && c.GitHubWebhookSecret == "" {
+		return c, fmt.Errorf("DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR is set but DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET is empty: refusing to expose an unauthenticated webhook")
 	}
 
 	return c, nil

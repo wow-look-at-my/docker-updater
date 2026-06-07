@@ -168,6 +168,51 @@ func TestHandleAPIContainers(t *testing.T) {
 	assert.Equal(t, "exited", old.State)
 }
 
+func TestHandleAPIContainersRestarts(t *testing.T) {
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{ID: "c-web", Names: []string{"/web"}, Image: "nginx:latest", State: "running", Status: "Up 1 hour", Labels: map[string]string{"docker-updater.enable": "true"}},
+				{ID: "c-cache", Names: []string{"/cache"}, Image: "redis:7", State: "running", Status: "Up 2 hours"},
+				{ID: "c-broken", Names: []string{"/broken"}, Image: "x:1", State: "exited", Status: "Exited (1) 1 minute ago"},
+			}, nil
+		},
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			switch id {
+			case "c-web":
+				return types.ContainerJSON{ContainerJSONBase: &types.ContainerJSONBase{RestartCount: 3}}, nil
+			case "c-cache":
+				return types.ContainerJSON{ContainerJSONBase: &types.ContainerJSONBase{RestartCount: 0}}, nil
+			default:
+				return types.ContainerJSON{}, errors.New("inspect failed")
+			}
+		},
+	}
+
+	s := newDashboardServer(cli, Config{Interval: time.Minute, Label: "docker-updater.enable"}, newStore())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
+	s.handleAPIContainers(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp apiResponse
+	require.Nil(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	byName := map[string]apiContainer{}
+	for _, c := range resp.Containers {
+		byName[c.Name] = c
+	}
+
+	require.NotNil(t, byName["web"].Restarts)
+	assert.Equal(t, 3, *byName["web"].Restarts)
+
+	require.NotNil(t, byName["cache"].Restarts, "zero restarts is reported, not omitted")
+	assert.Equal(t, 0, *byName["cache"].Restarts)
+
+	assert.Nil(t, byName["broken"].Restarts, "an inspect failure leaves restarts unknown")
+}
+
 func TestHandleAPIContainersListError(t *testing.T) {
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {

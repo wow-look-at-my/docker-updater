@@ -270,15 +270,32 @@ func runningRepoDigests(ctx context.Context, cli DockerClient, imageID string) [
 	return img.RepoDigests
 }
 
-// pullImage pulls the latest version of an image and returns its identity
-// (the registry manifest digest, falling back to the content ID).
-func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (string, error) {
+// pullImage pulls the latest version of an image and returns its identity (the
+// registry manifest digest, falling back to the content ID) and whether the
+// pull actually fetched new content.
+//
+// fetched is true only when the local image the reference resolves to changed
+// as a result of the pull: a pull that finds the image already up to date
+// downloads nothing and reports fetched=false. This distinguishes "we ran a
+// pull check" (every cycle) from "we downloaded a newer image" (rare), so
+// callers can record when an image was genuinely pulled rather than merely
+// polled.
+func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (digest string, fetched bool, err error) {
 	// Never issue a pull/manifest request against a bare image ID (e.g.
 	// "sha256:..."): it is not a registry repository and the daemon rejects it
 	// with "pull access denied". Callers resolve a real reference first; this
 	// guard enforces the invariant so a bad reference can never reach the daemon.
 	if !hasRepository(imageName) {
-		return "", fmt.Errorf("cannot pull %q: not a registry repository reference", imageName)
+		return "", false, fmt.Errorf("cannot pull %q: not a registry repository reference", imageName)
+	}
+
+	// Record the content ID the reference resolves to before pulling, so we can
+	// tell afterwards whether the pull fetched new content. A reference not yet
+	// present locally inspects with an error, leaving beforeID empty -- in which
+	// case any successful pull is, by definition, fetching new content.
+	beforeID := ""
+	if before, _, e := cli.ImageInspectWithRaw(ctx, imageName); e == nil {
+		beforeID = before.ID
 	}
 
 	opts := image.PullOptions{}
@@ -288,22 +305,24 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 
 	reader, err := cli.ImagePull(ctx, imageName, opts)
 	if err != nil {
-		return "", fmt.Errorf("pulling image %s: %w", imageName, err)
+		return "", false, fmt.Errorf("pulling image %s: %w", imageName, err)
 	}
 	defer reader.Close()
 
 	// Consume the pull output to completion.
 	if _, err := io.Copy(io.Discard, reader); err != nil {
-		return "", fmt.Errorf("reading pull response for %s: %w", imageName, err)
+		return "", false, fmt.Errorf("reading pull response for %s: %w", imageName, err)
 	}
 
 	// Inspect the pulled image to get its freshly-resolved registry digest.
 	inspect, _, err := cli.ImageInspectWithRaw(ctx, imageName)
 	if err != nil {
-		return "", fmt.Errorf("inspecting pulled image %s: %w", imageName, err)
+		return "", false, fmt.Errorf("inspecting pulled image %s: %w", imageName, err)
 	}
 
-	return imageIdentity(inspect.RepoDigests, inspect.ID, repositoryOf(imageName)), nil
+	digest = imageIdentity(inspect.RepoDigests, inspect.ID, repositoryOf(imageName))
+	fetched = inspect.ID != beforeID
+	return digest, fetched, nil
 }
 
 // recreateContainer stops the old container, creates a new one with the same
@@ -422,7 +441,25 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	return nil
 }
 
-func waitHealthy(ctx context.Context, cli DockerClient, containerID string, timeout time.Duration) error {
+// waitHealthy polls containerID until Docker reports it healthy. The deadline
+// is derived from the container's own HEALTHCHECK config so callers don't
+// need to know or duplicate the timing parameters.
+func waitHealthy(ctx context.Context, cli DockerClient, containerID string) error {
+	initial, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return fmt.Errorf("inspecting container: %w", err)
+	}
+	if initial.State == nil || !initial.State.Running {
+		return fmt.Errorf("container exited")
+	}
+	if initial.State.Health == nil {
+		return fmt.Errorf("no healthcheck defined")
+	}
+	if initial.State.Health.Status == "healthy" {
+		return nil
+	}
+
+	timeout := healthCheckTimeout(initial)
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -444,9 +481,40 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string, time
 			if inspect.State.Health == nil {
 				return fmt.Errorf("no healthcheck defined")
 			}
-			if inspect.State.Health.Status == "healthy" {
+			switch inspect.State.Health.Status {
+			case "healthy":
 				return nil
+			case "unhealthy":
+				return fmt.Errorf("container unhealthy")
 			}
 		}
 	}
+}
+
+// healthCheckTimeout returns the maximum time to wait for a container to become
+// healthy, derived from its HEALTHCHECK config: start-period + retries*interval
+// + one probe timeout as buffer. Falls back to 5 minutes if not configured.
+func healthCheckTimeout(inspect types.ContainerJSON) time.Duration {
+	const fallback = 5 * time.Minute
+	if inspect.Config == nil || inspect.Config.Healthcheck == nil {
+		return fallback
+	}
+	hc := inspect.Config.Healthcheck
+	interval := hc.Interval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	retries := hc.Retries
+	if retries <= 0 {
+		retries = 3
+	}
+	probeTimeout := hc.Timeout
+	if probeTimeout <= 0 {
+		probeTimeout = 30 * time.Second
+	}
+	total := hc.StartPeriod + time.Duration(retries)*interval + probeTimeout
+	if total < 30*time.Second {
+		return 30 * time.Second
+	}
+	return total
 }

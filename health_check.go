@@ -32,8 +32,9 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 		log.Printf("container %s: waiting for exec health check: %s", info.Name, info.HealthCheckCommand)
 		return waitExecHealthy(ctx, cli, containerID, info.HealthCheckCommand, info.HealthCheckTimeout)
 	}
-	timeout := dockerHealthBudget(ctx, cli, containerID)
-	return waitHealthy(ctx, cli, containerID, timeout)
+	// No health-check label: fall back to Docker's HEALTHCHECK status. waitHealthy
+	// derives its own budget from the container's healthcheck config.
+	return waitHealthy(ctx, cli, containerID)
 }
 
 // waitHTTPHealthy polls url every 2s until it returns a 2xx response or timeout.
@@ -122,25 +123,4 @@ func runExecOnce(ctx context.Context, cli DockerClient, containerID, command str
 			}
 		}
 	}
-}
-
-// dockerHealthBudget derives a wait budget from the container's HEALTHCHECK
-// configuration: StartPeriod + Retries×Interval + 10s buffer.
-// Returns 60s when the config is absent or zero.
-func dockerHealthBudget(ctx context.Context, cli DockerClient, containerID string) time.Duration {
-	const fallback = 60 * time.Second
-	inspect, err := cli.ContainerInspect(ctx, containerID)
-	if err != nil || inspect.Config == nil || inspect.Config.Healthcheck == nil {
-		return fallback
-	}
-	hc := inspect.Config.Healthcheck
-	retries := hc.Retries
-	if retries <= 0 {
-		retries = 3
-	}
-	budget := hc.StartPeriod + time.Duration(retries)*hc.Interval
-	if budget <= 0 {
-		return fallback
-	}
-	return budget + 10*time.Second
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -273,85 +272,41 @@ func TestRollingUpdateContainerExecHealthTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "not healthy")
 }
 
-// --- dockerHealthBudget ---
+// --- post-update fallback to Docker HEALTHCHECK status ---
 
-func TestDockerHealthBudget(t *testing.T) {
+// When no health-check label is set, waitPostUpdateHealthy falls back to
+// Docker's HEALTHCHECK status via waitHealthy (which derives its own budget).
+func TestRecreateContainerFallbackDockerHealthy(t *testing.T) {
+	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return baseInspect(), nil
+			}
 			return types.ContainerJSON{
-				Config: &container.Config{
-					Healthcheck: &container.HealthConfig{
-						Interval:    10 * time.Second,
-						Retries:     3,
-						StartPeriod: 30 * time.Second,
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
 					},
 				},
 			}, nil
 		},
-	}
-
-	budget := dockerHealthBudget(context.Background(), cli, "test-container")
-	// 30s + 3×10s + 10s buffer = 70s
-	assert.Equal(t, 70*time.Second, budget)
-}
-
-func TestDockerHealthBudgetDefaultRetries(t *testing.T) {
-	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
-			return types.ContainerJSON{
-				Config: &container.Config{
-					Healthcheck: &container.HealthConfig{
-						Interval:    5 * time.Second,
-						Retries:     0, // 0 → default 3
-						StartPeriod: 15 * time.Second,
-					},
-				},
-			}, nil
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			return container.CreateResponse{ID: "new123456789"}, nil
 		},
 	}
 
-	budget := dockerHealthBudget(context.Background(), cli, "test-container")
-	// 15s + 3×5s + 10s buffer = 40s
-	assert.Equal(t, 40*time.Second, budget)
-}
-
-func TestDockerHealthBudgetFallbackOnInspectError(t *testing.T) {
-	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
-			return types.ContainerJSON{}, errors.New("inspect failed")
-		},
+	info := ContainerInfo{
+		ID:    "old123456789",
+		Name:  "myapp",
+		Image: "myapp:latest",
+		// no HealthCheckURL / HealthCheckCommand -> Docker status fallback
 	}
 
-	budget := dockerHealthBudget(context.Background(), cli, "test-container")
-	assert.Equal(t, 60*time.Second, budget)
-}
-
-func TestDockerHealthBudgetFallbackNoHealthcheck(t *testing.T) {
-	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
-			return types.ContainerJSON{
-				Config: &container.Config{Healthcheck: nil},
-			}, nil
-		},
-	}
-
-	budget := dockerHealthBudget(context.Background(), cli, "test-container")
-	assert.Equal(t, 60*time.Second, budget)
-}
-
-func TestDockerHealthBudgetFallbackZeroValues(t *testing.T) {
-	cli := &mockDocker{
-		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
-			return types.ContainerJSON{
-				Config: &container.Config{
-					Healthcheck: &container.HealthConfig{},
-				},
-			}, nil
-		},
-	}
-
-	budget := dockerHealthBudget(context.Background(), cli, "test-container")
-	assert.Equal(t, 60*time.Second, budget)
+	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
+	require.Nil(t, err)
 }
 
 // --- listMonitoredContainers: health-check label parsing ---

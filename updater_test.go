@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -75,6 +76,39 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
 	assert.Nil(t, results[0].Error)
+	assert.False(t, results[0].Pulled, "an up-to-date check pulls nothing and must not reset the last-pulled time")
+}
+
+func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
+	// When the pull fetches genuinely new content -- the tag resolves to a
+	// different local image after pulling -- result.Pulled must be true. Dry-run
+	// keeps the test on the pull/fetch path without the recreate handoff.
+	var inspects int
+	cli := &mockDocker{
+		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			inspects++
+			if inspects == 1 { // before the pull: the old local image
+				return types.ImageInspect{ID: "sha256:olddigest"}, nil, nil
+			}
+			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil // after the pull
+		},
+	}
+
+	info := ContainerInfo{
+		Name:        "web",
+		Image:       "nginx:latest",
+		ImageDigest: "sha256:olddigest",
+		Mode:        UpdateModeImage,
+	}
+	cfg := Config{Label: "docker-updater.enable", DryRun: true}
+	result := checkAndUpdateImage(context.Background(), cli, info, cfg, UpdateResult{Container: info, DryRun: true}, newAuthResolver(nil))
+
+	assert.True(t, result.Pulled, "fetching new content must mark the image as pulled")
+	assert.True(t, result.Updated, "an update is available")
+	assert.Equal(t, "sha256:newdigest", result.NewRef)
 }
 
 func TestRunUpdateCheckImageDryRun(t *testing.T) {
@@ -446,13 +480,66 @@ func TestRunLoop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore())
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), nil)
 		close(done)
 	}()
 
 	time.Sleep(150 * time.Millisecond)
 	sigCh <- syscall.SIGTERM
 
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runLoop did not exit after signal")
+	}
+}
+
+// waitFor polls cond until it is true or the deadline elapses.
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
+// TestRunLoopWebhookTrigger proves a webhook trigger runs a check immediately,
+// without waiting for the (here, deliberately huge) interval to elapse.
+func TestRunLoopWebhookTrigger(t *testing.T) {
+	var checks atomic.Int64
+	cli := &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			checks.Add(1)
+			return nil, nil // no monitored containers; a check still ran
+		},
+	}
+
+	cfg := Config{
+		Label:    "docker-updater.enable",
+		Interval: time.Hour, // long enough that the ticker never fires in this test
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	trigger := make(chan struct{}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), trigger)
+		close(done)
+	}()
+
+	// The initial check runs once on startup.
+	waitFor(t, func() bool { return checks.Load() >= 1 }, "initial check did not run")
+
+	// Firing the trigger must run a second check despite the hour-long interval.
+	trigger <- struct{}{}
+	waitFor(t, func() bool { return checks.Load() >= 2 }, "webhook trigger did not run a check")
+
+	sigCh <- syscall.SIGTERM
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

@@ -93,8 +93,11 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg-row); }
 
 .cname { font-weight: 600; }
-.cimage { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
-.cref { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+/* Image and short image-ID share one line, separated by a middot. The line runs
+   as long as it needs and overflows the narrow Container column, sliding under
+   the top-aligned cells to its right rather than wrapping into a tall stack. */
+.cmeta { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; white-space: nowrap; }
+.cref { font-size: 11px; }
 
 .badge {
   display: inline-block;
@@ -122,6 +125,7 @@ tbody tr:hover { background: var(--bg-row); }
 .up-available { color: var(--amber); font-weight: 600; }
 .up-error { color: var(--red); }
 .up-na { color: var(--text-dim); }
+.restarts-warn { color: var(--amber); font-weight: 600; }
 
 .detail { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 320px; word-break: break-word; }
 

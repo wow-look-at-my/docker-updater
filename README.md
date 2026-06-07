@@ -7,6 +7,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
+- **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
 - **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, restart count, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
@@ -168,15 +169,45 @@ labels:
   # Git mode only:
   docker-updater.git-repo: "https://github.com/user/repo"
   docker-updater.git-ref: "refs/heads/main"
+  # Post-update health check (HTTP or exec; falls back to Docker HEALTHCHECK):
+  docker-updater.health-check.url: ":8080/health"
+  docker-updater.health-check.command: "curl -sf http://localhost:8080/health"
+  docker-updater.health-check.timeout: "60s"
+  # Pre-update readiness check:
+  docker-updater.pre-check.url: ":8080/ready-to-update"
+  docker-updater.pre-check.command: "/check-ready.sh"
+  docker-updater.pre-check.timeout: "30s"
+  # Zero-downtime rolling update:
+  docker-updater.rolling: "true"
 ```
 
-### Healthcheck Requirement
+### Post-Update Health Checks
 
-All containers monitored by docker-updater **must** define a `HEALTHCHECK` in their Dockerfile. After starting the replacement container, docker-updater waits for Docker to report it `healthy`. If the container becomes `unhealthy`, the update is rolled back immediately.
+After starting the replacement container, docker-updater verifies it is healthy before completing the update. There are three ways to configure this:
 
-The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`), so slow-starting containers only need the right `HEALTHCHECK` parameters — no extra labels needed.
+1. **HTTP health check** (`docker-updater.health-check.url`): docker-updater polls the URL via HTTP GET from its own process -- no `curl` or other binary inside the container is required. This is the fix for images that ship without a shell or HTTP client (e.g. when `ollama` dropped `curl`, its in-container `HEALTHCHECK` could no longer run).
+2. **Exec health check** (`docker-updater.health-check.command`): docker-updater runs a command inside the container via `docker exec` (requires a shell). Exit code 0 means healthy.
+3. **Docker HEALTHCHECK fallback**: if neither label is set, docker-updater waits for Docker's built-in `HEALTHCHECK` to report `healthy`. In this mode the image **must** define a `HEALTHCHECK`, and an `unhealthy` result rolls the update back immediately. The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`, with a 30s floor and a 5-minute fallback when no config is present), so slow-starting containers only need the right `HEALTHCHECK` parameters.
 
-If the container fails to become healthy, docker-updater stops it and reports the failure via webhook notifications.
+For the HTTP and exec checks, docker-updater polls every 2 seconds until the check passes or `docker-updater.health-check.timeout` (default 60s) elapses. If the health check fails, docker-updater stops the new container and reports the failure via webhook notifications. This applies to both standard recreate and rolling update modes.
+
+```yaml
+labels:
+  docker-updater.enable: "true"
+  # HTTP check from docker-updater's own process (no curl needed in the image):
+  docker-updater.health-check.url: ":8080/health"
+  docker-updater.health-check.timeout: "60s"  # optional, default 60s
+```
+
+```yaml
+labels:
+  docker-updater.enable: "true"
+  # Exec check inside the container:
+  docker-updater.health-check.command: "curl -sf http://localhost:8080/health"
+  docker-updater.health-check.timeout: "60s"  # optional, default 60s
+```
+
+URLs starting with `:` (port prefix) are resolved using the container's bridge IP, the same way pre-check URLs are (see [Pre-Update Checks](#pre-update-checks)). If both `health-check.url` and `health-check.command` are set, the HTTP check takes precedence.
 
 ### Image Mode (default)
 
@@ -236,14 +267,14 @@ labels:
 
 The rolling update flow:
 1. New container is created with a temporary name, same networks and aliases
-2. docker-updater waits for Docker's HEALTHCHECK to report healthy
+2. docker-updater waits for the health check to pass (HTTP, exec, or Docker HEALTHCHECK)
 3. Old container receives SIGTERM and drains existing connections
 4. Old container is removed, new container is renamed to the original name
 
 Requirements:
-- The container must have a `HEALTHCHECK` in its Dockerfile
 - A reverse proxy must route traffic via Docker DNS (network alias), not published ports
 - The container must not publish host ports (the proxy owns port bindings)
+- If using the Docker HEALTHCHECK fallback, the image must define a `HEALTHCHECK`
 
 Pre-checks are skipped for rolling updates -- the old container drains naturally via graceful shutdown.
 
@@ -269,12 +300,10 @@ services:
 
   my-app:
     image: myapp:latest
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     labels:
       docker-updater.enable: "true"
+      # HTTP health check from docker-updater's process -- no curl needed in the image:
+      docker-updater.health-check.url: ":8080/health"
+      docker-updater.health-check.timeout: "60s"
       docker-updater.pre-check.url: ":8080/ready-to-update"
 ```

@@ -13,8 +13,8 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseHealth(t *testing.T) {

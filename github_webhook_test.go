@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // sign produces a GitHub-style "sha256=<hex>" HMAC-SHA256 signature.

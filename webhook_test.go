@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildGenericPayload(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "web", Image: "nginx:latest"},
-			Updated:	true,
-			OldRef:		"sha256:olddigestvalue1234567890",
-			NewRef:		"sha256:newdigestvalue1234567890",
-			CheckedAt:	time.Now(),
+			Container: ContainerInfo{Name: "web", Image: "nginx:latest"},
+			Updated:   true,
+			OldRef:    "sha256:olddigestvalue1234567890",
+			NewRef:    "sha256:newdigestvalue1234567890",
+			CheckedAt: time.Now(),
 		},
 	}
 
@@ -43,9 +43,9 @@ func TestBuildGenericPayload(t *testing.T) {
 func TestBuildGenericPayloadWithError(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "db", Image: "postgres:16"},
-			Error:		errors.New("pull failed"),
-			CheckedAt:	time.Now(),
+			Container: ContainerInfo{Name: "db", Image: "postgres:16"},
+			Error:     errors.New("pull failed"),
+			CheckedAt: time.Now(),
 		},
 	}
 
@@ -62,10 +62,10 @@ func TestBuildGenericPayloadWithError(t *testing.T) {
 func TestBuildDiscordPayload(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "app", Image: "myapp:latest"},
-			Updated:	true,
-			OldRef:		"sha256:old1234567890123",
-			NewRef:		"sha256:new1234567890123",
+			Container: ContainerInfo{Name: "app", Image: "myapp:latest"},
+			Updated:   true,
+			OldRef:    "sha256:old1234567890123",
+			NewRef:    "sha256:new1234567890123",
 		},
 	}
 
@@ -89,10 +89,10 @@ func TestBuildDiscordPayload(t *testing.T) {
 func TestBuildSlackPayload(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "worker", Image: "worker:v2"},
-			Updated:	true,
-			OldRef:		"sha256:old1234567890123",
-			NewRef:		"sha256:new1234567890123",
+			Container: ContainerInfo{Name: "worker", Image: "worker:v2"},
+			Updated:   true,
+			OldRef:    "sha256:old1234567890123",
+			NewRef:    "sha256:new1234567890123",
 		},
 	}
 
@@ -116,8 +116,8 @@ func TestBuildSlackPayload(t *testing.T) {
 func TestBuildDiscordPayloadWithError(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "broken", Image: "broken:latest"},
-			Error:		errors.New("connection refused"),
+			Container: ContainerInfo{Name: "broken", Image: "broken:latest"},
+			Error:     errors.New("connection refused"),
 		},
 	}
 
@@ -140,11 +140,11 @@ func TestBuildDiscordPayloadWithError(t *testing.T) {
 func TestBuildSlackPayloadDryRun(t *testing.T) {
 	results := []UpdateResult{
 		{
-			Container:	ContainerInfo{Name: "test", Image: "test:latest"},
-			Updated:	true,
-			OldRef:		"sha256:old1234567890123",
-			NewRef:		"sha256:new1234567890123",
-			DryRun:		true,
+			Container: ContainerInfo{Name: "test", Image: "test:latest"},
+			Updated:   true,
+			OldRef:    "sha256:old1234567890123",
+			NewRef:    "sha256:new1234567890123",
+			DryRun:    true,
 		},
 	}
 

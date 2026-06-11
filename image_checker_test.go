@@ -9,8 +9,8 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/image"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCheckImageUpdateNoChange(t *testing.T) {

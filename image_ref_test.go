@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wow-look-at-my/testify/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 // digestOf builds a valid "sha256:<64-hex>" string from a single hex char.

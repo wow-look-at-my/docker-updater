@@ -1,11 +1,11 @@
 package main
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
 	"time"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
 )
 
 func TestLoadConfigDefaults(t *testing.T) {

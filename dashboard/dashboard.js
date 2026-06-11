@@ -89,25 +89,40 @@ function autoUpdateCell(c) {
   return el("td", null, el("span", { class: cls }, "Auto · " + (c.mode || "image")));
 }
 
+// heldBackReason explains why a detected update has not been applied. The three
+// cases mirror the backend's mutually-exclusive branches (see state.go Record):
+// an error while applying, a pre-check that skipped it, or dry-run mode — which
+// is the only remaining way an update can be available without error or skip.
+function heldBackReason(c) {
+  if (c.error) return "error: " + c.error;
+  if (c.skipped) return "skipped: " + (c.skip_reason || "pre-check");
+  return "dry-run — not applied";
+}
+
 function upstreamCell(c) {
   const td = el("td", null);
   if (!c.auto_update) {
     td.appendChild(el("span", { class: "up-na" }, "—"));
     return td;
   }
-  if (c.error) {
-    td.appendChild(el("span", { class: "up-error" }, "error"));
-    td.appendChild(el("div", { class: "detail" }, c.error));
-    return td;
-  }
+  // An available update means one was detected but held back. Always surface it
+  // as such — even when it also errored — so the row matches the "updates
+  // pending" count instead of hiding behind a bare "error".
   if (c.update_available) {
     td.appendChild(el("span", { class: "up-available" }, "update available"));
     let detail = "";
     if (c.current_ref || c.available_ref) {
       detail = (c.current_ref || "?") + " → " + (c.available_ref || "?");
     }
-    if (c.skipped) detail = (detail ? detail + " · " : "") + "skipped: " + (c.skip_reason || "pre-check");
-    if (detail) td.appendChild(el("div", { class: "detail" }, detail));
+    const reason = heldBackReason(c);
+    detail = detail ? detail + " · " + reason : reason;
+    td.appendChild(el("div", { class: "detail" }, detail));
+    return td;
+  }
+  // Errored with no newer ref detected: a plain failure, not a pending update.
+  if (c.error) {
+    td.appendChild(el("span", { class: "up-error" }, "error"));
+    td.appendChild(el("div", { class: "detail" }, c.error));
     return td;
   }
   // Up to date.
@@ -115,6 +130,12 @@ function upstreamCell(c) {
   const updated = fmtRelative(c.last_updated);
   if (updated) td.appendChild(el("div", { class: "detail" }, "updated " + updated));
   return td;
+}
+
+// pending reports whether a container has an update detected but not yet applied
+// — the exact condition counted by the "updates pending" card.
+function pending(c) {
+  return Boolean(c.auto_update && c.update_available);
 }
 
 function row(c) {
@@ -131,7 +152,7 @@ function row(c) {
   const lastChecked = c.auto_update ? (fmtRelative(c.last_checked) || "—") : "—";
   const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 
-  return el("tr", null,
+  return el("tr", { class: pending(c) ? "row-pending" : null },
     nameCell,
     autoUpdateCell(c),
     stateCell(c),
@@ -152,7 +173,7 @@ function render(data) {
   const containers = data.containers || [];
 
   const auto = containers.filter((c) => c.auto_update).length;
-  const updates = containers.filter((c) => c.auto_update && c.update_available).length;
+  const updates = containers.filter(pending).length;
   const errors = containers.filter((c) => c.auto_update && c.error).length;
 
   setText("stat-total", containers.length);
@@ -160,6 +181,10 @@ function render(data) {
   setText("stat-manual", containers.length - auto);
   setText("stat-updates", updates);
   setText("stat-errors", errors);
+
+  // The card jumps to the held-back rows; only make it actionable when there are any.
+  const updatesCard = document.getElementById("card-updates");
+  if (updatesCard) updatesCard.classList.toggle("clickable", updates > 0);
 
   document.getElementById("dry-run-badge").classList.toggle("hidden", !data.dry_run);
   setText("cfg-interval", data.interval || "—");
@@ -202,6 +227,23 @@ async function refresh() {
     banner.classList.remove("hidden");
   }
 }
+
+// jumpToPending scrolls to the first container with a held-back update, flashing
+// it so "N updates pending" always points at concrete rows. Stopped containers
+// live in a collapsed section, so reveal it first when the target is inside.
+function jumpToPending() {
+  const first = document.querySelector(".row-pending");
+  if (!first) return;
+  const exitedSection = document.getElementById("exited-section");
+  if (exitedSection && exitedSection.contains(first)) exitedSection.open = true;
+  first.scrollIntoView({ behavior: "smooth", block: "center" });
+  first.classList.remove("row-flash");
+  void first.offsetWidth; // reflow so the animation restarts on repeat clicks
+  first.classList.add("row-flash");
+}
+
+const updatesCard = document.getElementById("card-updates");
+if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
 
 refresh();
 setInterval(refresh, REFRESH_SECONDS * 1000);

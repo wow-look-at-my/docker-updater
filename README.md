@@ -85,6 +85,27 @@ port (`-p 8080:8080`). Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different addres
 Note that "last pulled" and "last checked" only apply to monitored containers;
 the tool never polls the registry for containers it isn't watching.
 
+### Developing the dashboard
+
+The dashboard's client logic lives in [`dashboard/dashboard.ts`](dashboard/dashboard.ts)
+(TypeScript). It is typed against the `/api/containers` JSON contract, so a
+renamed or wrong-typed field is a compile error rather than a runtime
+`undefined`. The browser loads the compiled `dashboard/dashboard.js`, which is
+checked in and embedded into the Go binary via `go:embed` -- so a plain
+`go build` needs no Node toolchain.
+
+After editing `dashboard.ts`, recompile and commit the generated `dashboard.js`:
+
+```bash
+cd dashboard
+npm ci          # first time only
+npm run build   # compiles dashboard.ts -> dashboard.js
+```
+
+Run `npm run typecheck` to type-check without emitting. CI type-checks the source
+and fails if the committed `dashboard.js` is out of date with `dashboard.ts`, so
+do not hand-edit the generated file.
+
 ## GitHub Webhook Trigger
 
 Normally docker-updater polls the registry every `DOCKER_UPDATER_INTERVAL`. With

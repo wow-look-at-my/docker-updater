@@ -12,8 +12,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -115,11 +115,11 @@ func TestRecreateContainerExecHealthSuccess(t *testing.T) {
 	}
 
 	info := ContainerInfo{
-		ID:                   "old123456789",
-		Name:                 "myapp",
-		Image:                "myapp:latest",
-		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
-		HealthCheckTimeout:   10 * time.Second,
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		HealthCheckCommand: "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout: 10 * time.Second,
 	}
 
 	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
@@ -145,11 +145,11 @@ func TestRecreateContainerExecHealthTimeout(t *testing.T) {
 	}
 
 	info := ContainerInfo{
-		ID:                   "old123456789",
-		Name:                 "myapp",
-		Image:                "myapp:latest",
-		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
-		HealthCheckTimeout:   50 * time.Millisecond,
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		HealthCheckCommand: "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout: 50 * time.Millisecond,
 	}
 
 	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
@@ -233,12 +233,12 @@ func TestRollingUpdateContainerExecHealthSuccess(t *testing.T) {
 	}
 
 	info := ContainerInfo{
-		ID:                   "old123456789",
-		Name:                 "myapp",
-		Image:                "myapp:latest",
-		Rolling:              true,
-		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
-		HealthCheckTimeout:   10 * time.Second,
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		Rolling:            true,
+		HealthCheckCommand: "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout: 10 * time.Second,
 	}
 
 	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
@@ -259,12 +259,12 @@ func TestRollingUpdateContainerExecHealthTimeout(t *testing.T) {
 	}
 
 	info := ContainerInfo{
-		ID:                   "old123456789",
-		Name:                 "myapp",
-		Image:                "myapp:latest",
-		Rolling:              true,
-		HealthCheckCommand:   "curl -sf http://localhost:8080/health",
-		HealthCheckTimeout:   50 * time.Millisecond,
+		ID:                 "old123456789",
+		Name:               "myapp",
+		Image:              "myapp:latest",
+		Rolling:            true,
+		HealthCheckCommand: "curl -sf http://localhost:8080/health",
+		HealthCheckTimeout: 50 * time.Millisecond,
 	}
 
 	err := rollingUpdateContainer(context.Background(), cli, info, "myapp:latest")
@@ -330,9 +330,9 @@ func TestListMonitoredContainersHealthCheck(t *testing.T) {
 					Names: []string{"/exec-app"},
 					Image: "otherapp:latest",
 					Labels: map[string]string{
-						"docker-updater.enable":                "true",
-						"docker-updater.health-check.command":  "/check.sh",
-						"docker-updater.health-check.timeout":  "45s",
+						"docker-updater.enable":               "true",
+						"docker-updater.health-check.command": "/check.sh",
+						"docker-updater.health-check.timeout": "45s",
 					},
 				},
 				{

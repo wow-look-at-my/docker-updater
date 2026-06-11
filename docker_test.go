@@ -17,25 +17,25 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/wow-look-at-my/testify/assert"
-	"github.com/wow-look-at-my/testify/require"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockDocker implements DockerClient for testing.
 type mockDocker struct {
-	infoFn               func(ctx context.Context) (system.Info, error)
-	containerListFn      func(ctx context.Context, options container.ListOptions) ([]types.Container, error)
-	containerInspectFn   func(ctx context.Context, id string) (types.ContainerJSON, error)
-	containerStopFn      func(ctx context.Context, id string, options container.StopOptions) error
-	containerRemoveFn    func(ctx context.Context, id string, options container.RemoveOptions) error
-	containerCreateFn    func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
-	containerStartFn     func(ctx context.Context, id string, options container.StartOptions) error
+	infoFn                 func(ctx context.Context) (system.Info, error)
+	containerListFn        func(ctx context.Context, options container.ListOptions) ([]types.Container, error)
+	containerInspectFn     func(ctx context.Context, id string) (types.ContainerJSON, error)
+	containerStopFn        func(ctx context.Context, id string, options container.StopOptions) error
+	containerRemoveFn      func(ctx context.Context, id string, options container.RemoveOptions) error
+	containerCreateFn      func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
+	containerStartFn       func(ctx context.Context, id string, options container.StartOptions) error
 	containerRenameFn      func(ctx context.Context, containerID string, newName string) error
 	containerExecCreateFn  func(ctx context.Context, containerID string, options container.ExecOptions) (types.IDResponse, error)
 	containerExecStartFn   func(ctx context.Context, execID string, config container.ExecStartOptions) error
 	containerExecInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
-	imagePullFn          func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
-	imageInspectFn       func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
+	imagePullFn            func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
+	imageInspectFn         func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
 }
 
 func (m *mockDocker) Info(ctx context.Context) (system.Info, error) {
@@ -722,4 +722,3 @@ func TestRollingUpdateContainer(t *testing.T) {
 	assert.Equal(t, "new123456789", renamedID)
 	assert.Equal(t, "myapp", renamedTo)
 }
-

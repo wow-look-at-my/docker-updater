@@ -54,7 +54,25 @@ doesn't -- so you can see your fleet at a glance:
 - **State & uptime**: running/stopped, healthcheck status, and how long it has been up
 - **Restarts**: Docker's restart count -- how many times the daemon's restart policy has restarted the container since it was last (re)created. Because docker-updater creates a fresh container on every pull, this reads as "restarts since the last pull" for monitored containers, and a non-zero value flags a crash-looping container
 - **Last checked / last pulled**: *last checked* is when docker-updater last polled the registry; *last pulled* is when it last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance "last pulled", so the column reflects genuine image changes rather than resetting every cycle
-- **Upstream**: whether a newer image digest (or git commit) is available, or the last error
+- **Upstream**: whether a newer image digest (or git commit) is available -- and, when it is, why it has not been applied yet -- or the last error
+
+### Summary counters
+
+The cards across the top total your containers, auto-updated, manual, and errors,
+plus **updates pending**. That last one is the one people ask about, so to be
+explicit:
+
+- An update only counts as *pending* when it was **detected but deliberately not
+  applied**: dry-run mode is on, a [pre-check](#pre-update-checks) held it back,
+  or applying it errored. Containers that auto-update cleanly never appear here --
+  the newer image is pulled and the container recreated within the *same* check
+  cycle, so there is nothing left "available". A non-zero count therefore means
+  those updates are waiting on one of those three gates, **not** that the updater
+  is sitting idle on work it could do.
+- The affected rows are tinted and tagged `update available` with the reason
+  (`dry-run`, `skipped: <reason>`, or `error: <message>`) in the Upstream column.
+  Click the **updates pending** card to jump straight to them; if one is a stopped
+  container, the collapsed "exited" section is expanded automatically.
 
 The page auto-refreshes every few seconds. The same data is available as JSON at
 `/api/containers`, and `/healthz` returns `200 ok` for external liveness probes.
@@ -66,6 +84,27 @@ port (`-p 8080:8080`). Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different addres
 
 Note that "last pulled" and "last checked" only apply to monitored containers;
 the tool never polls the registry for containers it isn't watching.
+
+### Developing the dashboard
+
+The dashboard's client logic lives in [`dashboard/dashboard.ts`](dashboard/dashboard.ts)
+(TypeScript). It is typed against the `/api/containers` JSON contract, so a
+renamed or wrong-typed field is a compile error rather than a runtime
+`undefined`. The browser loads the compiled `dashboard/dashboard.js`, which is
+checked in and embedded into the Go binary via `go:embed` -- so a plain
+`go build` needs no Node toolchain.
+
+After editing `dashboard.ts`, recompile and commit the generated `dashboard.js`:
+
+```bash
+cd dashboard
+npm ci          # first time only
+npm run build   # compiles dashboard.ts -> dashboard.js
+```
+
+Run `npm run typecheck` to type-check without emitting. CI type-checks the source
+and fails if the committed `dashboard.js` is out of date with `dashboard.ts`, so
+do not hand-edit the generated file.
 
 ## GitHub Webhook Trigger
 

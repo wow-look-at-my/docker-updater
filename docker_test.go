@@ -36,6 +36,7 @@ type mockDocker struct {
 	containerExecInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
 	imagePullFn            func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 	imageInspectFn         func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
+	imageTagFn             func(ctx context.Context, source, target string) error
 }
 
 func (m *mockDocker) Info(ctx context.Context) (system.Info, error) {
@@ -127,6 +128,13 @@ func (m *mockDocker) ImageInspectWithRaw(ctx context.Context, imageID string) (t
 		return m.imageInspectFn(ctx, imageID)
 	}
 	return types.ImageInspect{ID: "sha256:testdigest"}, nil, nil
+}
+
+func (m *mockDocker) ImageTag(ctx context.Context, source, target string) error {
+	if m.imageTagFn != nil {
+		return m.imageTagFn(ctx, source, target)
+	}
+	return nil
 }
 
 func (m *mockDocker) Close() error { return nil }

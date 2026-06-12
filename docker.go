@@ -35,6 +35,7 @@ type DockerClient interface {
 	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
 	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 	ImageInspectWithRaw(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
+	ImageTag(ctx context.Context, source, target string) error
 	Close() error
 }
 
@@ -326,12 +327,24 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 }
 
 // recreateContainer stops the old container, creates a new one with the same
-// config but an updated image, and starts it.
+// config but an updated image, and starts it. Once the old container has been
+// removed, every failure (create, start, or the post-update health gate) rolls
+// back to the previous image under the same name -- a failed update must never
+// leave the service down.
 func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, newImage string) error {
 	// Inspect the existing container to capture its full config.
 	inspect, err := cli.ContainerInspect(ctx, info.ID)
 	if err != nil {
 		return fmt.Errorf("inspecting container %s: %w", info.Name, err)
+	}
+
+	// Pin the running image by content ID before tearing anything down: after
+	// the pull, the original tag reference resolves to the new image, so the
+	// tag alone cannot bring the old version back.
+	oldImageID := inspect.Image
+	oldImageRef := ""
+	if inspect.Config != nil {
+		oldImageRef = inspect.Config.Image
 	}
 
 	// Stop and remove the old container.
@@ -360,21 +373,64 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		}
 	}
 
+	// The old container no longer exists past this point, so merely failing
+	// the update would leave the service down. rollback removes the failed
+	// replacement (if any), brings the previous image back up under the
+	// original name, and folds the outcome into the returned error. It runs on
+	// a cancel-proof context so a shutdown mid-update cannot strand the
+	// service offline.
+	rollback := func(failedID string, cause error) error {
+		rctx := context.WithoutCancel(ctx)
+		if oldImageID == "" {
+			return fmt.Errorf("%w; ROLLBACK FAILED, %s is down: previous image unknown", cause, info.Name)
+		}
+		if failedID != "" {
+			// Best-effort stop; the failed container may already have exited.
+			cli.ContainerStop(rctx, failedID, container.StopOptions{})
+			if err := cli.ContainerRemove(rctx, failedID, container.RemoveOptions{}); err != nil {
+				return fmt.Errorf("%w; ROLLBACK FAILED, %s is down: removing failed container: %v", cause, info.Name, err)
+			}
+		}
+
+		// Restore by re-tagging the previous image to the original reference
+		// rather than creating from the bare image ID: a container whose
+		// Config.Image is a bare ID resolves to a digest-pinned reference on
+		// the next cycle and would never see updates again.
+		restoreRef := oldImageID
+		if hasRepository(oldImageRef) {
+			if err := cli.ImageTag(rctx, oldImageID, oldImageRef); err != nil {
+				log.Printf("container %s: re-tagging %s as %s failed, restoring by image ID: %v", info.Name, shortID(oldImageID), oldImageRef, err)
+			} else {
+				restoreRef = oldImageRef
+			}
+		}
+		config.Image = restoreRef
+
+		restored, err := cli.ContainerCreate(rctx, config, hostConfig, networkingConfig, nil, info.Name)
+		if err != nil {
+			return fmt.Errorf("%w; ROLLBACK FAILED, %s is down: recreating previous container: %v", cause, info.Name, err)
+		}
+		if err := cli.ContainerStart(rctx, restored.ID, container.StartOptions{}); err != nil {
+			return fmt.Errorf("%w; ROLLBACK FAILED, %s is down: starting previous container: %v", cause, info.Name, err)
+		}
+		log.Printf("container %s: rolled back to previous image %s (%s)", info.Name, shortID(oldImageID), shortID(restored.ID))
+		return fmt.Errorf("%w; rolled back to previous image %s", cause, shortID(oldImageID))
+	}
+
 	// Create and start the new container.
 	log.Printf("creating new container %s with image %s", info.Name, newImage)
 	created, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, info.Name)
 	if err != nil {
-		return fmt.Errorf("creating container %s: %w", info.Name, err)
+		return rollback("", fmt.Errorf("creating container %s: %w", info.Name, err))
 	}
 
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("starting container %s: %w", info.Name, err)
+		return rollback(created.ID, fmt.Errorf("starting container %s: %w", info.Name, err))
 	}
 
 	if err := waitPostUpdateHealthy(ctx, cli, created.ID, info); err != nil {
-		log.Printf("container %s: post-update health check failed, stopping (%s): %v", info.Name, shortID(created.ID), err)
-		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
-		return fmt.Errorf("container %s not healthy after update: %w", info.Name, err)
+		log.Printf("container %s: post-update health check failed (%s), rolling back: %v", info.Name, shortID(created.ID), err)
+		return rollback(created.ID, fmt.Errorf("container %s not healthy after update: %w", info.Name, err))
 	}
 
 	log.Printf("container %s updated and healthy (%s)", info.Name, shortID(created.ID))
@@ -441,9 +497,18 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	return nil
 }
 
+// noHealthcheckGracePeriod is how long a container with no HEALTHCHECK (and no
+// health-check labels) is observed after an update before being declared
+// healthy. Long enough to catch crash-on-boot regressions, short enough not to
+// stall the update cycle. Var so tests can shorten it.
+var noHealthcheckGracePeriod = 15 * time.Second
+
 // waitHealthy polls containerID until Docker reports it healthy. The deadline
 // is derived from the container's own HEALTHCHECK config so callers don't
-// need to know or duplicate the timing parameters.
+// need to know or duplicate the timing parameters. A container with no
+// HEALTHCHECK at all is instead gated on staying up for
+// noHealthcheckGracePeriod: failing such updates outright would make
+// healthcheck-less containers permanently un-updatable.
 func waitHealthy(ctx context.Context, cli DockerClient, containerID string) error {
 	initial, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -453,7 +518,7 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 		return fmt.Errorf("container exited")
 	}
 	if initial.State.Health == nil {
-		return fmt.Errorf("no healthcheck defined")
+		return waitStaysRunning(ctx, cli, containerID)
 	}
 	if initial.State.Health.Status == "healthy" {
 		return nil
@@ -461,7 +526,7 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 
 	timeout := healthCheckTimeout(initial)
 	deadline := time.After(timeout)
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(healthCheckPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -479,13 +544,45 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 				return fmt.Errorf("container exited")
 			}
 			if inspect.State.Health == nil {
-				return fmt.Errorf("no healthcheck defined")
+				continue
 			}
 			switch inspect.State.Health.Status {
 			case "healthy":
 				return nil
 			case "unhealthy":
 				return fmt.Errorf("container unhealthy")
+			}
+		}
+	}
+}
+
+// waitStaysRunning is the health gate for containers with no healthcheck of
+// any kind: the container passes if it is still running, with no restarts, at
+// the end of the grace period. A nonzero restart count means the process
+// crashed and a restart policy revived it -- "running right now" would be a
+// false positive.
+func waitStaysRunning(ctx context.Context, cli DockerClient, containerID string) error {
+	log.Printf("container %s: no healthcheck defined; verifying it stays running for %s", shortID(containerID), noHealthcheckGracePeriod)
+	deadline := time.After(noHealthcheckGracePeriod)
+	ticker := time.NewTicker(healthCheckPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			inspect, err := cli.ContainerInspect(ctx, containerID)
+			if err != nil {
+				return fmt.Errorf("inspecting container: %w", err)
+			}
+			if inspect.State == nil || !inspect.State.Running {
+				return fmt.Errorf("container exited within %s of starting", noHealthcheckGracePeriod)
+			}
+			if inspect.RestartCount > 0 {
+				return fmt.Errorf("container restarted within %s of starting", noHealthcheckGracePeriod)
 			}
 		}
 	}

@@ -17,10 +17,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Speed up health-check polling so the suite finishes well within the
-	// global 30s test timeout. Production code still uses the 2s defaults.
+	// Speed up health-check polling and the no-healthcheck grace period so the
+	// suite finishes well within the global 30s test timeout. Production code
+	// still uses the real defaults.
 	healthCheckPollInterval = 10 * time.Millisecond
 	execPollInterval = 10 * time.Millisecond
+	noHealthcheckGracePeriod = 50 * time.Millisecond
 	os.Exit(m.Run())
 }
 

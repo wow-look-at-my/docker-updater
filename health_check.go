@@ -22,7 +22,8 @@ var execPollInterval = 100 * time.Millisecond
 // If info.HealthCheckURL is set, it polls via HTTP GET.
 // If info.HealthCheckCommand is set, it polls via exec inside the container.
 // Otherwise it falls back to Docker's HEALTHCHECK status with a budget derived
-// from the container's healthcheck configuration.
+// from the container's healthcheck configuration; a container with no
+// HEALTHCHECK at all just has to stay running through a short grace period.
 func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID string, info ContainerInfo) error {
 	if info.HealthCheckURL != "" {
 		log.Printf("container %s: waiting for HTTP health check at %s", info.Name, info.HealthCheckURL)

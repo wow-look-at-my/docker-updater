@@ -8,6 +8,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
+- **Automatic rollback**: if the replacement container fails its post-update health check, the previous image is restored under the same name -- a failed update never leaves the service down
 - **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, restart count, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
@@ -226,9 +227,17 @@ After starting the replacement container, docker-updater verifies it is healthy 
 
 1. **HTTP health check** (`docker-updater.health-check.url`): docker-updater polls the URL via HTTP GET from its own process -- no `curl` or other binary inside the container is required. This is the fix for images that ship without a shell or HTTP client (e.g. when `ollama` dropped `curl`, its in-container `HEALTHCHECK` could no longer run).
 2. **Exec health check** (`docker-updater.health-check.command`): docker-updater runs a command inside the container via `docker exec` (requires a shell). Exit code 0 means healthy.
-3. **Docker HEALTHCHECK fallback**: if neither label is set, docker-updater waits for Docker's built-in `HEALTHCHECK` to report `healthy`. In this mode the image **must** define a `HEALTHCHECK`, and an `unhealthy` result rolls the update back immediately. The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`, with a 30s floor and a 5-minute fallback when no config is present), so slow-starting containers only need the right `HEALTHCHECK` parameters.
+3. **Docker HEALTHCHECK fallback**: if neither label is set, docker-updater waits for Docker's built-in `HEALTHCHECK` to report `healthy`. The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`, with a 30s floor and a 5-minute fallback when no config is present), so slow-starting containers only need the right `HEALTHCHECK` parameters.
+4. **No healthcheck at all**: if the image defines no `HEALTHCHECK` either, the new container only has to stay running (with no restarts) through a 15-second grace period. This is a weaker gate -- prefer one of the three above -- but it keeps healthcheck-less containers updatable instead of failing every update.
 
-For the HTTP and exec checks, docker-updater polls every 2 seconds until the check passes or `docker-updater.health-check.timeout` (default 60s) elapses. If the health check fails, docker-updater stops the new container and reports the failure via webhook notifications. This applies to both standard recreate and rolling update modes.
+For the HTTP and exec checks, docker-updater polls every 2 seconds until the check passes or `docker-updater.health-check.timeout` (default 60s) elapses.
+
+If the health check fails, the update is **rolled back**:
+
+- **Standard (recreate) mode**: the failed replacement is stopped and removed, the previous image is re-tagged to the container's original reference, and a container running the previous image is started under the original name. A failed update therefore never leaves the service down; the update is retried on the next check cycle.
+- **Rolling mode**: the old container was never stopped; the failed `-next` container is stopped and removed.
+
+Failures and rollbacks are reported via webhook notifications and surface as errors on the dashboard.
 
 ```yaml
 labels:
@@ -313,7 +322,7 @@ The rolling update flow:
 Requirements:
 - A reverse proxy must route traffic via Docker DNS (network alias), not published ports
 - The container must not publish host ports (the proxy owns port bindings)
-- If using the Docker HEALTHCHECK fallback, the image must define a `HEALTHCHECK`
+- Without a health-check label or an image `HEALTHCHECK`, the next container is only gated on staying running through the grace period -- define a real check for meaningful zero-downtime guarantees
 
 Pre-checks are skipped for rolling updates -- the old container drains naturally via graceful shutdown.
 

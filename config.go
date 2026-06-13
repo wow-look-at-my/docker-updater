@@ -18,6 +18,13 @@ type Config struct {
 	ConfigPath    string
 	DashboardAddr string
 
+	// SelfContainerID is the ID of docker-updater's own container. When set,
+	// an update that targets this container is performed via a detached helper
+	// (see self_update.go) instead of an inline recreate, which would kill the
+	// updater mid-swap. Auto-detected at startup; DOCKER_UPDATER_CONTAINER_ID
+	// overrides detection for environments where it fails.
+	SelfContainerID string
+
 	// Inbound GitHub webhook. When GitHubWebhookAddr is set, the updater
 	// listens on it for authenticated GitHub "package" deliveries (a ghcr image
 	// being published/updated) and runs a check immediately instead of waiting
@@ -74,6 +81,9 @@ func loadConfig() (Config, error) {
 	}
 
 	c.ConfigPath = os.Getenv("DOCKER_UPDATER_CONFIG")
+
+	// Optional override for own-container detection (see SelfContainerID).
+	c.SelfContainerID = os.Getenv("DOCKER_UPDATER_CONTAINER_ID")
 
 	// An unset variable keeps the default; an explicitly empty value disables
 	// the dashboard server.

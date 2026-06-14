@@ -9,6 +9,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
 - **Automatic rollback**: if the replacement container fails its post-update health check, the previous image is restored under the same name -- a failed update never leaves the service down
+- **Self-update**: docker-updater can update its own container. Because it can't stop+recreate itself inline (that kills the process mid-swap), it hands the swap to a short-lived detached helper -- so a published fix actually reaches the running updater
 - **Web dashboard**: Built-in status page showing every container (monitored or not), uptime, restart count, last pull, and whether a newer image is upstream
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
@@ -42,6 +43,7 @@ All configuration is via environment variables:
 | `DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR` | | Listen address for the inbound GitHub webhook (e.g. `:9000`); empty disables it |
 | `DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET` | | Shared secret for verifying GitHub webhook signatures; **required** when the webhook is enabled |
 | `DOCKER_UPDATER_GITHUB_WEBHOOK_PACKAGES` | | Comma-separated allowlist of package names (or `namespace/name`) that may trigger a check; empty means any package. Most useful with an org-level webhook |
+| `DOCKER_UPDATER_CONTAINER_ID` | *(auto-detected)* | docker-updater's own container ID, used to route [self-updates](#self-update-updating-docker-updater-itself) through the detached helper. Auto-detected from `/proc/self/mountinfo`; set this only if detection fails |
 
 ## Dashboard
 
@@ -326,6 +328,28 @@ Requirements:
 
 Pre-checks are skipped for rolling updates -- the old container drains naturally via graceful shutdown.
 
+### Self-update (updating docker-updater itself)
+
+docker-updater can keep itself up to date like any other container -- just give its own service the enable label:
+
+```yaml
+services:
+  docker-updater:
+    image: ghcr.io/wow-look-at-my/docker-updater
+    labels:
+      docker-updater.enable: "true"
+```
+
+This matters: without it, a docker-updater fix you publish never reaches the *running* updater, because an updater can't replace its own container the normal way. Stopping and removing its own container would kill the process before it could create the replacement -- it would simply vanish.
+
+To avoid that, when the container due for an update is docker-updater's own, it does **not** recreate itself inline. Instead it:
+
+1. Detects its own container ID (from `/proc/self/mountinfo`, which works even under `network_mode: host`; override with `DOCKER_UPDATER_CONTAINER_ID` if detection ever fails).
+2. Spawns a short-lived **detached helper container** from the freshly-pulled new image, given the same Docker socket mount.
+3. Returns. The helper -- a separate container with its own lifecycle -- then stops, removes, and recreates the docker-updater container on the new image, and exits (it is `--rm`'d).
+
+The helper reuses the same recreate path as every other update, so the **rollback and health-gate guarantees apply to the updater too**: if the new image fails to stay running, the helper restores the previous docker-updater image. Startup logs `self-update enabled (own container <id>)` when detection succeeds, or `self-update disabled` if it could not determine its own ID (in which case it never tries to update itself).
+
 ## Docker Compose Example
 
 ```yaml
@@ -336,6 +360,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.docker/config.json:/config.json:ro
+    labels:
+      # Let docker-updater update itself (via a detached helper). Without this,
+      # updater fixes you publish never reach the running updater.
+      docker-updater.enable: "true"
     environment:
       DOCKER_UPDATER_INTERVAL: "10m"
       DOCKER_UPDATER_WEBHOOK_URL: "https://discord.com/api/webhooks/..."

@@ -87,7 +87,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 		return result
 	}
 
-	if err := updateContainer(ctx, cli, info); err != nil {
+	if err := updateContainer(ctx, cli, info, cfg); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -130,7 +130,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 		return result
 	}
 
-	if err := updateContainer(ctx, cli, info); err != nil {
+	if err := updateContainer(ctx, cli, info, cfg); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -140,7 +140,13 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 	return result
 }
 
-func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo) error {
+func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config) error {
+	// Updating our own container can't be done inline -- stopping it would kill
+	// this process before the replacement is created. Hand the swap to a
+	// detached helper instead.
+	if sameContainer(info.ID, cfg.SelfContainerID) {
+		return selfUpdate(ctx, cli, info, info.Image)
+	}
 	if info.Rolling {
 		return rollingUpdateContainer(ctx, cli, info, info.Image)
 	}

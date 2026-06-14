@@ -12,6 +12,14 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[docker-updater] ")
 
+	// Hidden subcommand: the detached helper a self-update spawns runs
+	// `/docker-updater finish-self-update ...` to recreate the updater's own
+	// container on the new image. It is a one-shot and never starts the loop.
+	if len(os.Args) > 1 && os.Args[1] == finishSelfUpdateCommand {
+		finishSelfUpdate(os.Args[2:])
+		return
+	}
+
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)
@@ -31,6 +39,20 @@ func main() {
 		log.Fatalf("failed to connect to Docker: %v", err)
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
+
+	// Determine our own container ID so we can update ourselves correctly. A
+	// self-update can't recreate its own container inline (that would kill this
+	// process mid-swap); when SelfContainerID is known, updateContainer routes
+	// the updater's own update through a detached helper instead. An explicit
+	// DOCKER_UPDATER_CONTAINER_ID wins; otherwise we auto-detect.
+	if cfg.SelfContainerID == "" {
+		cfg.SelfContainerID = detectOwnContainerID()
+	}
+	if cfg.SelfContainerID != "" {
+		log.Printf("self-update enabled (own container %s)", shortID(cfg.SelfContainerID))
+	} else {
+		log.Print("self-update disabled: could not determine own container ID (set DOCKER_UPDATER_CONTAINER_ID to enable)")
+	}
 
 	var resolveAuth AuthResolver
 	if cfg.ConfigPath != "" {

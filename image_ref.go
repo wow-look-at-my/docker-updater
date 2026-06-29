@@ -47,6 +47,19 @@ func hasRepository(ref string) bool {
 	return ok
 }
 
+// isCanonicalRef reports whether ref already names a registry manifest by
+// digest (e.g. "ghcr.io/org/app@sha256:..."). Such a reference is pullable and
+// content-addressed even when the local image carries no RepoDigests, so the
+// locally-built skip-guard must not skip it.
+func isCanonicalRef(ref string) bool {
+	parsed, err := reference.ParseAnyReference(ref)
+	if err != nil {
+		return false
+	}
+	_, ok := parsed.(reference.Canonical)
+	return ok
+}
+
 // repositoryOf returns the normalized repository name of a reference
 // (e.g. "ghcr.io/wow-look-at-my/buildhost" or "docker.io/library/nginx"), or
 // "" if ref has no repository (a bare image ID/digest). ParseAnyReference is

@@ -178,6 +178,10 @@ func TestListMonitoredContainers(t *testing.T) {
 				Config:            &container.Config{Image: "nginx:latest"},
 			}, nil
 		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			// A real pulled registry image carries RepoDigests.
+			return types.ImageInspect{ID: "sha256:imagedigest123", RepoDigests: []string{"nginx@sha256:" + strings.Repeat("a", 64)}}, nil, nil
+		},
 	}
 
 	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
@@ -188,7 +192,7 @@ func TestListMonitoredContainers(t *testing.T) {
 	assert.Equal(t, "test-container", c.Name)
 	assert.Equal(t, "nginx:latest", c.Image)
 	assert.Equal(t, UpdateModeImage, c.Mode)
-	assert.Equal(t, "sha256:imagedigest123", c.ImageDigest)
+	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), c.ImageDigest)
 }
 
 func TestListMonitoredContainersGitMode(t *testing.T) {
@@ -580,6 +584,9 @@ func TestListMonitoredContainersPreCheck(t *testing.T) {
 				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
 		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:digest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
+		},
 	}
 
 	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
@@ -618,6 +625,9 @@ func TestListMonitoredContainersPreCheckURLResolve(t *testing.T) {
 					},
 				},
 			}, nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:digest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
 		},
 	}
 
@@ -658,6 +668,9 @@ func TestListMonitoredContainersRolling(t *testing.T) {
 				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:digest"},
 				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:digest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
 		},
 	}
 

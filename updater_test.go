@@ -66,7 +66,8 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 			return io.NopCloser(strings.NewReader("")), nil
 		},
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			return types.ImageInspect{ID: "sha256:currentdigest"}, nil, nil
+			// Registry image: same manifest before and after the pull (up-to-date).
+			return types.ImageInspect{ID: "sha256:currentdigest", RepoDigests: []string{"nginx@sha256:" + strings.Repeat("a", 64)}}, nil, nil
 		},
 	}
 
@@ -134,8 +135,13 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("")), nil
 		},
-		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			return types.ImageInspect{ID: "sha256:newdigest"}, nil, nil
+		imageInspectFn: func(_ context.Context, ref string) (types.ImageInspect, []byte, error) {
+			if strings.HasPrefix(ref, "sha256:") {
+				// Running image inspect during listing: old manifest.
+				return types.ImageInspect{ID: "sha256:olddigest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
+			}
+			// Freshly pulled image for the tag: the tag has advanced.
+			return types.ImageInspect{ID: "sha256:newdigest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("b", 64)}}, nil, nil
 		},
 	}
 
@@ -145,7 +151,7 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	require.Equal(t, 1, len(results))
 	assert.True(t, results[0].Updated)
 	assert.True(t, results[0].DryRun)
-	assert.Equal(t, "sha256:newdigest", results[0].NewRef)
+	assert.Equal(t, "sha256:"+strings.Repeat("b", 64), results[0].NewRef)
 }
 
 func TestCheckAndUpdateImageUpdate(t *testing.T) {

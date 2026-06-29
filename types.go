@@ -8,6 +8,11 @@ type UpdateMode string
 const (
 	UpdateModeImage UpdateMode = "image"
 	UpdateModeGit   UpdateMode = "git"
+	// UpdateModeBuild watches the base image of a locally-built (compose
+	// build:) service. The local derived tag is never pulled; instead the base
+	// image is pulled and, when its digest changes, the service is rebuilt and
+	// recreated via docker compose.
+	UpdateModeBuild UpdateMode = "build"
 )
 
 // ContainerInfo holds metadata about a monitored container.
@@ -22,6 +27,18 @@ type ContainerInfo struct {
 	// Git-mode fields
 	GitRepo string
 	GitRef  string
+
+	// Build-mode fields. Populated for UpdateModeBuild from the container's
+	// compose labels and (optionally) the docker-updater.base-image label.
+	ComposeProject     string // com.docker.compose.project
+	ComposeService     string // com.docker.compose.service
+	ComposeConfigFiles string // com.docker.compose.project.config_files (comma-separated)
+	ComposeWorkingDir  string // com.docker.compose.project.working_dir
+	// BaseImage is the registry image whose digest changing triggers a
+	// rebuild. Taken from the docker-updater.base-image label if set, else
+	// parsed from the service's Dockerfile FROM. Empty means unresolved
+	// (the container is skipped).
+	BaseImage string
 
 	// Pre-update check fields.
 	// If PreCheckURL is set, an HTTP GET is sent and 2xx means ready.

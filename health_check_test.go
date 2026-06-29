@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,6 +354,9 @@ func TestListMonitoredContainersHealthCheck(t *testing.T) {
 				Config:            &container.Config{Image: "myapp:latest"},
 			}, nil
 		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:digest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
+		},
 	}
 
 	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
@@ -400,6 +404,9 @@ func TestListMonitoredContainersHealthCheckURLResolve(t *testing.T) {
 					},
 				},
 			}, nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			return types.ImageInspect{ID: "sha256:digest", RepoDigests: []string{"myapp@sha256:" + strings.Repeat("a", 64)}}, nil, nil
 		},
 	}
 

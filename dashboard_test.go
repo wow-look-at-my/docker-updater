@@ -302,8 +302,19 @@ func TestDashboardServerRunShutsDown(t *testing.T) {
 }
 
 func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
-	// Guard against accidentally dropping the embedded JS that powers the UI.
+	// Guard against accidentally dropping the embedded JS that powers the UI,
+	// or shipping a stale dashboard.js compiled before a feature landed in
+	// dashboard.ts. Each entry is a function declaration tsc preserves
+	// verbatim in the compiled artifact.
 	data, err := dashboardAssets.ReadFile("dashboard/dashboard.js")
 	require.Nil(t, err)
-	assert.True(t, strings.Contains(string(data), "function uptimeText"))
+	js := string(data)
+	for _, fn := range []string{
+		"function uptimeText",       // status-string helper (original canary)
+		"function isOnline",         // four-group split (managed/unmanaged × online/offline)
+		"function onSearchInput",    // search/filter box handler
+		"function updatedHighlight", // recently-updated green fade
+	} {
+		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)
+	}
 }

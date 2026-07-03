@@ -41,6 +41,20 @@ body {
 .meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .meta-item { color: var(--text-dim); font-size: 13px; }
 
+.search {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  width: 240px;
+  max-width: 100%;
+}
+.search::placeholder { color: var(--text-dim); }
+.search:focus { outline: none; border-color: var(--accent); }
+
 .summary {
   display: flex;
   gap: 12px;
@@ -141,7 +155,9 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
 
 .detail { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 320px; word-break: break-word; }
 
-.exited-section {
+/* Container groups (managed/unmanaged × online/offline). Each group is a
+   collapsible <details> whose summary carries the group name and live count. */
+.group-section {
   margin-top: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -149,7 +165,7 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
   background: var(--bg-elev);
 }
 
-.exited-section summary {
+.group-section summary {
   padding: 10px 14px;
   font-size: 12px;
   text-transform: uppercase;
@@ -162,39 +178,24 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
   align-items: center;
   gap: 8px;
 }
-.exited-section summary::-webkit-details-marker { display: none; }
-.exited-section summary::before {
+.group-section summary::-webkit-details-marker { display: none; }
+.group-section summary::before {
   content: "▶";
   font-size: 10px;
   display: inline-block;
   transition: transform 0.15s;
 }
-.exited-section[open] summary::before { transform: rotate(90deg); }
+.group-section[open] summary::before { transform: rotate(90deg); }
 
-.exited-table {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
+/* The group table sits inside the section's own border: strip the standalone
+   table chrome and keep just a separator line under the summary. */
+.group-table {
+  border: none;
+  border-radius: 0;
   border-top: 1px solid var(--border);
 }
-.exited-table thead th {
-  text-align: left;
-  padding: 10px 14px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-row);
-}
-.exited-table tbody td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-  overflow-wrap: anywhere;
-  opacity: 0.65;
-}
-.exited-table tbody tr:last-child td { border-bottom: none; }
+/* Offline containers are dimmed, like the old exited section. */
+.group-offline tbody td { opacity: 0.65; }
 
 .error-banner {
   background: rgba(248,81,73,0.12);

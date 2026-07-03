@@ -47,6 +47,11 @@ type staticAsset struct {
 	etag        string // strong ETag: quoted hex SHA-256 of body
 }
 
+// assetVersionLen is how many hex chars of an asset's SHA-256 go into the
+// ?v= stamp index.html references it by. 12 (48 bits) is far beyond any
+// realistic collision between deploys while keeping URLs readable.
+const assetVersionLen = 12
+
 // staticAssetHandler serves the three embedded dashboard files with a strong
 // SHA-256 ETag and Cache-Control: no-cache. Embedded files carry a zero
 // modtime, so the old http.FileServer emitted no validators at all — browsers
@@ -58,25 +63,66 @@ type staticAsset struct {
 // and all three assets flip atomically. Hashes are computed once here, not per
 // request. Last-Modified is deliberately never sent (a zero modtime is
 // meaningless), leaving the ETag as the only — and sufficient — validator.
+//
+// Belt and suspenders on top of the validators: the served index.html is
+// rewritten at startup to reference its scripts as dashboard.js?v=<hash> /
+// dashboard.css?v=<hash> (a prefix of each asset's own content hash). A cache
+// that ignores no-cache — e.g. a cache-everything edge rule, whose default
+// cache key includes the query string — then stores every asset version under
+// a distinct key, so a given index.html can only ever resolve to the exact js
+// and css bytes it shipped with; an old-script/new-page pairing is impossible
+// by construction. The query string is a cache key only: serving ignores it
+// (lookup is by r.URL.Path), so any ?v= returns the same 200 + ETag.
 func staticAssetHandler() http.HandlerFunc {
-	assets := map[string]staticAsset{}
-	for path, ct := range map[string]string{
-		"index.html":    "text/html; charset=utf-8",
-		"dashboard.css": "text/css; charset=utf-8",
-		"dashboard.js":  "text/javascript; charset=utf-8",
-	} {
-		body, err := dashboardAssets.ReadFile("dashboard/" + path)
+	read := func(name string) []byte {
+		body, err := dashboardAssets.ReadFile("dashboard/" + name)
 		if err != nil {
 			// The embed paths are compile-time constants; this cannot fail at
 			// runtime. Log and serve 404 for the file rather than crashing.
-			log.Printf("dashboard: failed to load embedded asset %s: %v", path, err)
+			log.Printf("dashboard: failed to load embedded asset %s: %v", name, err)
+			return nil
+		}
+		return body
+	}
+	hexSum := func(b []byte) string {
+		sum := sha256.Sum256(b)
+		return hex.EncodeToString(sum[:])
+	}
+
+	js := read("dashboard.js")
+	css := read("dashboard.css")
+	html := read("index.html")
+
+	// Version-stamp the asset references before hashing index.html, so the
+	// page's own ETag covers the rewritten bytes.
+	if html != nil && js != nil {
+		html = bytes.Replace(html,
+			[]byte(`src="dashboard.js"`),
+			[]byte(`src="dashboard.js?v=`+hexSum(js)[:assetVersionLen]+`"`), 1)
+	}
+	if html != nil && css != nil {
+		html = bytes.Replace(html,
+			[]byte(`href="dashboard.css"`),
+			[]byte(`href="dashboard.css?v=`+hexSum(css)[:assetVersionLen]+`"`), 1)
+	}
+
+	assets := map[string]staticAsset{}
+	for _, f := range []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{"index.html", "text/html; charset=utf-8", html},
+		{"dashboard.css", "text/css; charset=utf-8", css},
+		{"dashboard.js", "text/javascript; charset=utf-8", js},
+	} {
+		if f.body == nil {
 			continue
 		}
-		sum := sha256.Sum256(body)
-		assets["/"+path] = staticAsset{
-			body:        body,
-			contentType: ct,
-			etag:        `"` + hex.EncodeToString(sum[:]) + `"`,
+		assets["/"+f.name] = staticAsset{
+			body:        f.body,
+			contentType: f.contentType,
+			etag:        `"` + hexSum(f.body) + `"`,
 		}
 	}
 

@@ -267,6 +267,19 @@ function render(data) {
 // latestData holds the most recent successful /api/containers payload so the
 // search box can re-render instantly without refetching; the poll replaces it.
 let latestData = null;
+// OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
+// an index.html from one build paired with a dashboard.js/css from another
+// (a cache or proxy in front of the server, or two docker-updater containers
+// answering the same host).
+const OUT_OF_SYNC_HINT = "Dashboard assets are out of sync (a cache or proxy served mismatched files). " +
+    "Hard-refresh (Ctrl+Shift+R); if it persists, purge your CDN cache for this host " +
+    "and check for two running docker-updater containers.";
+// isNullElementError spots render() blowing up on a missing element (a
+// TypeError dereferencing null/undefined) — the mixed-asset signature — as
+// opposed to a genuine fetch/data failure.
+function isNullElementError(err) {
+    return err instanceof TypeError && /null|undefined/i.test(err.message);
+}
 async function refresh() {
     const banner = document.getElementById("error-banner");
     try {
@@ -278,7 +291,9 @@ async function refresh() {
         banner.classList.add("hidden");
     }
     catch (err) {
-        banner.textContent = "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
+        banner.textContent = isNullElementError(err)
+            ? OUT_OF_SYNC_HINT
+            : "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
         banner.classList.remove("hidden");
     }
 }
@@ -303,29 +318,75 @@ function onSearchInput() {
     if (latestData)
         render(latestData);
 }
-const updatesCard = document.getElementById("card-updates");
-if (updatesCard)
-    updatesCard.addEventListener("click", jumpToPending);
-const searchBox = document.getElementById("search");
-if (searchBox)
-    searchBox.addEventListener("input", onSearchInput);
-// Keyboard niceties: "/" focuses the filter box, Escape clears it.
-document.addEventListener("keydown", (e) => {
-    if (!searchBox)
-        return;
-    const target = e.target instanceof HTMLElement ? e.target : null;
-    const typing = target !== null &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-    if (e.key === "/" && !typing) {
-        e.preventDefault();
-        searchBox.focus();
-        searchBox.select();
-    }
-    else if (e.key === "Escape" && target === searchBox) {
-        searchBox.value = "";
-        onSearchInput();
-        searchBox.blur();
-    }
-});
-void refresh();
-setInterval(refresh, REFRESH_SECONDS * 1000);
+// REQUIRED_IDS is the startup contract between this script and index.html:
+// every element id the code above dereferences unconditionally (the four group
+// sections with their -rows/-summary children, the search box, the empty-state
+// line, the error banner, the dry-run badge, and the summary stat cards). The
+// group entries are derived from GROUPS so the list can't drift from render()'s
+// own lookups.
+const REQUIRED_IDS = [
+    "search",
+    "empty",
+    "error-banner",
+    "dry-run-badge",
+    "stat-total",
+    "stat-auto",
+    "stat-manual",
+    "stat-updates",
+    "stat-errors",
+    ...GROUPS.flatMap((g) => [g.id, g.id + "-rows", g.id + "-summary"]),
+];
+// renderOutOfSyncBanner replaces the cryptic "replaceChildren of null" crash
+// with a readable full-width explanation of what actually happened. Inline
+// styles on purpose: in the mixed-asset scenario the stylesheet may be from
+// yet another build, so the banner cannot rely on any class existing.
+function renderOutOfSyncBanner(missing) {
+    const banner = el("div", {
+        class: "error-banner",
+        style: "display:block;margin:16px;padding:12px 16px;border:1px solid #f85149;" +
+            "border-radius:6px;background:#3d1214;color:#ffdcd7;" +
+            "font:14px/1.5 system-ui,sans-serif;",
+    }, OUT_OF_SYNC_HINT + " (missing elements: " + missing.join(", ") + ")");
+    document.body.prepend(banner);
+}
+// initDashboard wires the listeners and starts the poll loop — only ever
+// called against a document that passed the REQUIRED_IDS check below.
+function initDashboard() {
+    const updatesCard = document.getElementById("card-updates");
+    if (updatesCard)
+        updatesCard.addEventListener("click", jumpToPending);
+    const searchBox = document.getElementById("search");
+    if (searchBox)
+        searchBox.addEventListener("input", onSearchInput);
+    // Keyboard niceties: "/" focuses the filter box, Escape clears it.
+    document.addEventListener("keydown", (e) => {
+        if (!searchBox)
+            return;
+        const target = e.target instanceof HTMLElement ? e.target : null;
+        const typing = target !== null &&
+            (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        if (e.key === "/" && !typing) {
+            e.preventDefault();
+            searchBox.focus();
+            searchBox.select();
+        }
+        else if (e.key === "Escape" && target === searchBox) {
+            searchBox.value = "";
+            onSearchInput();
+            searchBox.blur();
+        }
+    });
+    void refresh();
+    setInterval(refresh, REFRESH_SECONDS * 1000);
+}
+// Startup gate: if the document is missing anything this script requires, the
+// browser was served mismatched assets (an index.html from one build against a
+// dashboard.js from another). Say so readably and do NOT start the poll loop —
+// every render would just crash on the absent elements.
+const missingIds = REQUIRED_IDS.filter((id) => document.getElementById(id) === null);
+if (missingIds.length > 0) {
+    renderOutOfSyncBanner(missingIds);
+}
+else {
+    initDashboard();
+}

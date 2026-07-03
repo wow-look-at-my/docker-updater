@@ -347,6 +347,54 @@ func TestDashboardAssetCaching(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+// TestDashboardVersionStampedAssetURLs locks in the cache-key busting: the
+// served index.html references its assets as dashboard.js?v=<hash-prefix> /
+// dashboard.css?v=<hash-prefix>, stamped from each asset's own content hash.
+// Any HTTP cache — including a cache-everything edge rule, whose default cache
+// key includes the query string — then stores each asset version under a
+// distinct key, so an index.html can only ever pull the exact js/css it
+// shipped with; an old-script/new-page pairing is impossible. The query string
+// must be a pure cache key: serving ignores it.
+func TestDashboardVersionStampedAssetURLs(t *testing.T) {
+	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, newStore())
+	ts := httptest.NewServer(s.handler())
+	defer ts.Close()
+
+	get := func(path string) (*http.Response, string) {
+		resp, err := http.Get(ts.URL + path)
+		require.Nil(t, err, path)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, string(body)
+	}
+
+	_, page := get("/")
+
+	for asset, attr := range map[string]string{
+		"dashboard.js":  "src",
+		"dashboard.css": "href",
+	} {
+		resp, plain := get("/" + asset)
+		require.Equal(t, http.StatusOK, resp.StatusCode, asset)
+		etag := resp.Header.Get("ETag")
+		require.Regexp(t, `^"[0-9a-f]{64}"$`, etag, asset)
+
+		// index.html references the asset stamped with a prefix of the very
+		// hash the asset itself is served under — never the bare name.
+		stampedRef := attr + `="` + asset + `?v=` + strings.Trim(etag, `"`)[:assetVersionLen] + `"`
+		assert.Contains(t, page, stampedRef, "index.html must reference %s stamped with its content hash", asset)
+		assert.NotContains(t, page, attr+`="`+asset+`"`, "bare (unstamped) %s reference must be gone", asset)
+
+		// The stamped URL — any ?v=, in fact — resolves to the same bytes and
+		// validator as the bare path.
+		respV, stamped := get("/" + asset + "?v=anything")
+		assert.Equal(t, http.StatusOK, respV.StatusCode, asset)
+		assert.Equal(t, etag, respV.Header.Get("ETag"), asset)
+		assert.Equal(t, plain, stamped, asset)
+		assert.Equal(t, "no-cache", respV.Header.Get("Cache-Control"), asset)
+	}
+}
+
 func TestDashboardServerRunShutsDown(t *testing.T) {
 	s := newDashboardServer(&mockDocker{}, Config{DashboardAddr: "127.0.0.1:0", Interval: time.Minute}, newStore())
 
@@ -377,10 +425,11 @@ func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
 	require.Nil(t, err)
 	js := string(data)
 	for _, fn := range []string{
-		"function uptimeText",       // status-string helper (original canary)
-		"function isOnline",         // four-group split (managed/unmanaged × online/offline)
-		"function onSearchInput",    // search/filter box handler
-		"function updatedHighlight", // recently-updated green fade
+		"function uptimeText",            // status-string helper (original canary)
+		"function isOnline",              // four-group split (managed/unmanaged × online/offline)
+		"function onSearchInput",         // search/filter box handler
+		"function updatedHighlight",      // recently-updated green fade
+		"function renderOutOfSyncBanner", // mixed-asset startup guard
 	} {
 		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)
 	}

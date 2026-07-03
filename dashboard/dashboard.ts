@@ -4,6 +4,15 @@
 
 const REFRESH_SECONDS = 5;
 
+// A row whose container was actually updated (recreated on a new image/commit/
+// base) within this window gets a green background that fades linearly to
+// nothing as the update ages. Rows are rebuilt on every refresh, so the fade
+// advances in REFRESH_SECONDS steps.
+const UPDATED_HIGHLIGHT_MS = 10 * 60 * 1000;
+const UPDATED_HIGHLIGHT_MAX_ALPHA = 0.22;
+// rgb of --green (#3fb950) in dashboard.css.
+const GREEN_RGB = "63,185,80";
+
 // ApiContainer mirrors the JSON emitted by apiContainer in dashboard.go. Keeping
 // it in sync is the whole point of the TypeScript rewrite: a renamed or
 // wrong-typed field here is a compile error instead of a silent `undefined`.
@@ -179,6 +188,60 @@ function pending(c: ApiContainer): boolean {
   return Boolean(c.auto_update && c.update_available);
 }
 
+// isOnline splits containers into the online/offline group halves. Offline is
+// the not-up states: exited, dead, or created (never started); everything else
+// (running, restarting, paused, removing) counts as online.
+function isOnline(c: ApiContainer): boolean {
+  return c.state !== "exited" && c.state !== "dead" && c.state !== "created";
+}
+
+// The four dashboard sections, in display order. Every container lands in
+// exactly one: managed (has the auto-update label) × online/offline. The ids
+// match the <details> elements in index.html ("-summary" / "-rows" suffixes).
+interface Group {
+  id: string;
+  label: string;
+  match: (c: ApiContainer) => boolean;
+}
+
+const GROUPS: Group[] = [
+  { id: "group-managed-online", label: "Managed · online", match: (c) => c.auto_update && isOnline(c) },
+  { id: "group-managed-offline", label: "Managed · offline", match: (c) => c.auto_update && !isOnline(c) },
+  { id: "group-unmanaged-online", label: "Unmanaged · online", match: (c) => !c.auto_update && isOnline(c) },
+  { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !c.auto_update && !isOnline(c) },
+];
+
+// searchQuery returns the normalized filter-box text: trimmed and lowercased,
+// "" meaning "no filter".
+function searchQuery(): string {
+  const box = document.getElementById("search") as HTMLInputElement | null;
+  return box ? box.value.trim().toLowerCase() : "";
+}
+
+// matchesQuery is a case-insensitive substring match against the container
+// name and image; either matching keeps the row visible.
+function matchesQuery(c: ApiContainer, query: string): boolean {
+  if (!query) return true;
+  return (c.name || "").toLowerCase().includes(query) || (c.image || "").toLowerCase().includes(query);
+}
+
+// updatedHighlight computes the fading green background for a container whose
+// last update was applied within UPDATED_HIGHLIGHT_MS: full strength when
+// fresh, linearly down to zero at the end of the window. Returns null once the
+// window has passed (or when the container was never updated).
+function updatedHighlight(c: ApiContainer, now: number): { background: string; title: string } | null {
+  if (!c.last_updated) return null;
+  const then = new Date(c.last_updated).getTime();
+  if (Number.isNaN(then)) return null;
+  const age = Math.max(0, now - then); // clamp so slight clock skew reads as fresh
+  if (age >= UPDATED_HIGHLIGHT_MS) return null;
+  const alpha = UPDATED_HIGHLIGHT_MAX_ALPHA * (1 - age / UPDATED_HIGHLIGHT_MS);
+  return {
+    background: "rgba(" + GREEN_RGB + "," + alpha.toFixed(3) + ")",
+    title: "updated " + (fmtRelative(c.last_updated) || "just now"),
+  };
+}
+
 function row(c: ApiContainer): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
@@ -193,7 +256,8 @@ function row(c: ApiContainer): HTMLElement {
   const lastChecked = c.auto_update ? (fmtRelative(c.last_checked) || "—") : "—";
   const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 
-  return el("tr", { class: pending(c) ? "row-pending" : null },
+  const highlight = updatedHighlight(c, Date.now());
+  const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null },
     nameCell,
     autoUpdateCell(c),
     stateCell(c),
@@ -203,6 +267,11 @@ function row(c: ApiContainer): HTMLElement {
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),
   );
+  // Inline style so the alpha can fade with age. It wins over .row-pending's
+  // class background, which is acceptable: a just-updated container should not
+  // also be pending, and the pending left-edge accent still shows regardless.
+  if (highlight) tr.style.background = highlight.background;
+  return tr;
 }
 
 function setText(id: string, text: string | number): void {
@@ -213,6 +282,8 @@ function setText(id: string, text: string | number): void {
 function render(data: ApiResponse): void {
   const containers = data.containers || [];
 
+  // The summary cards are fleet totals: computed over every container, never
+  // narrowed by the search filter.
   const auto = containers.filter((c) => c.auto_update).length;
   const updates = containers.filter(pending).length;
   const errors = containers.filter((c) => c.auto_update && c.error).length;
@@ -238,26 +309,39 @@ function render(data: ApiResponse): void {
   setText("next-cycle", nextCycle ? "Next check " + nextCycle : "");
   setText("refreshed", "Updated " + new Date(data.generated_at).toLocaleTimeString());
 
-  const isExited = (c: ApiContainer): boolean => c.state === "exited" || c.state === "dead";
-  const active = containers.filter((c) => !isExited(c));
-  const exited = containers.filter(isExited);
+  const query = searchQuery();
+  const visible = containers.filter((c) => matchesQuery(c, query));
 
-  document.getElementById("rows")!.replaceChildren(...active.map(row));
-  document.getElementById("exited-rows")!.replaceChildren(...exited.map(row));
+  // Only tbody contents, summary counts, and the hidden class change per
+  // render. The <details> elements themselves are static (and their open state
+  // is never touched), so the user's expand/collapse choices survive refreshes.
+  for (const g of GROUPS) {
+    const members = visible.filter(g.match);
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
+    document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
+    document.getElementById(g.id)!.classList.toggle("hidden", members.length === 0);
+  }
 
-  document.getElementById("exited-section")!.classList.toggle("hidden", exited.length === 0);
-  document.getElementById("exited-summary")!.textContent =
-    exited.length + " exited container" + (exited.length !== 1 ? "s" : "");
-
-  document.getElementById("empty")!.classList.toggle("hidden", containers.length > 0);
+  // Every container lands in exactly one group, so "all groups hidden" is
+  // exactly "no visible containers": none exist, or the filter matched none.
+  const empty = document.getElementById("empty")!;
+  empty.textContent = query && containers.length > 0
+    ? 'No containers match "' + query + '".'
+    : "No containers found.";
+  empty.classList.toggle("hidden", visible.length > 0);
 }
+
+// latestData holds the most recent successful /api/containers payload so the
+// search box can re-render instantly without refetching; the poll replaces it.
+let latestData: ApiResponse | null = null;
 
 async function refresh(): Promise<void> {
   const banner = document.getElementById("error-banner")!;
   try {
     const resp = await fetch("api/containers", { cache: "no-store" });
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
-    render((await resp.json()) as ApiResponse);
+    latestData = (await resp.json()) as ApiResponse;
+    render(latestData);
     banner.classList.add("hidden");
   } catch (err) {
     banner.textContent = "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
@@ -266,21 +350,47 @@ async function refresh(): Promise<void> {
 }
 
 // jumpToPending scrolls to the first container with a held-back update, flashing
-// it so "N updates pending" always points at concrete rows. Stopped containers
-// live in a collapsed section, so reveal it first when the target is inside.
+// it so "N updates pending" always points at concrete rows. Every row lives in
+// a collapsible group, so reveal the group holding the target first.
 function jumpToPending(): void {
   const first = document.querySelector<HTMLElement>(".row-pending");
   if (!first) return;
-  const exitedSection = document.getElementById("exited-section") as HTMLDetailsElement | null;
-  if (exitedSection && exitedSection.contains(first)) exitedSection.open = true;
+  const section = first.closest("details");
+  if (section) section.open = true;
   first.scrollIntoView({ behavior: "smooth", block: "center" });
   first.classList.remove("row-flash");
   void first.offsetWidth; // reflow so the animation restarts on repeat clicks
   first.classList.add("row-flash");
 }
 
+// onSearchInput re-renders the groups from the last fetched payload — no
+// refetch; the poll keeps replacing latestData underneath as usual.
+function onSearchInput(): void {
+  if (latestData) render(latestData);
+}
+
 const updatesCard = document.getElementById("card-updates");
 if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
+
+const searchBox = document.getElementById("search") as HTMLInputElement | null;
+if (searchBox) searchBox.addEventListener("input", onSearchInput);
+
+// Keyboard niceties: "/" focuses the filter box, Escape clears it.
+document.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (!searchBox) return;
+  const target = e.target instanceof HTMLElement ? e.target : null;
+  const typing = target !== null &&
+    (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+  if (e.key === "/" && !typing) {
+    e.preventDefault();
+    searchBox.focus();
+    searchBox.select();
+  } else if (e.key === "Escape" && target === searchBox) {
+    searchBox.value = "";
+    onSearchInput();
+    searchBox.blur();
+  }
+});
 
 void refresh();
 setInterval(refresh, REFRESH_SECONDS * 1000);

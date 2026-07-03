@@ -60,6 +60,16 @@ doesn't -- so you can see your fleet at a glance:
 - **Last checked / last pulled**: *last checked* is when docker-updater last polled the registry; *last pulled* is when it last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance "last pulled", so the column reflects genuine image changes rather than resetting every cycle
 - **Upstream**: whether a newer image digest (or git commit) is available -- and, when it is, why it has not been applied yet -- or the last error
 
+Containers are grouped into four collapsible sections -- **Managed · online**,
+**Managed · offline**, **Unmanaged · online**, and **Unmanaged · offline** --
+where *managed* means the container carries the enable label and *offline*
+means it is exited, dead, or created but never started. Empty groups are
+hidden, and the unmanaged-offline group starts collapsed. A search box in the
+top bar filters every group by container name or image (press `/` to focus it,
+`Escape` to clear). Rows whose container was **actually updated** in the last
+10 minutes get a green highlight that fades as the update ages, so a fresh
+deploy is visible at a glance.
+
 ### Summary counters
 
 The cards across the top total your containers, auto-updated, manual, and errors,
@@ -75,8 +85,8 @@ explicit:
   is sitting idle on work it could do.
 - The affected rows are tinted and tagged `update available` with the reason
   (`dry-run`, `skipped: <reason>`, or `error: <message>`) in the Upstream column.
-  Click the **updates pending** card to jump straight to them; if one is a stopped
-  container, the collapsed "exited" section is expanded automatically.
+  Click the **updates pending** card to jump straight to them; if the first one
+  sits in a collapsed group, that group is expanded automatically.
 
 The page auto-refreshes every few seconds. The same data is available as JSON at
 `/api/containers`, and `/healthz` returns `200 ok` for external liveness probes.

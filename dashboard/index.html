@@ -13,6 +13,8 @@
       <span class="logo">&#x21bb;</span>
       <h1>docker-updater</h1>
     </div>
+    <input type="search" id="search" class="search" placeholder="filter containers" autocomplete="off"
+           title="Filter by container name or image — press / to focus, Escape to clear">
     <div class="meta">
       <span id="dry-run-badge" class="badge badge-dry hidden">DRY RUN</span>
       <span id="last-cycle" class="meta-item" title="Last completed check cycle"></span>
@@ -31,39 +33,88 @@
 
   <main>
     <div id="error-banner" class="error-banner hidden"></div>
-    <table id="containers">
-      <thead>
-        <tr>
-          <th>Container</th>
-          <th>Auto-update</th>
-          <th>State</th>
-          <th>Uptime</th>
-          <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
-          <th>Last checked</th>
-          <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
-          <th>Upstream</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-    <p id="empty" class="empty hidden">No containers found.</p>
-    <details id="exited-section" class="exited-section hidden">
-      <summary id="exited-summary"></summary>
-      <table class="exited-table">
+
+    <!-- The four container groups (managed × online). Same column set in every
+         table so columns align visually across groups. render() only replaces
+         tbody children / summary text / the hidden class, so the user's
+         open/closed toggles survive refreshes. -->
+    <details id="group-managed-online" class="group-section hidden" open>
+      <summary id="group-managed-online-summary">Managed · online</summary>
+      <table class="group-table">
         <thead>
           <tr>
             <th>Container</th>
             <th>Auto-update</th>
             <th>State</th>
             <th>Uptime</th>
+            <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
             <th>Last checked</th>
-            <th>Last pulled</th>
+            <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
             <th>Upstream</th>
           </tr>
         </thead>
-        <tbody id="exited-rows"></tbody>
+        <tbody id="group-managed-online-rows"></tbody>
       </table>
     </details>
+
+    <details id="group-managed-offline" class="group-section group-offline hidden" open>
+      <summary id="group-managed-offline-summary">Managed · offline</summary>
+      <table class="group-table">
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th>Auto-update</th>
+            <th>State</th>
+            <th>Uptime</th>
+            <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
+            <th>Last checked</th>
+            <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
+            <th>Upstream</th>
+          </tr>
+        </thead>
+        <tbody id="group-managed-offline-rows"></tbody>
+      </table>
+    </details>
+
+    <details id="group-unmanaged-online" class="group-section hidden" open>
+      <summary id="group-unmanaged-online-summary">Unmanaged · online</summary>
+      <table class="group-table">
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th>Auto-update</th>
+            <th>State</th>
+            <th>Uptime</th>
+            <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
+            <th>Last checked</th>
+            <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
+            <th>Upstream</th>
+          </tr>
+        </thead>
+        <tbody id="group-unmanaged-online-rows"></tbody>
+      </table>
+    </details>
+
+    <details id="group-unmanaged-offline" class="group-section group-offline hidden">
+      <summary id="group-unmanaged-offline-summary">Unmanaged · offline</summary>
+      <table class="group-table">
+        <thead>
+          <tr>
+            <th>Container</th>
+            <th>Auto-update</th>
+            <th>State</th>
+            <th>Uptime</th>
+            <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
+            <th>Last checked</th>
+            <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
+            <th>Upstream</th>
+          </tr>
+        </thead>
+        <tbody id="group-unmanaged-offline-rows"></tbody>
+      </table>
+    </details>
+
+    <p id="empty" class="empty hidden">No containers found.</p>
   </main>
 
   <footer>

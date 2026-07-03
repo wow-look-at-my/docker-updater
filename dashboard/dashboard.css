@@ -41,7 +41,13 @@ body {
 .meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .meta-item { color: var(--text-dim); font-size: 13px; }
 
+/* Styled by both id and class so the rule keeps matching if either attribute
+   is ever dropped from the markup. The appearance reset stops type=search from
+   drawing the platform's native (light) widget chrome instead of our theme. */
+#search,
 .search {
+  -webkit-appearance: none;
+  appearance: none;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -52,8 +58,19 @@ body {
   width: 240px;
   max-width: 100%;
 }
+#search::placeholder,
 .search::placeholder { color: var(--text-dim); }
+#search:focus,
 .search:focus { outline: none; border-color: var(--accent); }
+/* WebKit paints its own light-gray cancel "x" and a white autofill fill on
+   search inputs; suppress both so the box stays dark (Escape already clears). */
+#search::-webkit-search-cancel-button,
+.search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+#search:-webkit-autofill,
+.search:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--bg) inset;
+}
 
 .summary {
   display: flex;

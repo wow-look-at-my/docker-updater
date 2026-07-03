@@ -50,7 +50,11 @@ All configuration is via environment variables:
 
 docker-updater serves a read-only web dashboard (default `:8080`) that lists
 **every** container on the host -- both the ones it auto-updates and the ones it
-doesn't -- so you can see your fleet at a glance:
+doesn't -- so you can see your fleet at a glance. The dashboard's static assets
+are served with strong SHA-256 `ETag`s and `Cache-Control: no-cache`, so
+browsers and any cache in front revalidate on every load (a cheap 304 while
+unchanged) and a deploy can never leave a stale `dashboard.js` running against
+a newer `index.html`:
 
 ![docker-updater dashboard](docs/dashboard.png)
 

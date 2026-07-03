@@ -280,6 +280,73 @@ func TestDashboardServesStaticAssets(t *testing.T) {
 	assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
 }
 
+// TestDashboardAssetCaching locks in the validator contract for the embedded
+// assets: strong SHA-256 ETags computed from the embedded bytes, Cache-Control
+// no-cache so every load (browser or intermediary cache) revalidates, 304 on a
+// matching If-None-Match, and no Last-Modified (embedded files have a zero,
+// meaningless modtime). Without this a cache in front could keep serving an
+// old dashboard.js against a new index.html after a deploy — the compiled JS
+// then dereferences element ids the other version's markup doesn't have.
+func TestDashboardAssetCaching(t *testing.T) {
+	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, newStore())
+	ts := httptest.NewServer(s.handler())
+	defer ts.Close()
+
+	etags := map[string]string{}
+	for _, path := range []string{"/", "/index.html", "/dashboard.css", "/dashboard.js"} {
+		resp, err := http.Get(ts.URL + path)
+		require.Nil(t, err, path)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+		assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"), path)
+		assert.Empty(t, resp.Header.Get("Last-Modified"), "zero-modtime embed must not fabricate Last-Modified: %s", path)
+		assert.NotEmpty(t, body, path)
+
+		etag := resp.Header.Get("ETag")
+		require.NotEmpty(t, etag, path)
+		assert.Regexp(t, `^"[0-9a-f]{64}"$`, etag, "strong quoted hex SHA-256 ETag: %s", path)
+		etags[path] = etag
+
+		// A conditional GET with the matching validator revalidates to a
+		// bodyless 304 — the cheap steady-state path.
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		require.Nil(t, err, path)
+		req.Header.Set("If-None-Match", etag)
+		resp, err = http.DefaultClient.Do(req)
+		require.Nil(t, err, path)
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusNotModified, resp.StatusCode, path)
+		assert.Empty(t, body, path)
+
+		// A stale validator (old deploy's hash) gets the full new body.
+		req, err = http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		require.Nil(t, err, path)
+		req.Header.Set("If-None-Match", `"`+strings.Repeat("0", 64)+`"`)
+		resp, err = http.DefaultClient.Do(req)
+		require.Nil(t, err, path)
+		body, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode, path)
+		assert.NotEmpty(t, body, path)
+	}
+
+	// "/" is index.html under another name.
+	assert.Equal(t, etags["/index.html"], etags["/"])
+	// Distinct files carry distinct validators, so each asset revalidates
+	// independently after a deploy.
+	assert.NotEqual(t, etags["/dashboard.js"], etags["/dashboard.css"])
+	assert.NotEqual(t, etags["/dashboard.js"], etags["/index.html"])
+
+	// Unknown paths still 404 — the asset handler never falls back to index.html.
+	resp, err := http.Get(ts.URL + "/no-such-file.txt")
+	require.Nil(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func TestDashboardServerRunShutsDown(t *testing.T) {
 	s := newDashboardServer(&mockDocker{}, Config{DashboardAddr: "127.0.0.1:0", Interval: time.Minute}, newStore())
 

@@ -237,10 +237,10 @@ func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo,
 	}
 
 	key := buildStateKey(info)
+	prev, seen := lookupBaseDigest(key)
 
 	if !isPrefixIncapable(key) {
 		if stale, ok := derivedImageStale(ctx, cli, info); ok {
-			prev := storedBaseDigest(key)
 			if !stale {
 				// Verified current: the running image extends the base we just
 				// pulled. Keep the digest baseline warm so the fallback path
@@ -253,10 +253,6 @@ func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo,
 		// Layers unavailable (container or image not inspectable right now):
 		// fall through to the digest baseline for this cycle.
 	}
-
-	baseDigestStore.Lock()
-	prev, seen := baseDigestStore.digests[key]
-	baseDigestStore.Unlock()
 
 	if !seen {
 		// First cycle: adopt the current base as the built-from baseline so we
@@ -302,24 +298,33 @@ func isLayerPrefix(base, derived []string) bool {
 	return true
 }
 
-// imageLayersByRef returns an image's RootFS layer diff IDs, looked up by any
-// reference (tag, digest, or content ID), or nil when unavailable.
-func imageLayersByRef(ctx context.Context, cli DockerClient, ref string) []string {
+// imageIDAndLayers inspects an image by any reference (tag, digest, or
+// content ID), returning its content ID and RootFS layer diff IDs. Zero
+// values mean the image could not be inspected.
+func imageIDAndLayers(ctx context.Context, cli DockerClient, ref string) (id string, layers []string) {
 	if ref == "" {
-		return nil
+		return "", nil
 	}
 	inspect, _, err := cli.ImageInspectWithRaw(ctx, ref)
 	if err != nil {
-		return nil
+		return "", nil
 	}
-	return inspect.RootFS.Layers
+	return inspect.ID, inspect.RootFS.Layers
 }
 
-// storedBaseDigest returns the recorded base identity for a service, or "".
-func storedBaseDigest(key string) string {
+// imageLayersByRef returns just an image's RootFS layer diff IDs.
+func imageLayersByRef(ctx context.Context, cli DockerClient, ref string) []string {
+	_, layers := imageIDAndLayers(ctx, cli, ref)
+	return layers
+}
+
+// lookupBaseDigest returns the recorded base identity for a service, and
+// whether one has been recorded at all.
+func lookupBaseDigest(key string) (string, bool) {
 	baseDigestStore.Lock()
 	defer baseDigestStore.Unlock()
-	return baseDigestStore.digests[key]
+	digest, seen := baseDigestStore.digests[key]
+	return digest, seen
 }
 
 // recordBuiltBase records the base identity the derived image was just built
@@ -360,10 +365,10 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 		return false, fmt.Errorf("container %s: no compose service label", info.Name)
 	}
 
-	// Pin the image the container currently runs before the rebuild.
-	// `compose build` never touches the container, so this stays valid as the
-	// "before" side of the change comparison.
-	runningID := runningImageID(ctx, cli, info)
+	// Pin, before the rebuild, the image the container currently runs and the
+	// reference it was created with (the tag the build re-points). `compose
+	// build` never touches the container, so both stay valid across it.
+	runningID, derivedRef := serviceContainerState(ctx, cli, info)
 
 	log.Printf("container %s: rebuilding service %s (base %s changed)", info.Name, info.ComposeService, shortID(newBase))
 	if err := runner.Build(ctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
@@ -373,7 +378,7 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 	// What the rebuild produced: the image the derived tag points at NOW.
 	// (Inspecting the container again would be useless -- a build re-tags the
 	// image but leaves the container on the old one until `up -d`.)
-	builtID, builtLayers := builtImage(ctx, cli, info)
+	builtID, builtLayers := imageIDAndLayers(ctx, cli, derivedRef)
 	if builtID != "" && runningID != "" && builtID == runningID {
 		// Cache hit: the rebuild produced the identical image. Record the new
 		// base so we don't keep rebuilding, but do not churn the container.
@@ -417,39 +422,30 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 	return true, nil
 }
 
+// serviceContainerState inspects the service's current container once and
+// returns both the content ID of the image it runs ("" if undeterminable)
+// and the image reference it was created with (e.g. "opencode:local", the
+// tag `compose build` re-points; falls back to info.Image).
+func serviceContainerState(ctx context.Context, cli DockerClient, info ContainerInfo) (runningID, imageRef string) {
+	imageRef = info.Image
+	inspect, err := cli.ContainerInspect(ctx, currentServiceContainerID(ctx, cli, info))
+	if err != nil {
+		return "", imageRef
+	}
+	if inspect.Config != nil && inspect.Config.Image != "" {
+		imageRef = inspect.Config.Image
+	}
+	if inspect.ContainerJSONBase != nil {
+		runningID = inspect.Image
+	}
+	return runningID, imageRef
+}
+
 // runningImageID returns the content ID of the image the service's current
 // container runs, or "" if it cannot be determined.
 func runningImageID(ctx context.Context, cli DockerClient, info ContainerInfo) string {
-	inspect, err := cli.ContainerInspect(ctx, currentServiceContainerID(ctx, cli, info))
-	if err != nil || inspect.ContainerJSONBase == nil {
-		return ""
-	}
-	return inspect.Image
-}
-
-// builtImage inspects the derived image the rebuild (re)tagged -- the
-// service's local image reference, e.g. "opencode:local" -- returning its
-// content ID and RootFS layers. Zero values mean it could not be inspected.
-func builtImage(ctx context.Context, cli DockerClient, info ContainerInfo) (id string, layers []string) {
-	ref := derivedImageRef(ctx, cli, info)
-	if ref == "" {
-		return "", nil
-	}
-	inspect, _, err := cli.ImageInspectWithRaw(ctx, ref)
-	if err != nil {
-		return "", nil
-	}
-	return inspect.ID, inspect.RootFS.Layers
-}
-
-// derivedImageRef returns the reference of the service's locally-built image
-// (e.g. "opencode:local"): the reference the container was created with,
-// which is also the tag `compose build` re-points at the freshly built image.
-func derivedImageRef(ctx context.Context, cli DockerClient, info ContainerInfo) string {
-	if inspect, err := cli.ContainerInspect(ctx, currentServiceContainerID(ctx, cli, info)); err == nil && inspect.Config != nil && inspect.Config.Image != "" {
-		return inspect.Config.Image
-	}
-	return info.Image
+	id, _ := serviceContainerState(ctx, cli, info)
+	return id
 }
 
 // currentServiceContainerID returns the container ID currently backing the

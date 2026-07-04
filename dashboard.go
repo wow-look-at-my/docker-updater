@@ -215,6 +215,7 @@ type apiResponse struct {
 	Interval    string         `json:"interval"`
 	DryRun      bool           `json:"dry_run"`
 	Label       string         `json:"label"`
+	Version     string         `json:"version,omitempty"`
 	LastCycle   *time.Time     `json:"last_cycle,omitempty"`
 	NextCycle   *time.Time     `json:"next_cycle,omitempty"`
 	Containers  []apiContainer `json:"containers"`
@@ -234,6 +235,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		Interval:    s.cfg.Interval.String(),
 		DryRun:      s.cfg.DryRun,
 		Label:       s.cfg.Label,
+		Version:     buildVersion(),
 	}
 	if !snap.LastCycle.IsZero() {
 		lc := snap.LastCycle

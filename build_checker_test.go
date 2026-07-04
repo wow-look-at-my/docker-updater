@@ -576,3 +576,90 @@ func TestBuildStateKeySurvivesContainerRecreation(t *testing.T) {
 	bare := ContainerInfo{ID: "c9", BaseImage: fixtureBase}
 	assert.Contains(t, buildStateKey(bare), "c9", "non-compose containers key by ID")
 }
+
+// captureComposeLog redirects the compose child-output stream to a buffer for
+// the duration of a test, restoring the real writer afterwards.
+func captureComposeLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var buf strings.Builder
+	old := composeLogWriter
+	composeLogWriter = &buf
+	t.Cleanup(func() { composeLogWriter = old })
+	return &buf
+}
+
+func TestRunLoggedCommandFailureErrorCarriesOutputTail(t *testing.T) {
+	logged := captureComposeLog(t)
+
+	err := runLoggedCommand(context.Background(), "sh",
+		[]string{"-c", "echo building step 1; echo 'mkdir /tmp/dockerfile123: no such file or directory' >&2; exit 1"})
+
+	require.Error(t, err)
+	// The error names the command, the exit status, AND the actual cause from
+	// the child's output -- never a bare "exit status 1".
+	assert.Contains(t, err.Error(), "sh -c")
+	assert.Contains(t, err.Error(), "exit status 1")
+	assert.Contains(t, err.Error(), "mkdir /tmp/dockerfile123: no such file or directory")
+	assert.Contains(t, err.Error(), "building step 1", "stdout and stderr are both captured")
+
+	// The full output also streamed to the updater's own log.
+	assert.Contains(t, logged.String(), "building step 1")
+	assert.Contains(t, logged.String(), "no such file or directory")
+}
+
+func TestRunLoggedCommandSuccessStreamsOutputWithoutError(t *testing.T) {
+	logged := captureComposeLog(t)
+
+	err := runLoggedCommand(context.Background(), "sh", []string{"-c", "echo pulling base; echo built ok"})
+
+	require.NoError(t, err)
+	assert.Contains(t, logged.String(), "pulling base")
+	assert.Contains(t, logged.String(), "built ok")
+}
+
+func TestRunLoggedCommandFailureWithNoOutputSaysSo(t *testing.T) {
+	captureComposeLog(t)
+
+	err := runLoggedCommand(context.Background(), "sh", []string{"-c", "exit 3"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exit status 3")
+	assert.Contains(t, err.Error(), "(no output)")
+}
+
+func TestRunLoggedCommandTailTrimmedToLastLines(t *testing.T) {
+	captureComposeLog(t)
+
+	// 60 numbered lines, then fail: only the last composeErrTailLines lines may
+	// appear in the error.
+	err := runLoggedCommand(context.Background(), "sh",
+		[]string{"-c", "i=1; while [ $i -le 60 ]; do echo line-$i; i=$((i+1)); done; exit 1"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "line-60", "the final lines are kept")
+	assert.Contains(t, err.Error(), "line-41", "exactly the last 20 lines are kept")
+	assert.NotContains(t, err.Error(), "line-40\n", "older lines are trimmed")
+	assert.NotContains(t, err.Error(), "line-1\n", "the head of the output is trimmed")
+}
+
+func TestTailBufferCapsRetainedBytes(t *testing.T) {
+	tb := &tailBuffer{max: 16}
+	_, err := tb.Write([]byte("0123456789"))
+	require.NoError(t, err)
+	_, err = tb.Write([]byte("abcdefghijklmnop"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "abcdefghijklmnop", tb.tail(composeErrTailLines),
+		"only the final max bytes are retained")
+}
+
+func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
+	captureComposeLog(t)
+
+	// No real docker CLI needed: whether the binary is missing or the args are
+	// rejected, the error must identify the full docker command line.
+	err := runDockerCompose(context.Background(), composeArgs([]string{"/srv/demo/docker-compose.yml"}, "/srv/demo", "build", "--pull", "opencode"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo build --pull opencode")
+}

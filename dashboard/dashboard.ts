@@ -44,6 +44,7 @@ interface ApiResponse {
   interval: string;
   dry_run: boolean;
   label: string;
+  version?: string;
   last_cycle?: string | null;
   next_cycle?: string | null;
   containers: ApiContainer[];
@@ -302,6 +303,16 @@ function render(data: ApiResponse): void {
   setText("cfg-interval", data.interval || "—");
   setText("cfg-label", data.label || "—");
   setText("refresh-interval", REFRESH_SECONDS);
+
+  // The updater's own build hash: shortened for the footer, full SHA on
+  // hover. Guarded lookup (like card-updates) rather than REQUIRED_IDS, since
+  // the dashboard works fine without the footer element.
+  const versionNode = document.getElementById("build-version");
+  if (versionNode) {
+    const v = data.version || "";
+    versionNode.textContent = v ? v.slice(0, 12) : "—";
+    versionNode.title = v ? "docker-updater build " + v : "";
+  }
 
   const lastCycle = fmtRelative(data.last_cycle);
   setText("last-cycle", lastCycle ? "Last check " + lastCycle : "No check yet");

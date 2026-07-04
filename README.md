@@ -92,8 +92,13 @@ explicit:
   Click the **updates pending** card to jump straight to them; if the first one
   sits in a collapsed group, that group is expanded automatically.
 
-The page auto-refreshes every few seconds. The same data is available as JSON at
-`/api/containers`, and `/healthz` returns `200 ok` for external liveness probes.
+The page auto-refreshes every few seconds. The footer shows the **build hash of
+the running docker-updater** (short SHA; hover for the full one — the same
+commit the image's `org.opencontainers.image.version` label carries), so you can
+tell at a glance which build is answering. The same hash is printed at startup
+(`docker-updater <sha> starting`) and returned in the `version` field of the
+JSON API. The same data is available as JSON at `/api/containers`, and
+`/healthz` returns `200 ok` for external liveness probes.
 
 With `--network host` (recommended), the dashboard is reachable on the host's
 port directly, e.g. `http://<host>:8080`. Without host networking, publish the
@@ -331,7 +336,16 @@ services:
 
 When `ghcr.io/anomalyco/opencode:latest` publishes a new release, the local image no longer extends the pulled base, so docker-updater runs `docker compose build --pull opencode` and `docker compose up -d opencode`, recreating the service on the rebuilt image. Without build mode, this same service would log a `pull access denied` error every cycle and never update.
 
-> **Requirement:** build mode shells out to the `docker` CLI with the Compose plugin (`docker compose`). The published image ships the statically-linked Docker CLI plus the compose and buildx CLI plugins, so build mode works out of the box — the one thing you must provide is the service's **build context**, mounted into the docker-updater container at the same `working_dir` path the compose labels record. If the CLI is ever absent (a custom-built image), a build-mode rebuild fails and is reported as an error rather than silently doing nothing.
+> **Requirement:** build mode shells out to the `docker` CLI with the Compose plugin (`docker compose`). The published image ships the statically-linked Docker CLI plus the compose and buildx CLI plugins — and a writable `/tmp`, which compose/buildx hard-require (a `dockerfile_inline` build is materialized into a temp directory, and compose's bake integration writes its metadata file under the temp dir) — so build mode works out of the box. The one thing you must provide is the service's **compose file and build context**, mounted into the docker-updater container at the same paths the compose labels record (`working_dir` / `config_files`). If the CLI is ever absent (a custom-built image), a build-mode rebuild fails and is reported as an error rather than silently doing nothing.
+
+#### Troubleshooting a failed rebuild
+
+A failed `docker compose build` / `up` is reported with the **last lines of the compose output attached to the error**, so the dashboard's Upstream column and webhook notifications name the actual cause — not just `exit status 1`. The complete compose output (progress and errors) always streams into the updater's own log: `docker logs docker-updater`.
+
+The two failure signatures worth knowing:
+
+- **Compose tree not mounted.** Compose runs *inside* the docker-updater container, so it can only see the compose file and build context if they are bind-mounted into it at the **same absolute paths** recorded on the service's containers. An error like `stat /srv/stack/docker-compose.yml: no such file or directory` (or `no configuration file provided`) means the path exists on the host but not inside docker-updater — add a volume such as `-v /srv/stack:/srv/stack:ro` (read-write if the build writes into its context).
+- **No writable temp dir.** `mkdir /tmp/dockerfileNNN: no such file or directory` means the image has no `/tmp` — buildx cannot materialize a `dockerfile_inline` (and compose cannot place its bake metadata file). The published image ships `/tmp` (mode `1777`) and sets `TMPDIR=/tmp`; if you build a custom `FROM scratch` image, ship the same.
 
 > **Locally-built images in image mode are skipped.** Even without migrating to build mode, a container in the default image mode whose image has no `RepoDigests` (locally built, no registry origin) is now **detected and skipped** with a warning — `image <x> is locally built and not in a registry; use docker-updater.mode=build` — instead of pull-erroring every cycle.
 

@@ -157,7 +157,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	oldBase, newBase, err := checkBuildUpdate(ctx, cli, info, resolveAuth)
+	oldBase, newBase, verified, err := checkBuildUpdate(ctx, cli, info, resolveAuth)
 	if err != nil {
 		result.Error = err
 		log.Printf("container %s: error checking base image: %v", info.Name, err)
@@ -167,12 +167,24 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 	result.OldRef = oldBase
 
 	if newBase == "" {
-		log.Printf("container %s: base image up-to-date", info.Name)
+		if verified {
+			log.Printf("container %s: image up to date with base %s (base layers verified)", info.Name, shortID(oldBase))
+		} else {
+			log.Printf("container %s: base image up-to-date (digest match)", info.Name)
+		}
 		return result
 	}
 
 	result.NewRef = newBase
-	log.Printf("container %s: base image update detected (%s -> %s)", info.Name, shortID(oldBase), shortID(newBase))
+	if verified {
+		from := shortID(oldBase)
+		if from == "" {
+			from = "unknown"
+		}
+		log.Printf("container %s: image built from stale base; rebuilding (%s -> %s)", info.Name, from, shortID(newBase))
+	} else {
+		log.Printf("container %s: base image update detected (%s -> %s)", info.Name, shortID(oldBase), shortID(newBase))
+	}
 
 	if !info.Rolling {
 		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
@@ -194,7 +206,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	changed, err := rebuildAndRecreate(ctx, cli, runner, info, newBase)
+	changed, err := rebuildAndRecreate(ctx, cli, runner, info, newBase, verified)
 	if err != nil {
 		result.Error = err
 		log.Printf("container %s: error rebuilding: %v", info.Name, err)

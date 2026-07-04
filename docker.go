@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -340,9 +341,14 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 	}
 	defer reader.Close()
 
-	// Consume the pull output to completion.
-	if _, err := io.Copy(io.Discard, reader); err != nil {
-		return "", false, fmt.Errorf("reading pull response for %s: %w", imageName, err)
+	// Decode the pull's JSON progress stream to completion. The daemon
+	// reports mid-pull failures (registry 429/5xx, dropped connections) as
+	// in-band `error` records in a cleanly terminated stream, so blindly
+	// draining the reader would treat a failed pull as success -- the caller
+	// would then inspect the OLD local image and wrongly conclude
+	// "up-to-date". jsonmessage surfaces those records as an error.
+	if err := jsonmessage.DisplayJSONMessagesStream(reader, io.Discard, 0, false, nil); err != nil {
+		return "", false, fmt.Errorf("pulling image %s: %w", imageName, err)
 	}
 
 	// Inspect the pulled image to get its freshly-resolved registry digest.

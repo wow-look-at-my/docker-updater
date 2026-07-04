@@ -6,7 +6,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
-- **Build-based updates**: For locally-built (compose `build:`) services that are never pushed to a registry, watches the service's **base image** and rebuilds + recreates via `docker compose` when the base publishes a new digest — instead of fruitlessly pulling a local-only tag every cycle
+- **Build-based updates**: For locally-built (compose `build:`) services that are never pushed to a registry, watches the service's **base image** and rebuilds + recreates via `docker compose` when the derived image no longer extends the base's current release — instead of fruitlessly pulling a local-only tag every cycle
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
 - **Automatic rollback**: if the replacement container fails its post-update health check, the previous image is restored under the same name -- a failed update never leaves the service down
@@ -15,7 +15,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
 - **Dry-run mode**: Monitor for updates without applying them
-- **Scratch image**: No external dependencies at runtime
+- **Scratch image**: no libc, no shell — just static binaries: the updater itself plus the Docker CLI with the compose/buildx plugins that build mode shells out to
 
 ## Usage
 
@@ -291,8 +291,8 @@ Checks a git remote for new commits on the tracked ref using the smart HTTP prot
 `docker-updater.mode: "build"` is for a service whose image is **built locally** by Docker Compose (`build:`) and given a local tag that was never pushed to a registry, e.g. `image: opencode:local`. Such an image has no registry origin (no `RepoDigests`), so the default image mode's `docker pull opencode:local` fails every cycle with `pull access denied ... repository does not exist`. Build mode fixes this:
 
 - It **never** pulls the local derived tag. Instead it watches the service's **base image** (the `FROM` of its build).
-- Each cycle it pulls **only** the base image and compares its digest to the digest the current derived image was last built from. Unchanged → no-op.
-- When the base image publishes a new digest, it rebuilds and recreates the service:
+- Each cycle it pulls **only** the base image and checks, from the images themselves, whether the derived image still extends it (see *Staleness detection* below). Still current → no-op.
+- When the derived image is stale (the base advanced), it rebuilds and recreates the service:
 
   ```bash
   docker compose -f <config_files> --project-directory <working_dir> build --pull <service>
@@ -310,7 +310,9 @@ Checks a git remote for new commits on the tracked ref using the smart HTTP prot
 
 If neither resolves, the container is **skipped** with a one-line log (it never error-loops).
 
-**Built-from signal.** The "digest the derived image was built from" is tracked **per container** in memory (the same approach git mode uses for commit SHAs): the first cycle adopts the base's current digest as the baseline without rebuilding, and a later change to that digest is what triggers the rebuild. After a successful rebuild the new base digest is recorded so the next cycle is a no-op. This needs no Dockerfile/label cooperation and no inspection of the derived image's layers.
+**Staleness detection.** Whether the derived image needs a rebuild is computed from the images themselves, fresh on every cycle: an image built `FROM` a base starts with exactly the base's filesystem layers, so after pulling the base, docker-updater checks that the base's layers are a **prefix** of the layers of the image the service's container actually runs. If they are, the derived image genuinely extends the current base — up to date. If not, the base has advanced and the service is rebuilt. Because this compares ground truth rather than remembered state, it survives updater restarts and container recreations, and it catches staleness that predates the updater itself: a container built from a months-old base is detected and rebuilt on the very first check cycle.
+
+Some builds can never pass the layer check — e.g. a multi-stage Dockerfile whose final stage is `FROM scratch` (or an unrelated image) and only `COPY --from`s artifacts out of the base stage, so the final image doesn't start with the base's layers. docker-updater proves this once rather than looping: after a completed rebuild whose image *still* doesn't extend the base, the service is logged (`falling back to base-digest change tracking`) and switched to the fallback signal — the base digest recorded at the last rebuild, compared each cycle. For such services an updater restart re-adopts the current digest as the baseline (the pre-fix behavior for everything); all other services keep the restart-proof layer check.
 
 Cross-cutting features apply to build mode the same as other modes: pre-update checks (`docker-updater.pre-check.*`) gate the rebuild, post-update health checks (`docker-updater.health-check.*`) verify the recreated container and report failures, and `DOCKER_UPDATER_DRY_RUN` logs the rebuild + recreate it *would* perform while mutating nothing (the update stays pending until really applied). The base-image transition (`<old> -> <new>`) is reported on the dashboard and via webhooks like any other update.
 
@@ -327,9 +329,9 @@ services:
       docker-updater.base-image: "ghcr.io/anomalyco/opencode:latest"
 ```
 
-When `ghcr.io/anomalyco/opencode:latest` publishes a new digest, docker-updater runs `docker compose build --pull opencode` and `docker compose up -d opencode`, recreating the service on the rebuilt image. Without build mode, this same service would log a `pull access denied` error every cycle and never update.
+When `ghcr.io/anomalyco/opencode:latest` publishes a new release, the local image no longer extends the pulled base, so docker-updater runs `docker compose build --pull opencode` and `docker compose up -d opencode`, recreating the service on the rebuilt image. Without build mode, this same service would log a `pull access denied` error every cycle and never update.
 
-> **Requirement:** build mode shells out to the `docker` CLI with the Compose plugin (`docker compose`), and the build needs access to the service's build context. The default `scratch`-based image ships no `docker` binary, so to use build mode run docker-updater from an image that includes the Docker CLI + Compose plugin (and the build context mounted at the same `working_dir` path the compose labels record). The other modes (`image`, `git`) are unaffected and work in the default image. If the `docker` CLI is absent, a build-mode rebuild fails and is reported as an error rather than silently doing nothing.
+> **Requirement:** build mode shells out to the `docker` CLI with the Compose plugin (`docker compose`). The published image ships the statically-linked Docker CLI plus the compose and buildx CLI plugins, so build mode works out of the box — the one thing you must provide is the service's **build context**, mounted into the docker-updater container at the same `working_dir` path the compose labels record. If the CLI is ever absent (a custom-built image), a build-mode rebuild fails and is reported as an error rather than silently doing nothing.
 
 > **Locally-built images in image mode are skipped.** Even without migrating to build mode, a container in the default image mode whose image has no `RepoDigests` (locally built, no registry origin) is now **detected and skipped** with a warning — `image <x> is locally built and not in a registry; use docker-updater.mode=build` — instead of pull-erroring every cycle.
 

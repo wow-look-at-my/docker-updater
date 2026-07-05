@@ -121,6 +121,10 @@ func TestHandleAPIContainers(t *testing.T) {
 	assert.Equal(t, "5m0s", resp.Interval)
 	assert.Equal(t, "docker-updater.enable", resp.Label)
 	assert.False(t, resp.DryRun)
+	// The updater's own build identifier rides along so the dashboard can show
+	// which build is answering. Always present: buildVersion falls back to "dev".
+	assert.Equal(t, buildVersion(), resp.Version)
+	assert.NotEmpty(t, resp.Version)
 	require.NotNil(t, resp.LastCycle)
 	require.NotNil(t, resp.NextCycle)
 	assert.Equal(t, resp.LastCycle.Add(5*time.Minute).Unix(), resp.NextCycle.Unix())

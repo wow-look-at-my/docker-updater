@@ -20,6 +20,8 @@ func main() {
 		return
 	}
 
+	log.Printf("docker-updater %s starting", buildVersion())
+
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)

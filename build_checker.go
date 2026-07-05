@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -51,14 +52,87 @@ func composeArgs(configFiles []string, workingDir string, rest ...string) []stri
 	return append(args, rest...)
 }
 
+// composeLogWriter is where a child compose process's combined output is
+// streamed. Production wires it to the updater's own stderr so `docker logs
+// docker-updater` always carries the real compose output (progress AND the
+// actual failure reason); tests capture it. Var so tests can substitute.
+var composeLogWriter io.Writer = os.Stderr
+
+// Bounds for the output tail attached to a failed compose invocation's error:
+// the last composeErrTailLines lines or composeErrTailBytes bytes, whichever
+// is smaller. Enough to name the actual cause (e.g. a compose config or
+// build error) on the dashboard and in webhooks without shipping a whole
+// build log there.
+const (
+	composeErrTailLines = 20
+	composeErrTailBytes = 2048
+)
+
 func runDockerCompose(ctx context.Context, args []string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = os.Stderr // surface build output in the updater's logs
-	cmd.Stderr = os.Stderr
+	return runLoggedCommand(ctx, "docker", args)
+}
+
+// runLoggedCommand runs name with args, streaming the child's combined output
+// to the updater's own log while retaining a bounded tail. On a non-zero exit
+// the tail is folded into the returned error, so the dashboard and webhooks
+// name the actual cause instead of a bare "exit status 1".
+func runLoggedCommand(ctx context.Context, name string, args []string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+
+	// Stdout and Stderr share the one writer value, so os/exec serializes
+	// writes to it (no interleaving corruption) and uses a single pipe.
+	tail := &tailBuffer{max: composeErrTailBytes}
+	out := io.MultiWriter(composeLogWriter, tail)
+	cmd.Stdout = out
+	cmd.Stderr = out
+
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker %s: %w", strings.Join(args, " "), err)
+		// A bare *exec.ExitError renders as "exit status 1", which names no
+		// cause at all -- the dashboard/webhook error must carry the output
+		// tail so the operator sees WHY compose failed without having to
+		// open the updater's logs.
+		if t := tail.tail(composeErrTailLines); t != "" {
+			return fmt.Errorf("%s %s: %w; last output:\n%s", name, strings.Join(args, " "), err, t)
+		}
+		return fmt.Errorf("%s %s: %w (no output)", name, strings.Join(args, " "), err)
 	}
 	return nil
+}
+
+// tailBuffer is an io.Writer retaining only the last max bytes written, so a
+// multi-megabyte build log costs constant memory while the failure tail stays
+// available. Not safe for concurrent writers; os/exec guarantees serialized
+// writes when the same writer value backs both Stdout and Stderr, and tail()
+// is only called after the command has exited.
+type tailBuffer struct {
+	buf []byte
+	max int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-t.max:]...)
+	}
+	return len(p), nil
+}
+
+// tail returns the retained output trimmed to at most maxLines final lines,
+// with leading/trailing whitespace dropped. Empty when the command wrote
+// nothing.
+func (t *tailBuffer) tail(maxLines int) string {
+	s := strings.TrimSpace(string(t.buf))
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, "\r")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // defaultComposeRunner is the runner used in production. Var so tests can

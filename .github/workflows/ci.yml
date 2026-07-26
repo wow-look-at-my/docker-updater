@@ -8,9 +8,6 @@ permissions:
   contents: read
   packages: write
   actions: read
-  # buildhost-publish records every artifact it uploaded on the org's
-  # linked artifacts page; that recording is part of publishing, not
-  # optional, so the publish-buildhost job fails without this.
   artifact-metadata: write
 
 jobs:

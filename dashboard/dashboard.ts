@@ -4,6 +4,15 @@
 
 const REFRESH_SECONDS = 5;
 
+// A row whose container was actually updated (recreated on a new image/commit/
+// base) within this window gets a green background that fades linearly to
+// nothing as the update ages. Rows are rebuilt on every refresh, so the fade
+// advances in REFRESH_SECONDS steps.
+const UPDATED_HIGHLIGHT_MS = 10 * 60 * 1000;
+const UPDATED_HIGHLIGHT_MAX_ALPHA = 0.22;
+// rgb of --green (#3fb950) in dashboard.css.
+const GREEN_RGB = "63,185,80";
+
 // ApiContainer mirrors the JSON emitted by apiContainer in dashboard.go. Keeping
 // it in sync is the whole point of the TypeScript rewrite: a renamed or
 // wrong-typed field here is a compile error instead of a silent `undefined`.
@@ -35,6 +44,7 @@ interface ApiResponse {
   interval: string;
   dry_run: boolean;
   label: string;
+  version?: string;
   last_cycle?: string | null;
   next_cycle?: string | null;
   containers: ApiContainer[];
@@ -179,6 +189,60 @@ function pending(c: ApiContainer): boolean {
   return Boolean(c.auto_update && c.update_available);
 }
 
+// isOnline splits containers into the online/offline group halves. Offline is
+// the not-up states: exited, dead, or created (never started); everything else
+// (running, restarting, paused, removing) counts as online.
+function isOnline(c: ApiContainer): boolean {
+  return c.state !== "exited" && c.state !== "dead" && c.state !== "created";
+}
+
+// The four dashboard sections, in display order. Every container lands in
+// exactly one: managed (has the auto-update label) × online/offline. The ids
+// match the <details> elements in index.html ("-summary" / "-rows" suffixes).
+interface Group {
+  id: string;
+  label: string;
+  match: (c: ApiContainer) => boolean;
+}
+
+const GROUPS: Group[] = [
+  { id: "group-managed-online", label: "Managed · online", match: (c) => c.auto_update && isOnline(c) },
+  { id: "group-managed-offline", label: "Managed · offline", match: (c) => c.auto_update && !isOnline(c) },
+  { id: "group-unmanaged-online", label: "Unmanaged · online", match: (c) => !c.auto_update && isOnline(c) },
+  { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !c.auto_update && !isOnline(c) },
+];
+
+// searchQuery returns the normalized filter-box text: trimmed and lowercased,
+// "" meaning "no filter".
+function searchQuery(): string {
+  const box = document.getElementById("search") as HTMLInputElement | null;
+  return box ? box.value.trim().toLowerCase() : "";
+}
+
+// matchesQuery is a case-insensitive substring match against the container
+// name and image; either matching keeps the row visible.
+function matchesQuery(c: ApiContainer, query: string): boolean {
+  if (!query) return true;
+  return (c.name || "").toLowerCase().includes(query) || (c.image || "").toLowerCase().includes(query);
+}
+
+// updatedHighlight computes the fading green background for a container whose
+// last update was applied within UPDATED_HIGHLIGHT_MS: full strength when
+// fresh, linearly down to zero at the end of the window. Returns null once the
+// window has passed (or when the container was never updated).
+function updatedHighlight(c: ApiContainer, now: number): { background: string; title: string } | null {
+  if (!c.last_updated) return null;
+  const then = new Date(c.last_updated).getTime();
+  if (Number.isNaN(then)) return null;
+  const age = Math.max(0, now - then); // clamp so slight clock skew reads as fresh
+  if (age >= UPDATED_HIGHLIGHT_MS) return null;
+  const alpha = UPDATED_HIGHLIGHT_MAX_ALPHA * (1 - age / UPDATED_HIGHLIGHT_MS);
+  return {
+    background: "rgba(" + GREEN_RGB + "," + alpha.toFixed(3) + ")",
+    title: "updated " + (fmtRelative(c.last_updated) || "just now"),
+  };
+}
+
 function row(c: ApiContainer): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
@@ -193,7 +257,8 @@ function row(c: ApiContainer): HTMLElement {
   const lastChecked = c.auto_update ? (fmtRelative(c.last_checked) || "—") : "—";
   const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 
-  return el("tr", { class: pending(c) ? "row-pending" : null },
+  const highlight = updatedHighlight(c, Date.now());
+  const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null },
     nameCell,
     autoUpdateCell(c),
     stateCell(c),
@@ -203,6 +268,11 @@ function row(c: ApiContainer): HTMLElement {
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),
   );
+  // Inline style so the alpha can fade with age. It wins over .row-pending's
+  // class background, which is acceptable: a just-updated container should not
+  // also be pending, and the pending left-edge accent still shows regardless.
+  if (highlight) tr.style.background = highlight.background;
+  return tr;
 }
 
 function setText(id: string, text: string | number): void {
@@ -213,6 +283,8 @@ function setText(id: string, text: string | number): void {
 function render(data: ApiResponse): void {
   const containers = data.containers || [];
 
+  // The summary cards are fleet totals: computed over every container, never
+  // narrowed by the search filter.
   const auto = containers.filter((c) => c.auto_update).length;
   const updates = containers.filter(pending).length;
   const errors = containers.filter((c) => c.auto_update && c.error).length;
@@ -232,24 +304,62 @@ function render(data: ApiResponse): void {
   setText("cfg-label", data.label || "—");
   setText("refresh-interval", REFRESH_SECONDS);
 
+  // The updater's own build hash: shortened for the footer, full SHA on
+  // hover. Guarded lookup (like card-updates) rather than REQUIRED_IDS, since
+  // the dashboard works fine without the footer element.
+  const versionNode = document.getElementById("build-version");
+  if (versionNode) {
+    const v = data.version || "";
+    versionNode.textContent = v ? v.slice(0, 12) : "—";
+    versionNode.title = v ? "docker-updater build " + v : "";
+  }
+
   const lastCycle = fmtRelative(data.last_cycle);
   setText("last-cycle", lastCycle ? "Last check " + lastCycle : "No check yet");
   const nextCycle = fmtRelative(data.next_cycle);
   setText("next-cycle", nextCycle ? "Next check " + nextCycle : "");
   setText("refreshed", "Updated " + new Date(data.generated_at).toLocaleTimeString());
 
-  const isExited = (c: ApiContainer): boolean => c.state === "exited" || c.state === "dead";
-  const active = containers.filter((c) => !isExited(c));
-  const exited = containers.filter(isExited);
+  const query = searchQuery();
+  const visible = containers.filter((c) => matchesQuery(c, query));
 
-  document.getElementById("rows")!.replaceChildren(...active.map(row));
-  document.getElementById("exited-rows")!.replaceChildren(...exited.map(row));
+  // Only tbody contents, summary counts, and the hidden class change per
+  // render. The <details> elements themselves are static (and their open state
+  // is never touched), so the user's expand/collapse choices survive refreshes.
+  for (const g of GROUPS) {
+    const members = visible.filter(g.match);
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
+    document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
+    document.getElementById(g.id)!.classList.toggle("hidden", members.length === 0);
+  }
 
-  document.getElementById("exited-section")!.classList.toggle("hidden", exited.length === 0);
-  document.getElementById("exited-summary")!.textContent =
-    exited.length + " exited container" + (exited.length !== 1 ? "s" : "");
+  // Every container lands in exactly one group, so "all groups hidden" is
+  // exactly "no visible containers": none exist, or the filter matched none.
+  const empty = document.getElementById("empty")!;
+  empty.textContent = query && containers.length > 0
+    ? 'No containers match "' + query + '".'
+    : "No containers found.";
+  empty.classList.toggle("hidden", visible.length > 0);
+}
 
-  document.getElementById("empty")!.classList.toggle("hidden", containers.length > 0);
+// latestData holds the most recent successful /api/containers payload so the
+// search box can re-render instantly without refetching; the poll replaces it.
+let latestData: ApiResponse | null = null;
+
+// OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
+// an index.html from one build paired with a dashboard.js/css from another
+// (a cache or proxy in front of the server, or two docker-updater containers
+// answering the same host).
+const OUT_OF_SYNC_HINT =
+  "Dashboard assets are out of sync (a cache or proxy served mismatched files). " +
+  "Hard-refresh (Ctrl+Shift+R); if it persists, purge your CDN cache for this host " +
+  "and check for two running docker-updater containers.";
+
+// isNullElementError spots render() blowing up on a missing element (a
+// TypeError dereferencing null/undefined) — the mixed-asset signature — as
+// opposed to a genuine fetch/data failure.
+function isNullElementError(err: unknown): boolean {
+  return err instanceof TypeError && /null|undefined/i.test(err.message);
 }
 
 async function refresh(): Promise<void> {
@@ -257,30 +367,112 @@ async function refresh(): Promise<void> {
   try {
     const resp = await fetch("api/containers", { cache: "no-store" });
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
-    render((await resp.json()) as ApiResponse);
+    latestData = (await resp.json()) as ApiResponse;
+    render(latestData);
     banner.classList.add("hidden");
   } catch (err) {
-    banner.textContent = "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
+    banner.textContent = isNullElementError(err)
+      ? OUT_OF_SYNC_HINT
+      : "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
     banner.classList.remove("hidden");
   }
 }
 
 // jumpToPending scrolls to the first container with a held-back update, flashing
-// it so "N updates pending" always points at concrete rows. Stopped containers
-// live in a collapsed section, so reveal it first when the target is inside.
+// it so "N updates pending" always points at concrete rows. Every row lives in
+// a collapsible group, so reveal the group holding the target first.
 function jumpToPending(): void {
   const first = document.querySelector<HTMLElement>(".row-pending");
   if (!first) return;
-  const exitedSection = document.getElementById("exited-section") as HTMLDetailsElement | null;
-  if (exitedSection && exitedSection.contains(first)) exitedSection.open = true;
+  const section = first.closest("details");
+  if (section) section.open = true;
   first.scrollIntoView({ behavior: "smooth", block: "center" });
   first.classList.remove("row-flash");
   void first.offsetWidth; // reflow so the animation restarts on repeat clicks
   first.classList.add("row-flash");
 }
 
-const updatesCard = document.getElementById("card-updates");
-if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
+// onSearchInput re-renders the groups from the last fetched payload — no
+// refetch; the poll keeps replacing latestData underneath as usual.
+function onSearchInput(): void {
+  if (latestData) render(latestData);
+}
 
-void refresh();
-setInterval(refresh, REFRESH_SECONDS * 1000);
+// REQUIRED_IDS is the startup contract between this script and index.html:
+// every element id the code above dereferences unconditionally (the four group
+// sections with their -rows/-summary children, the search box, the empty-state
+// line, the error banner, the dry-run badge, and the summary stat cards). The
+// group entries are derived from GROUPS so the list can't drift from render()'s
+// own lookups.
+const REQUIRED_IDS: string[] = [
+  "search",
+  "empty",
+  "error-banner",
+  "dry-run-badge",
+  "stat-total",
+  "stat-auto",
+  "stat-manual",
+  "stat-updates",
+  "stat-errors",
+  ...GROUPS.flatMap((g) => [g.id, g.id + "-rows", g.id + "-summary"]),
+];
+
+// renderOutOfSyncBanner replaces the cryptic "replaceChildren of null" crash
+// with a readable full-width explanation of what actually happened. Inline
+// styles on purpose: in the mixed-asset scenario the stylesheet may be from
+// yet another build, so the banner cannot rely on any class existing.
+function renderOutOfSyncBanner(missing: string[]): void {
+  const banner = el(
+    "div",
+    {
+      class: "error-banner",
+      style:
+        "display:block;margin:16px;padding:12px 16px;border:1px solid #f85149;" +
+        "border-radius:6px;background:#3d1214;color:#ffdcd7;" +
+        "font:14px/1.5 system-ui,sans-serif;",
+    },
+    OUT_OF_SYNC_HINT + " (missing elements: " + missing.join(", ") + ")",
+  );
+  document.body.prepend(banner);
+}
+
+// initDashboard wires the listeners and starts the poll loop — only ever
+// called against a document that passed the REQUIRED_IDS check below.
+function initDashboard(): void {
+  const updatesCard = document.getElementById("card-updates");
+  if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
+
+  const searchBox = document.getElementById("search") as HTMLInputElement | null;
+  if (searchBox) searchBox.addEventListener("input", onSearchInput);
+
+  // Keyboard niceties: "/" focuses the filter box, Escape clears it.
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (!searchBox) return;
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    const typing = target !== null &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+    if (e.key === "/" && !typing) {
+      e.preventDefault();
+      searchBox.focus();
+      searchBox.select();
+    } else if (e.key === "Escape" && target === searchBox) {
+      searchBox.value = "";
+      onSearchInput();
+      searchBox.blur();
+    }
+  });
+
+  void refresh();
+  setInterval(refresh, REFRESH_SECONDS * 1000);
+}
+
+// Startup gate: if the document is missing anything this script requires, the
+// browser was served mismatched assets (an index.html from one build against a
+// dashboard.js from another). Say so readably and do NOT start the poll loop —
+// every render would just crash on the absent elements.
+const missingIds = REQUIRED_IDS.filter((id) => document.getElementById(id) === null);
+if (missingIds.length > 0) {
+  renderOutOfSyncBanner(missingIds);
+} else {
+  initDashboard();
+}

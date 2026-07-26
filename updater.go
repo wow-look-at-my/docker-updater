@@ -36,6 +36,8 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 			result = checkAndUpdateImage(ctx, cli, info, cfg, result, resolveAuth)
 		case UpdateModeGit:
 			result = checkAndUpdateGit(ctx, cli, info, cfg, result)
+		case UpdateModeBuild:
+			result = checkAndUpdateBuild(ctx, cli, defaultComposeRunner, info, cfg, result, resolveAuth)
 		default:
 			log.Printf("container %s: unknown mode %q, skipping", info.Name, info.Mode)
 			continue
@@ -137,6 +139,84 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 	}
 
 	result.Updated = true
+	return result
+}
+
+// checkAndUpdateBuild handles a build-mode container: a locally-built (compose
+// `build:`) service whose local derived tag has no registry origin. It watches
+// the service's BASE image and, when the base digest advances, rebuilds and
+// recreates the service via docker compose. It never pulls the local derived
+// tag.
+func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
+	if info.BaseImage == "" {
+		// Unresolvable base: skip without erroring the loop. listMonitoredContainers
+		// already logged once at resolution; report a one-line skip here too.
+		result.Skipped = true
+		result.SkipReason = "no base image to watch (set docker-updater.base-image or a parseable Dockerfile FROM)"
+		log.Printf("container %s: build mode but no base image to watch; use docker-updater.base-image (skipping)", info.Name)
+		return result
+	}
+
+	oldBase, newBase, verified, err := checkBuildUpdate(ctx, cli, info, resolveAuth)
+	if err != nil {
+		result.Error = err
+		log.Printf("container %s: error checking base image: %v", info.Name, err)
+		return result
+	}
+
+	result.OldRef = oldBase
+
+	if newBase == "" {
+		if verified {
+			log.Printf("container %s: image up to date with base %s (base layers verified)", info.Name, shortID(oldBase))
+		} else {
+			log.Printf("container %s: base image up-to-date (digest match)", info.Name)
+		}
+		return result
+	}
+
+	result.NewRef = newBase
+	if verified {
+		from := shortID(oldBase)
+		if from == "" {
+			from = "unknown"
+		}
+		log.Printf("container %s: image built from stale base; rebuilding (%s -> %s)", info.Name, from, shortID(newBase))
+	} else {
+		log.Printf("container %s: base image update detected (%s -> %s)", info.Name, shortID(oldBase), shortID(newBase))
+	}
+
+	if !info.Rolling {
+		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
+			if err := runPreCheck(ctx, cli, info); err != nil {
+				result.Skipped = true
+				result.SkipReason = err.Error()
+				log.Printf("container %s: pre-check failed, skipping rebuild: %v", info.Name, err)
+				return result
+			}
+		}
+	}
+
+	if cfg.DryRun {
+		// Dry-run must mutate nothing: no compose build, no recreate, and the
+		// recorded "built-from" base must not advance, so the same update keeps
+		// showing as available until it is really applied.
+		log.Printf("container %s: dry-run mode, would rebuild service %s on new base %s (no changes made)", info.Name, info.ComposeService, shortID(newBase))
+		result.Updated = true
+		return result
+	}
+
+	changed, err := rebuildAndRecreate(ctx, cli, runner, info, newBase, verified)
+	if err != nil {
+		result.Error = err
+		log.Printf("container %s: error rebuilding: %v", info.Name, err)
+		return result
+	}
+
+	// A cache-hit rebuild (identical image ID) is not a churn-worthy update, but
+	// the base did advance, so still report that the check applied the new base.
+	result.Updated = true
+	_ = changed
 	return result
 }
 

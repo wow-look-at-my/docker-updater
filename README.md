@@ -6,6 +6,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
+- **Build-based updates**: For locally-built (compose `build:`) services that are never pushed to a registry, watches the service's **base image** and rebuilds + recreates via `docker compose` when the derived image no longer extends the base's current release — instead of fruitlessly pulling a local-only tag every cycle
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
 - **Automatic rollback**: if the replacement container fails its post-update health check, the previous image is restored under the same name -- a failed update never leaves the service down
@@ -14,7 +15,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Webhook notifications**: Supports generic, Discord, and Slack webhooks
 - **GitHub webhook trigger**: An authenticated inbound endpoint that lets GitHub kick off a check the moment a ghcr image is pushed, instead of waiting for the next interval
 - **Dry-run mode**: Monitor for updates without applying them
-- **Scratch image**: No external dependencies at runtime
+- **Scratch image**: no libc, no shell — just static binaries: the updater itself plus the Docker CLI with the compose/buildx plugins that build mode shells out to
 
 ## Usage
 
@@ -49,15 +50,29 @@ All configuration is via environment variables:
 
 docker-updater serves a read-only web dashboard (default `:8080`) that lists
 **every** container on the host -- both the ones it auto-updates and the ones it
-doesn't -- so you can see your fleet at a glance:
+doesn't -- so you can see your fleet at a glance. The dashboard's static assets
+are served with strong SHA-256 `ETag`s and `Cache-Control: no-cache`, so
+browsers and any cache in front revalidate on every load (a cheap 304 while
+unchanged) and a deploy can never leave a stale `dashboard.js` running against
+a newer `index.html`:
 
 ![docker-updater dashboard](docs/dashboard.png)
 
-- **Auto-update status**: whether a container is monitored, and in `image` or `git` mode
+- **Auto-update status**: whether a container is monitored, and in `image`, `git`, or `build` mode
 - **State & uptime**: running/stopped, healthcheck status, and how long it has been up
 - **Restarts**: Docker's restart count -- how many times the daemon's restart policy has restarted the container since it was last (re)created. Because docker-updater creates a fresh container on every pull, this reads as "restarts since the last pull" for monitored containers, and a non-zero value flags a crash-looping container
 - **Last checked / last pulled**: *last checked* is when docker-updater last polled the registry; *last pulled* is when it last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance "last pulled", so the column reflects genuine image changes rather than resetting every cycle
 - **Upstream**: whether a newer image digest (or git commit) is available -- and, when it is, why it has not been applied yet -- or the last error
+
+Containers are grouped into four collapsible sections -- **Managed · online**,
+**Managed · offline**, **Unmanaged · online**, and **Unmanaged · offline** --
+where *managed* means the container carries the enable label and *offline*
+means it is exited, dead, or created but never started. Empty groups are
+hidden, and the unmanaged-offline group starts collapsed. A search box in the
+top bar filters every group by container name or image (press `/` to focus it,
+`Escape` to clear). Rows whose container was **actually updated** in the last
+10 minutes get a green highlight that fades as the update ages, so a fresh
+deploy is visible at a glance.
 
 ### Summary counters
 
@@ -74,11 +89,16 @@ explicit:
   is sitting idle on work it could do.
 - The affected rows are tinted and tagged `update available` with the reason
   (`dry-run`, `skipped: <reason>`, or `error: <message>`) in the Upstream column.
-  Click the **updates pending** card to jump straight to them; if one is a stopped
-  container, the collapsed "exited" section is expanded automatically.
+  Click the **updates pending** card to jump straight to them; if the first one
+  sits in a collapsed group, that group is expanded automatically.
 
-The page auto-refreshes every few seconds. The same data is available as JSON at
-`/api/containers`, and `/healthz` returns `200 ok` for external liveness probes.
+The page auto-refreshes every few seconds. The footer shows the **build hash of
+the running docker-updater** (short SHA; hover for the full one — the same
+commit the image's `org.opencontainers.image.version` label carries), so you can
+tell at a glance which build is answering. The same hash is printed at startup
+(`docker-updater <sha> starting`) and returned in the `version` field of the
+JSON API. The same data is available as JSON at `/api/containers`, and
+`/healthz` returns `200 ok` for external liveness probes.
 
 With `--network host` (recommended), the dashboard is reachable on the host's
 port directly, e.g. `http://<host>:8080`. Without host networking, publish the
@@ -207,10 +227,12 @@ Add these labels to containers you want to monitor:
 labels:
   docker-updater.enable: "true"
   # Optional: update mode (default: image)
-  docker-updater.mode: "image"  # or "git"
+  docker-updater.mode: "image"  # or "git" or "build"
   # Git mode only:
   docker-updater.git-repo: "https://github.com/user/repo"
   docker-updater.git-ref: "refs/heads/main"
+  # Build mode only (locally-built compose `build:` services):
+  docker-updater.base-image: "ghcr.io/anomalyco/opencode:latest"  # base image to watch
   # Post-update health check (HTTP or exec; falls back to Docker HEALTHCHECK):
   docker-updater.health-check.url: ":8080/health"
   docker-updater.health-check.command: "curl -sf http://localhost:8080/health"
@@ -268,6 +290,64 @@ The registry reference to poll is taken from the reference the container was cre
 ### Git Mode
 
 Checks a git remote for new commits on the tracked ref using the smart HTTP protocol (no git binary required). When a new commit is detected, the container is recreated with a fresh image pull.
+
+### Build Mode (locally-built images)
+
+`docker-updater.mode: "build"` is for a service whose image is **built locally** by Docker Compose (`build:`) and given a local tag that was never pushed to a registry, e.g. `image: opencode:local`. Such an image has no registry origin (no `RepoDigests`), so the default image mode's `docker pull opencode:local` fails every cycle with `pull access denied ... repository does not exist`. Build mode fixes this:
+
+- It **never** pulls the local derived tag. Instead it watches the service's **base image** (the `FROM` of its build).
+- Each cycle it pulls **only** the base image and checks, from the images themselves, whether the derived image still extends it (see *Staleness detection* below). Still current → no-op.
+- When the derived image is stale (the base advanced), it rebuilds and recreates the service:
+
+  ```bash
+  docker compose -f <config_files> --project-directory <working_dir> build --pull <service>
+  docker compose -f <config_files> --project-directory <working_dir> up -d <service>
+  ```
+
+  The container is recreated **only if the rebuilt image ID actually changed** — a cache-hit rebuild that produces the identical image is a no-op (no churn), mirroring image mode.
+
+**Identifying the service.** docker-updater reads the service's compose identity from the standard compose labels Docker stamps on every compose-managed container (`com.docker.compose.project`, `.service`, `.project.config_files`, `.project.working_dir`), so no extra configuration beyond `mode: build` is usually needed.
+
+**Determining the base image** (in preference order):
+
+1. The explicit `docker-updater.base-image` label (e.g. `ghcr.io/anomalyco/opencode:latest`). **Recommended** — unambiguous and works with any build setup.
+2. Otherwise, the `FROM` of the service's Dockerfile (looked up under the compose working directory). Multi-stage Dockerfiles are handled: the base of the **final** stage is watched, resolving `FROM <stage-name>` references back to the stage's own registry base. `FROM scratch`, a build-arg base (`FROM ${BASE}`), or an unreadable/unparseable Dockerfile mean no base can be resolved.
+
+If neither resolves, the container is **skipped** with a one-line log (it never error-loops).
+
+**Staleness detection.** Whether the derived image needs a rebuild is computed from the images themselves, fresh on every cycle: an image built `FROM` a base starts with exactly the base's filesystem layers, so after pulling the base, docker-updater checks that the base's layers are a **prefix** of the layers of the image the service's container actually runs. If they are, the derived image genuinely extends the current base — up to date. If not, the base has advanced and the service is rebuilt. Because this compares ground truth rather than remembered state, it survives updater restarts and container recreations, and it catches staleness that predates the updater itself: a container built from a months-old base is detected and rebuilt on the very first check cycle.
+
+Some builds can never pass the layer check — e.g. a multi-stage Dockerfile whose final stage is `FROM scratch` (or an unrelated image) and only `COPY --from`s artifacts out of the base stage, so the final image doesn't start with the base's layers. docker-updater proves this once rather than looping: after a completed rebuild whose image *still* doesn't extend the base, the service is logged (`falling back to base-digest change tracking`) and switched to the fallback signal — the base digest recorded at the last rebuild, compared each cycle. For such services an updater restart re-adopts the current digest as the baseline (the pre-fix behavior for everything); all other services keep the restart-proof layer check.
+
+Cross-cutting features apply to build mode the same as other modes: pre-update checks (`docker-updater.pre-check.*`) gate the rebuild, post-update health checks (`docker-updater.health-check.*`) verify the recreated container and report failures, and `DOCKER_UPDATER_DRY_RUN` logs the rebuild + recreate it *would* perform while mutating nothing (the update stays pending until really applied). The base-image transition (`<old> -> <new>`) is reported on the dashboard and via webhooks like any other update.
+
+#### Build-mode example
+
+```yaml
+services:
+  opencode:
+    build: .                       # Dockerfile FROM ghcr.io/anomalyco/opencode:latest
+    image: opencode:local          # local-only tag, never pushed
+    labels:
+      docker-updater.enable: "true"
+      docker-updater.mode: "build"
+      docker-updater.base-image: "ghcr.io/anomalyco/opencode:latest"
+```
+
+When `ghcr.io/anomalyco/opencode:latest` publishes a new release, the local image no longer extends the pulled base, so docker-updater runs `docker compose build --pull opencode` and `docker compose up -d opencode`, recreating the service on the rebuilt image. Without build mode, this same service would log a `pull access denied` error every cycle and never update.
+
+> **Requirement:** build mode shells out to the `docker` CLI with the Compose plugin (`docker compose`). The published image ships the statically-linked Docker CLI plus the compose and buildx CLI plugins — and a writable `/tmp`, which compose/buildx hard-require (a `dockerfile_inline` build is materialized into a temp directory, and compose's bake integration writes its metadata file under the temp dir) — so build mode works out of the box. The one thing you must provide is the service's **compose file and build context**, mounted into the docker-updater container at the same paths the compose labels record (`working_dir` / `config_files`). If the CLI is ever absent (a custom-built image), a build-mode rebuild fails and is reported as an error rather than silently doing nothing.
+
+#### Troubleshooting a failed rebuild
+
+A failed `docker compose build` / `up` is reported with the **last lines of the compose output attached to the error**, so the dashboard's Upstream column and webhook notifications name the actual cause — not just `exit status 1`. The complete compose output (progress and errors) always streams into the updater's own log: `docker logs docker-updater`.
+
+The two failure signatures worth knowing:
+
+- **Compose tree not mounted.** Compose runs *inside* the docker-updater container, so it can only see the compose file and build context if they are bind-mounted into it at the **same absolute paths** recorded on the service's containers. An error like `stat /srv/stack/docker-compose.yml: no such file or directory` (or `no configuration file provided`) means the path exists on the host but not inside docker-updater — add a volume such as `-v /srv/stack:/srv/stack:ro` (read-write if the build writes into its context).
+- **No writable temp dir.** `mkdir /tmp/dockerfileNNN: no such file or directory` means the image has no `/tmp` — buildx cannot materialize a `dockerfile_inline` (and compose cannot place its bake metadata file). The published image ships `/tmp` (mode `1777`) and sets `TMPDIR=/tmp`; if you build a custom `FROM scratch` image, ship the same.
+
+> **Locally-built images in image mode are skipped.** Even without migrating to build mode, a container in the default image mode whose image has no `RepoDigests` (locally built, no registry origin) is now **detected and skipped** with a warning — `image <x> is locally built and not in a registry; use docker-updater.mode=build` — instead of pull-erroring every cycle.
 
 ### Pre-Update Checks
 

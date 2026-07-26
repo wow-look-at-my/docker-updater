@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -172,6 +173,14 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
+		if mode == UpdateModeBuild {
+			info.ComposeProject = c.Labels["com.docker.compose.project"]
+			info.ComposeService = c.Labels["com.docker.compose.service"]
+			info.ComposeConfigFiles = c.Labels["com.docker.compose.project.config_files"]
+			info.ComposeWorkingDir = c.Labels["com.docker.compose.project.working_dir"]
+			info.BaseImage = resolveBaseImage(info, readDockerfile)
+		}
+
 		info.PreCheckURL = c.Labels["docker-updater.pre-check.url"]
 		info.PreCheckCommand = c.Labels["docker-updater.pre-check.command"]
 		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
@@ -245,6 +254,21 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 				log.Printf("cannot resolve registry repository for container %s; skipping", name)
 				continue
 			}
+
+			// Skip-guard for locally-built images. A container whose image has
+			// no RepoDigests has no registry origin (it was built locally and
+			// never pushed/pulled, e.g. a compose `build:` tag like
+			// `opencode:local`). resolveImageRef still returns the local tag as
+			// pullable, so without this guard image mode would `docker pull
+			// <local-tag>` every cycle and fail with "repository does not
+			// exist". Detect it and skip with an actionable warning instead.
+			// A digest-pinned reference (already canonical) is exempt -- it
+			// names a real registry manifest even with no RepoDigests recorded.
+			if len(repoDigests) == 0 && !isCanonicalRef(ref) {
+				log.Printf("image %s is locally built and not in a registry; use docker-updater.mode=build (skipping container %s)", ref, name)
+				continue
+			}
+
 			info.Image = ref
 			info.ImageDigest = imageIdentity(repoDigests, inspect.Image, repositoryOf(ref))
 		} else {
@@ -255,6 +279,13 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 	}
 
 	return monitored, nil
+}
+
+// listAllContainers returns every container on the host (running or not). Used
+// by build mode to re-find a service's container after a compose recreate
+// replaces it.
+func listAllContainers(ctx context.Context, cli DockerClient) ([]types.Container, error) {
+	return cli.ContainerList(ctx, container.ListOptions{All: true})
 }
 
 // runningRepoDigests returns the RepoDigests of the running image, used to
@@ -310,9 +341,14 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 	}
 	defer reader.Close()
 
-	// Consume the pull output to completion.
-	if _, err := io.Copy(io.Discard, reader); err != nil {
-		return "", false, fmt.Errorf("reading pull response for %s: %w", imageName, err)
+	// Decode the pull's JSON progress stream to completion. The daemon
+	// reports mid-pull failures (registry 429/5xx, dropped connections) as
+	// in-band `error` records in a cleanly terminated stream, so blindly
+	// draining the reader would treat a failed pull as success -- the caller
+	// would then inspect the OLD local image and wrongly conclude
+	// "up-to-date". jsonmessage surfaces those records as an error.
+	if err := jsonmessage.DisplayJSONMessagesStream(reader, io.Discard, 0, false, nil); err != nil {
+		return "", false, fmt.Errorf("pulling image %s: %w", imageName, err)
 	}
 
 	// Inspect the pulled image to get its freshly-resolved registry digest.

@@ -9,6 +9,7 @@ permissions:
   packages: write
   actions: read
   artifact-metadata: write
+  deployments: write
 
 jobs:
   test:

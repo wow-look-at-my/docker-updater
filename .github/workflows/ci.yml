@@ -45,4 +45,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: .github/actions
+      # go-toolchain hands its build/ outputs to later jobs through the org
+      # cache-upload action, not actions/upload-artifact, so buildhost-publish's
+      # default artifact mode finds nothing ("Artifact 'go-build' not found in
+      # run"). Restore the hand-off and publish from the directory instead --
+      # the same shape go-toolchain's own publish job uses. The name is explicit
+      # rather than nameless self-discovery because go-toolchain still saves the
+      # deprecated bare `go-build` alias alongside `go-build-<job>`, and a run
+      # with two hand-offs makes nameless discovery a hard error by design.
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: go-build-test
+          path: build/
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master
+        with:
+          path: build

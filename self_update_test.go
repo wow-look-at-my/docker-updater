@@ -210,7 +210,7 @@ func TestUpdateContainerRoutesSelfToHelper(t *testing.T) {
 
 	info := ContainerInfo{ID: "selfid", Name: "docker-updater", Image: "img"}
 	cfg := Config{SelfContainerID: "selfid"}
-	require.NoError(t, updateContainer(context.Background(), cli, info, cfg))
+	require.NoError(t, updateContainer(context.Background(), cli, &fakeComposeRunner{}, info, cfg))
 
 	assert.True(t, helperCreated, "updating our own container must go through the helper")
 	assert.False(t, selfStopped, "our own container must not be stopped inline")
@@ -251,6 +251,6 @@ func TestUpdateContainerNonSelfRecreatesInline(t *testing.T) {
 
 	info := ContainerInfo{ID: "appid", Name: "app", Image: "img"}
 	cfg := Config{SelfContainerID: "selfid"} // not us
-	require.NoError(t, updateContainer(context.Background(), cli, info, cfg))
+	require.NoError(t, updateContainer(context.Background(), cli, &fakeComposeRunner{}, info, cfg))
 	assert.True(t, stopped, "a non-self container is recreated inline (old one stopped)")
 }

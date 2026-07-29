@@ -105,7 +105,7 @@ func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
 		Mode:        UpdateModeImage,
 	}
 	cfg := Config{Label: "docker-updater.enable", DryRun: true}
-	result := checkAndUpdateImage(context.Background(), cli, info, cfg, UpdateResult{Container: info, DryRun: true}, newAuthResolver(nil))
+	result := checkAndUpdateImage(context.Background(), cli, &fakeComposeRunner{}, info, cfg, UpdateResult{Container: info, DryRun: true}, newAuthResolver(nil))
 
 	assert.True(t, result.Pulled, "fetching new content must mark the image as pulled")
 	assert.True(t, result.Updated, "an update is available")
@@ -199,7 +199,7 @@ func TestCheckAndUpdateImageUpdate(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
+	result = checkAndUpdateImage(context.Background(), cli, &fakeComposeRunner{}, info, cfg, result, newAuthResolver(nil))
 
 	assert.True(t, result.Updated)
 	assert.Nil(t, result.Error)
@@ -260,7 +260,7 @@ func TestCheckAndUpdateGitNoRepo(t *testing.T) {
 
 	cfg := Config{}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	result = checkAndUpdateGit(context.Background(), nil, &fakeComposeRunner{}, info, cfg, result)
 
 	require.NotNil(t, result.Error)
 	assert.False(t, result.Updated)
@@ -296,11 +296,11 @@ func TestCheckAndUpdateGitDryRun(t *testing.T) {
 	cfg := Config{DryRun: true}
 
 	result := UpdateResult{Container: info, DryRun: true}
-	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	result = checkAndUpdateGit(context.Background(), nil, &fakeComposeRunner{}, info, cfg, result)
 	assert.False(t, result.Updated)
 
 	result = UpdateResult{Container: info, DryRun: true}
-	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	result = checkAndUpdateGit(context.Background(), nil, &fakeComposeRunner{}, info, cfg, result)
 	assert.True(t, result.Updated)
 	assert.True(t, result.DryRun)
 }
@@ -359,7 +359,7 @@ func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
+	result = checkAndUpdateImage(context.Background(), cli, &fakeComposeRunner{}, info, cfg, result, newAuthResolver(nil))
 
 	assert.False(t, result.Updated)
 	assert.True(t, result.Skipped)
@@ -418,7 +418,7 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateImage(context.Background(), cli, info, cfg, result, newAuthResolver(nil))
+	result = checkAndUpdateImage(context.Background(), cli, &fakeComposeRunner{}, info, cfg, result, newAuthResolver(nil))
 
 	assert.True(t, result.Updated)
 	assert.False(t, result.Skipped)
@@ -462,13 +462,13 @@ func TestCheckAndUpdateGitPreCheckFails(t *testing.T) {
 
 	// First call seeds the ref store.
 	result := UpdateResult{Container: info}
-	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	result = checkAndUpdateGit(context.Background(), nil, &fakeComposeRunner{}, info, cfg, result)
 	assert.False(t, result.Updated)
 	assert.False(t, result.Skipped)
 
 	// Second call detects change but pre-check fails.
 	result = UpdateResult{Container: info}
-	result = checkAndUpdateGit(context.Background(), nil, info, cfg, result)
+	result = checkAndUpdateGit(context.Background(), nil, &fakeComposeRunner{}, info, cfg, result)
 	assert.False(t, result.Updated)
 	assert.True(t, result.Skipped)
 	assert.Contains(t, result.SkipReason, "status 503")

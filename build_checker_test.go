@@ -24,6 +24,15 @@ type fakeComposeRunner struct {
 	buildErr   error
 	upErr      error
 	onBuild    func() // hook to mutate fixture state between build and the image re-read
+
+	// Image-mode recreates go through UpNoDeps; recorded separately so tests
+	// can assert dependencies are never swept into a single-service update.
+	upNoDepsCalls    int
+	upNoDepsErr      error
+	upNoDepsServices []string
+	upNoDepsFiles    [][]string
+	upNoDepsDirs     []string
+	onUpNoDeps       func() // hook to mutate fixture state between converge attempts
 }
 
 func (f *fakeComposeRunner) Build(_ context.Context, _ []string, _, _ string) error {
@@ -37,6 +46,17 @@ func (f *fakeComposeRunner) Build(_ context.Context, _ []string, _, _ string) er
 func (f *fakeComposeRunner) Up(_ context.Context, _ []string, _, _ string) error {
 	f.upCalls++
 	return f.upErr
+}
+
+func (f *fakeComposeRunner) UpNoDeps(_ context.Context, configFiles []string, workingDir, service string) error {
+	f.upNoDepsCalls++
+	f.upNoDepsFiles = append(f.upNoDepsFiles, configFiles)
+	f.upNoDepsDirs = append(f.upNoDepsDirs, workingDir)
+	f.upNoDepsServices = append(f.upNoDepsServices, service)
+	if f.onUpNoDeps != nil {
+		f.onUpNoDeps()
+	}
+	return f.upNoDepsErr
 }
 
 // resetBuildState clears the per-service baseline and prefix-incapability

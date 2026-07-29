@@ -173,11 +173,18 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
+		// Compose metadata is read for every mode, not just build mode. A
+		// compose-managed container recreated from its own stored HostConfig
+		// silently keeps the config it was created with, so edits to the
+		// compose file (a new mount, a changed env var) never reach the
+		// service. Image mode uses these labels to converge through `docker
+		// compose up -d` instead, making the compose file authoritative.
+		info.ComposeProject = c.Labels["com.docker.compose.project"]
+		info.ComposeService = c.Labels["com.docker.compose.service"]
+		info.ComposeConfigFiles = c.Labels["com.docker.compose.project.config_files"]
+		info.ComposeWorkingDir = c.Labels["com.docker.compose.project.working_dir"]
+
 		if mode == UpdateModeBuild {
-			info.ComposeProject = c.Labels["com.docker.compose.project"]
-			info.ComposeService = c.Labels["com.docker.compose.service"]
-			info.ComposeConfigFiles = c.Labels["com.docker.compose.project.config_files"]
-			info.ComposeWorkingDir = c.Labels["com.docker.compose.project.working_dir"]
 			info.BaseImage = resolveBaseImage(info, readDockerfile)
 		}
 

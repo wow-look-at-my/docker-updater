@@ -28,8 +28,10 @@ type ContainerInfo struct {
 	GitRepo string
 	GitRef  string
 
-	// Build-mode fields. Populated for UpdateModeBuild from the container's
-	// compose labels and (optionally) the docker-updater.base-image label.
+	// Compose fields. Populated for every mode from the container's compose
+	// labels; empty for containers not created by docker compose. Image mode
+	// recreates a compose-managed service through `docker compose up -d` so
+	// compose-file edits apply, and build mode additionally rebuilds it.
 	ComposeProject     string // com.docker.compose.project
 	ComposeService     string // com.docker.compose.service
 	ComposeConfigFiles string // com.docker.compose.project.config_files (comma-separated)

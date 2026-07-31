@@ -23,6 +23,12 @@ type composeRunner interface {
 	// Up runs `docker compose -f <configFiles...> --project-directory
 	// <workingDir> up -d <service>`.
 	Up(ctx context.Context, configFiles []string, workingDir, service string) error
+	// UpNoDeps runs `docker compose -f <configFiles...> --project-directory
+	// <workingDir> up -d --no-deps <service>`. Image-mode recreates use this so
+	// converging one service can never restart its dependencies: a stack whose
+	// dependency owns durable state (a docker-in-docker daemon, a database)
+	// must not lose it because a sibling service took a new image.
+	UpNoDeps(ctx context.Context, configFiles []string, workingDir, service string) error
 }
 
 // execComposeRunner is the production composeRunner: it execs the docker CLI.
@@ -35,6 +41,11 @@ func (execComposeRunner) Build(ctx context.Context, configFiles []string, workin
 
 func (execComposeRunner) Up(ctx context.Context, configFiles []string, workingDir, service string) error {
 	args := composeArgs(configFiles, workingDir, "up", "-d", service)
+	return runDockerCompose(ctx, args)
+}
+
+func (execComposeRunner) UpNoDeps(ctx context.Context, configFiles []string, workingDir, service string) error {
+	args := composeArgs(configFiles, workingDir, "up", "-d", "--no-deps", service)
 	return runDockerCompose(ctx, args)
 }
 

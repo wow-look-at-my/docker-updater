@@ -24,6 +24,7 @@ func TestMain(m *testing.M) {
 	healthCheckPollInterval = 10 * time.Millisecond
 	execPollInterval = 10 * time.Millisecond
 	noHealthcheckGracePeriod = 50 * time.Millisecond
+	aliasSettleDelay = 10 * time.Millisecond
 	os.Exit(m.Run())
 }
 

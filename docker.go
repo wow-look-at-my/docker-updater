@@ -37,6 +37,8 @@ type DockerClient interface {
 	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 	ImageInspectWithRaw(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
 	ImageTag(ctx context.Context, source, target string) error
+	NetworkConnect(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error
+	NetworkDisconnect(ctx context.Context, networkID, containerID string, force bool) error
 	Close() error
 }
 
@@ -473,6 +475,32 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 	return nil
 }
 
+// aliasSettleDelay is how long the new container serves under the service
+// aliases before the old one is stopped, so a proxy that caches DNS answers
+// re-resolves and learns the new address while the old is still reachable.
+// Overridden in tests.
+var aliasSettleDelay = 5 * time.Second
+
+// attachServiceAliases gives a running container the network aliases the
+// container it replaces is serving under. Docker cannot add an alias to an
+// existing endpoint, so each network is disconnected and reconnected -- safe
+// precisely because this container carries no traffic yet: nothing resolves to
+// it until this call lands.
+func attachServiceAliases(ctx context.Context, cli DockerClient, containerID string, aliases map[string][]string) error {
+	for netName, names := range aliases {
+		if len(names) == 0 {
+			continue
+		}
+		if err := cli.NetworkDisconnect(ctx, netName, containerID, false); err != nil {
+			return fmt.Errorf("disconnecting %s from network %s: %w", shortID(containerID), netName, err)
+		}
+		if err := cli.NetworkConnect(ctx, netName, containerID, &network.EndpointSettings{Aliases: names}); err != nil {
+			return fmt.Errorf("connecting %s to network %s: %w", shortID(containerID), netName, err)
+		}
+	}
+	return nil
+}
+
 // rollingUpdateContainer starts a new container before stopping the old one,
 // enabling zero-downtime updates when a reverse proxy routes by health.
 func rollingUpdateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, newImage string) error {
@@ -487,13 +515,23 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	hostConfig := inspect.HostConfig
 	hostConfig.PortBindings = nil
 
+	// Network aliases are how a reverse proxy finds "the service", so they are
+	// deliberately withheld until the new container is healthy. Copying them at
+	// CREATE time puts two versions behind one alias for the whole health wait:
+	// Docker's embedded DNS returns every IP an alias resolves to and rotates
+	// them, so a proxy resolving that alias sends about half of all new
+	// requests to the OLD image until it is stopped. With a container whose
+	// HEALTHCHECK runs on a 30s interval that is tens of seconds of answering
+	// from the version being replaced -- long enough for a client to get a
+	// response shaped by the previous build, which is how a buildhost publish
+	// came back missing a field its own release had added.
+	serviceAliases := map[string][]string{}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{},
 	}
 	for netName, netSettings := range inspect.NetworkSettings.Networks {
-		networkingConfig.EndpointsConfig[netName] = &network.EndpointSettings{
-			Aliases: netSettings.Aliases,
-		}
+		serviceAliases[netName] = netSettings.Aliases
+		networkingConfig.EndpointsConfig[netName] = &network.EndpointSettings{}
 	}
 
 	nextName := info.Name + "-next"
@@ -516,7 +554,26 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		return fmt.Errorf("next container %s not healthy: %w", nextName, err)
 	}
 
-	log.Printf("container %s: next container healthy, draining old", info.Name)
+	log.Printf("container %s: next container healthy, moving service aliases", info.Name)
+	if err := attachServiceAliases(ctx, cli, created.ID, serviceAliases); err != nil {
+		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
+		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+		return fmt.Errorf("attaching service aliases to %s: %w", nextName, err)
+	}
+
+	// Let a DNS-resolving proxy observe the new endpoint before the old one
+	// stops answering. nginx and friends cache a resolved alias for a few
+	// seconds; stopping the old container while a proxy still has only its
+	// address cached turns the cutover into refused connections. The old
+	// container keeps serving normally here -- it is the LAST few seconds in
+	// which both versions can answer, down from the entire health wait.
+	select {
+	case <-time.After(aliasSettleDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	log.Printf("container %s: draining old", info.Name)
 	timeout := 300
 	if err := cli.ContainerStop(ctx, info.ID, container.StopOptions{Timeout: &timeout}); err != nil {
 		return fmt.Errorf("stopping old container %s: %w", info.Name, err)

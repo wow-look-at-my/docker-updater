@@ -396,10 +396,15 @@ labels:
 ```
 
 The rolling update flow:
-1. New container is created with a temporary name, same networks and aliases
+1. New container is created with a temporary name and the same networks, but **without** the service aliases
 2. docker-updater waits for the health check to pass (HTTP, exec, or Docker HEALTHCHECK)
-3. Old container receives SIGTERM and drains existing connections
-4. Old container is removed, new container is renamed to the original name
+3. The service aliases move to the new container, and it starts taking traffic
+4. Old container receives SIGTERM and drains existing connections
+5. Old container is removed, new container is renamed to the original name
+
+Step 1 is what keeps two image versions from serving at once. Docker's DNS returns every address an alias resolves to and rotates them, so a container that holds the alias is taking live traffic — giving the new one that alias before it is healthy load-balances clients across the old and new image for the entire health wait (tens of seconds with a 30s-interval `HEALTHCHECK`), and they get answers shaped by the build being replaced.
+
+The alias move and the old container's SIGTERM are separated by a few seconds so a proxy that caches DNS answers re-resolves while the old container is still reachable; stopping it any sooner turns the cutover into refused connections.
 
 Requirements:
 - A reverse proxy must route traffic via Docker DNS (network alias), not published ports

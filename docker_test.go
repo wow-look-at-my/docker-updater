@@ -37,6 +37,22 @@ type mockDocker struct {
 	imagePullFn            func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 	imageInspectFn         func(ctx context.Context, imageID string) (types.ImageInspect, []byte, error)
 	imageTagFn             func(ctx context.Context, source, target string) error
+	networkConnectFn       func(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error
+	networkDisconnectFn    func(ctx context.Context, networkID, containerID string, force bool) error
+}
+
+func (m *mockDocker) NetworkConnect(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error {
+	if m.networkConnectFn != nil {
+		return m.networkConnectFn(ctx, networkID, containerID, config)
+	}
+	return nil
+}
+
+func (m *mockDocker) NetworkDisconnect(ctx context.Context, networkID, containerID string, force bool) error {
+	if m.networkDisconnectFn != nil {
+		return m.networkDisconnectFn(ctx, networkID, containerID, force)
+	}
+	return nil
 }
 
 func (m *mockDocker) Info(ctx context.Context) (system.Info, error) {
@@ -632,4 +648,90 @@ func TestRollingUpdateContainer(t *testing.T) {
 	assert.Equal(t, "old123456789", removedID)
 	assert.Equal(t, "new123456789", renamedID)
 	assert.Equal(t, "myapp", renamedTo)
+}
+
+// A service alias is the load balancer's whole notion of "the service", and
+// Docker's DNS round-robins across every container holding one. Giving the new
+// container the alias at CREATE time therefore load-balances live traffic
+// across two IMAGE VERSIONS for the entire health wait -- tens of seconds with
+// a 30s-interval HEALTHCHECK -- and clients get answers shaped by the build
+// being replaced. The alias must move only once the replacement is healthy,
+// and the old container must keep serving until after it has.
+func TestRollingUpdateContainer_AliasMovesOnlyAfterHealthy(t *testing.T) {
+	var events []string
+	var createdAliases []string
+	var connectedAliases []string
+
+	inspectCount := 0
+	healthy := false
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config: &container.Config{Image: "myapp:latest"},
+					NetworkSettings: &types.NetworkSettings{
+						Networks: map[string]*network.EndpointSettings{
+							"internal": {Aliases: []string{"backend", "myapp"}},
+						},
+					},
+				}, nil
+			}
+			// Report unhealthy once, so "healthy" is a state the test passes
+			// through rather than one it starts in.
+			status := "starting"
+			if healthy {
+				status = "healthy"
+			}
+			healthy = true
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{Running: true, Health: &types.Health{Status: status}},
+				},
+			}, nil
+		},
+		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, nc *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			events = append(events, "create")
+			for _, ep := range nc.EndpointsConfig {
+				createdAliases = append(createdAliases, ep.Aliases...)
+			}
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+		containerStartFn: func(_ context.Context, _ string, _ container.StartOptions) error {
+			events = append(events, "start")
+			return nil
+		},
+		networkDisconnectFn: func(_ context.Context, netName, id string, force bool) error {
+			events = append(events, "disconnect")
+			assert.Equal(t, "internal", netName)
+			assert.Equal(t, "new123456789", id, "only the incoming container is re-wired; disconnecting the old one would sever its in-flight requests")
+			assert.False(t, force)
+			return nil
+		},
+		networkConnectFn: func(_ context.Context, netName, id string, cfg *network.EndpointSettings) error {
+			events = append(events, "connect")
+			assert.Equal(t, "internal", netName)
+			assert.Equal(t, "new123456789", id)
+			connectedAliases = append(connectedAliases, cfg.Aliases...)
+			return nil
+		},
+		containerStopFn: func(_ context.Context, _ string, _ container.StopOptions) error {
+			events = append(events, "stop-old")
+			return nil
+		},
+	}
+
+	info := ContainerInfo{ID: "old123456789", Name: "myapp", Image: "myapp:latest", Rolling: true}
+	require.Nil(t, rollingUpdateContainer(context.Background(), cli, info, "myapp:latest"))
+
+	assert.Empty(t, createdAliases,
+		"the new container must not answer to the service alias before it is healthy")
+	assert.Equal(t, []string{"backend", "myapp"}, connectedAliases,
+		"every alias the old container served under must move to the new one")
+	assert.Equal(t, []string{"create", "start", "disconnect", "connect", "stop-old"}, events,
+		"the alias must move while the old container is still serving, so the cutover never leaves the alias pointing at nothing")
 }

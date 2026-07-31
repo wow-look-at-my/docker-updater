@@ -33,9 +33,9 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 
 		switch info.Mode {
 		case UpdateModeImage:
-			result = checkAndUpdateImage(ctx, cli, info, cfg, result, resolveAuth)
+			result = checkAndUpdateImage(ctx, cli, defaultComposeRunner, info, cfg, result, resolveAuth)
 		case UpdateModeGit:
-			result = checkAndUpdateGit(ctx, cli, info, cfg, result)
+			result = checkAndUpdateGit(ctx, cli, defaultComposeRunner, info, cfg, result)
 		case UpdateModeBuild:
 			result = checkAndUpdateBuild(ctx, cli, defaultComposeRunner, info, cfg, result, resolveAuth)
 		default:
@@ -49,7 +49,7 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 	return results
 }
 
-func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
+func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
 	result.OldRef = info.ImageDigest
 
 	newDigest, fetched, err := checkImageUpdate(ctx, cli, info, resolveAuth)
@@ -89,7 +89,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 		return result
 	}
 
-	if err := updateContainer(ctx, cli, info, cfg); err != nil {
+	if err := updateContainer(ctx, cli, runner, info, cfg); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -99,7 +99,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, info ContainerIn
 	return result
 }
 
-func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
+func checkAndUpdateGit(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
 	newSHA, err := checkGitUpdate(info)
 	if err != nil {
 		result.Error = err
@@ -132,7 +132,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, info ContainerInfo
 		return result
 	}
 
-	if err := updateContainer(ctx, cli, info, cfg); err != nil {
+	if err := updateContainer(ctx, cli, runner, info, cfg); err != nil {
 		result.Error = err
 		log.Printf("container %s: error updating: %v", info.Name, err)
 		return result
@@ -220,7 +220,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 	return result
 }
 
-func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, cfg Config) error {
+func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config) error {
 	// Updating our own container can't be done inline -- stopping it would kill
 	// this process before the replacement is created. Hand the swap to a
 	// detached helper instead.
@@ -228,7 +228,26 @@ func updateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, 
 		return selfUpdate(ctx, cli, info, info.Image)
 	}
 	if info.Rolling {
+		// Rolling updates start the replacement before draining the old
+		// container, which compose cannot express: `up -d` always stops the
+		// existing container first. Zero downtime therefore keeps the raw-API
+		// path, which carries the container definition over from the running
+		// container rather than from the compose file.
+		if composeManaged(info) {
+			log.Printf("container %s: rolling update carries its config over from the running container; compose-file changes need a `docker compose up -d %s` to apply", info.Name, info.ComposeService)
+		}
 		return rollingUpdateContainer(ctx, cli, info, info.Image)
+	}
+	// A compose-managed service is converged through compose so the compose
+	// file stays authoritative; only containers compose does not own fall back
+	// to replaying the previous container's config.
+	//
+	// Image mode only: git mode recreates a container whose image and compose
+	// config are both unchanged (the new commit arrives through a mount), and
+	// `up -d` is a no-op when nothing drifted, so it would silently stop
+	// applying git updates.
+	if info.Mode == UpdateModeImage && composeManaged(info) {
+		return recreateViaCompose(ctx, cli, runner, info)
 	}
 	return recreateContainer(ctx, cli, info, info.Image)
 }

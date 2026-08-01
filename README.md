@@ -61,7 +61,8 @@ a newer `index.html`:
 - **Auto-update status**: whether a container is monitored, and in `image`, `git`, or `build` mode
 - **State & uptime**: running/stopped, healthcheck status, and how long it has been up
 - **Restarts**: Docker's restart count -- how many times the daemon's restart policy has restarted the container since it was last (re)created. Because docker-updater creates a fresh container on every pull, this reads as "restarts since the last pull" for monitored containers, and a non-zero value flags a crash-looping container
-- **Last checked / last pulled**: *last checked* is when docker-updater last polled the registry; *last pulled* is when it last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance "last pulled", so the column reflects genuine image changes rather than resetting every cycle
+- **Last pulled**: when docker-updater last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance it, so the column tracks genuine image changes instead of resetting every cycle
+- **No "last checked" column**: every monitored container is polled in the same cycle, so it read identically on every row. The top bar's **Last check** / **Next check** carries it once; the per-container timestamp stays in the JSON API as `last_checked`
 - **Upstream**: whether a newer image digest (or git commit) is available -- and, when it is, why it has not been applied yet -- or the last error
 
 Containers are grouped into four collapsible sections -- **Managed · online**,

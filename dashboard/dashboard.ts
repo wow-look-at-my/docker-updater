@@ -27,6 +27,9 @@ interface ApiContainer {
   restarts?: number | null;
   auto_update: boolean;
   mode?: string;
+  // Still served by /api/containers, but not rendered: every monitored
+  // container is checked in the same cycle, so a per-row copy of the header's
+  // "Last check <ago>" told the operator nothing.
   last_checked?: string | null;
   last_pulled?: string | null;
   last_updated?: string | null;
@@ -338,7 +341,6 @@ function row(c: ApiContainer): HTMLElement {
   );
 
   const uptime = uptimeText(c);
-  const lastChecked = c.auto_update ? (fmtRelative(c.last_checked) || "—") : "—";
   const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 
   const highlight = updatedHighlight(c, Date.now());
@@ -348,7 +350,6 @@ function row(c: ApiContainer): HTMLElement {
     stateCell(c),
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
     restartsCell(c),
-    el("td", { class: lastChecked === "—" ? "up-na" : null }, lastChecked),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),
   );

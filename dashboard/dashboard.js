@@ -288,10 +288,9 @@ function updatedHighlight(c, now) {
 function row(c) {
     const nameCell = el("td", null, el("span", { class: "cname" }, c.name || "—"), el("div", { class: "cmeta" }, c.image || "—", c.image_id ? " · " : null, c.image_id ? el("span", { class: "cref" }, c.image_id) : null));
     const uptime = uptimeText(c);
-    const lastChecked = c.auto_update ? (fmtRelative(c.last_checked) || "—") : "—";
     const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
     const highlight = updatedHighlight(c, Date.now());
-    const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null }, nameCell, autoUpdateCell(c), stateCell(c), el("td", { class: uptime ? null : "up-na" }, uptime || "—"), restartsCell(c), el("td", { class: lastChecked === "—" ? "up-na" : null }, lastChecked), el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled), upstreamCell(c));
+    const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null }, nameCell, autoUpdateCell(c), stateCell(c), el("td", { class: uptime ? null : "up-na" }, uptime || "—"), restartsCell(c), el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled), upstreamCell(c));
     // Inline style so the alpha can fade with age. It wins over .row-pending's
     // class background, which is acceptable: a just-updated container should not
     // also be pending, and the pending left-edge accent still shows regardless.

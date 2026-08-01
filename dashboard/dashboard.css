@@ -95,6 +95,25 @@ body {
 #card-updates.clickable { cursor: pointer; transition: border-color 0.15s; }
 #card-updates.clickable:hover { border-color: var(--accent); }
 
+/* "copy" button inside the errors card. Disabled (and muted) whenever the
+   error count is zero, so it never promises an empty clipboard. */
+.copy-btn {
+  margin-top: 6px;
+  align-self: flex-start;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.copy-btn:hover:not(:disabled) { border-color: var(--red); color: var(--text); }
+.copy-btn:disabled { opacity: 0.4; cursor: default; }
+
 main { padding: 0 24px 24px; }
 
 table {

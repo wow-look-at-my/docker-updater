@@ -183,6 +183,90 @@ function upstreamCell(c: ApiContainer): HTMLElement {
   return td;
 }
 
+// errored is the exact predicate behind the "errors" card: a monitored
+// container whose last check or update attempt failed.
+function errored(c: ApiContainer): boolean {
+  return Boolean(c.auto_update && c.error);
+}
+
+// errorReport renders every current error as plain text for pasting into an
+// issue or a chat. One block per container: what it is, what it was trying to
+// move to, and the full untruncated error the Upstream column can only show a
+// clipped version of.
+function errorReport(data: ApiResponse): string {
+  const rows = (data.containers || []).filter(errored);
+  const header = "docker-updater — " + rows.length + " error" + (rows.length === 1 ? "" : "s") +
+    " at " + (data.generated_at || new Date().toISOString()) +
+    (data.version ? " (build " + data.version + ")" : "");
+  const blocks = rows.map((c) => {
+    const lines = [(c.name || "?") + "  [" + (c.image || "?") + "]"];
+    lines.push("  state: " + (c.state || "unknown") + (c.health ? " (" + c.health + ")" : ""));
+    if (c.update_available) {
+      const refs = c.current_ref || c.available_ref
+        ? ": " + (c.current_ref || "?") + " -> " + (c.available_ref || "?")
+        : "";
+      lines.push("  update available" + refs);
+    }
+    if (c.skipped) lines.push("  skipped: " + (c.skip_reason || "pre-check"));
+    lines.push("  error: " + (c.error || ""));
+    return lines.join("\n");
+  });
+  return [header, ...blocks].join("\n\n") + "\n";
+}
+
+// copyText writes to the clipboard, falling back to a hidden textarea +
+// execCommand: the dashboard is normally served over plain http on a LAN, where
+// navigator.clipboard does not exist (non-secure context).
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (window.isSecureContext && navigator.clipboard) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Permission denied or an unavailable API — try the legacy path below.
+  }
+  const ta = el("textarea", { style: "position:fixed;top:-1000px;opacity:0;" }) as HTMLTextAreaElement;
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
+}
+
+// copyBtnResetTimer keeps the transient "copied" label from being cleared by a
+// timer armed on an earlier click.
+let copyBtnResetTimer: number | undefined;
+
+// updateCopyButton keeps the button's label and enabled state in step with the
+// current error count. Called from render(), so it tracks every poll.
+function updateCopyButton(count: number): void {
+  const btn = document.getElementById("copy-errors") as HTMLButtonElement | null;
+  if (!btn || copyBtnResetTimer !== undefined) return; // mid-feedback: leave the label alone
+  btn.disabled = count === 0;
+  btn.textContent = count > 0 ? "copy " + count : "copy";
+}
+
+// onCopyErrors copies the report and flashes the outcome on the button itself,
+// then hands the label back to updateCopyButton on the next render.
+async function onCopyErrors(): Promise<void> {
+  const btn = document.getElementById("copy-errors") as HTMLButtonElement | null;
+  if (!btn || !latestData) return;
+  const ok = await copyText(errorReport(latestData));
+  btn.textContent = ok ? "copied" : "copy failed";
+  if (copyBtnResetTimer !== undefined) clearTimeout(copyBtnResetTimer);
+  copyBtnResetTimer = setTimeout(() => {
+    copyBtnResetTimer = undefined;
+    updateCopyButton(latestData ? (latestData.containers || []).filter(errored).length : 0);
+  }, 1500);
+}
+
 // pending reports whether a container has an update detected but not yet applied
 // — the exact condition counted by the "updates pending" card.
 function pending(c: ApiContainer): boolean {
@@ -287,7 +371,7 @@ function render(data: ApiResponse): void {
   // narrowed by the search filter.
   const auto = containers.filter((c) => c.auto_update).length;
   const updates = containers.filter(pending).length;
-  const errors = containers.filter((c) => c.auto_update && c.error).length;
+  const errors = containers.filter(errored).length;
 
   setText("stat-total", containers.length);
   setText("stat-auto", auto);
@@ -298,6 +382,8 @@ function render(data: ApiResponse): void {
   // The card jumps to the held-back rows; only make it actionable when there are any.
   const updatesCard = document.getElementById("card-updates");
   if (updatesCard) updatesCard.classList.toggle("clickable", updates > 0);
+
+  updateCopyButton(errors);
 
   document.getElementById("dry-run-badge")!.classList.toggle("hidden", !data.dry_run);
   setText("cfg-interval", data.interval || "—");
@@ -441,6 +527,9 @@ function renderOutOfSyncBanner(missing: string[]): void {
 function initDashboard(): void {
   const updatesCard = document.getElementById("card-updates");
   if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
+
+  const copyBtn = document.getElementById("copy-errors");
+  if (copyBtn) copyBtn.addEventListener("click", () => void onCopyErrors());
 
   const searchBox = document.getElementById("search") as HTMLInputElement | null;
   if (searchBox) searchBox.addEventListener("input", onSearchInput);

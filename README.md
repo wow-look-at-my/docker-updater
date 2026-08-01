@@ -92,6 +92,13 @@ explicit:
   Click the **updates pending** card to jump straight to them; if the first one
   sits in a collapsed group, that group is expanded automatically.
 
+The **errors** card carries a **copy** button that puts every current error on
+the clipboard as plain text -- one block per container with its name, image,
+state, the refs it was trying to move between, and the full untruncated error --
+so a broken update is one click away from a bug report. It is disabled when
+there are no errors, and falls back to a hidden-textarea copy on plain `http`,
+where the browser clipboard API is unavailable.
+
 The page auto-refreshes every few seconds. The footer shows the **build hash of
 the running docker-updater** (short SHA; hover for the full one — the same
 commit the image's `org.opencontainers.image.version` label carries), so you can

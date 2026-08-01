@@ -33,8 +33,8 @@ func composeManaged(info ContainerInfo) bool {
 // afterwards re-tags that image and converges the service back onto it, so a
 // failed update never leaves the service down.
 func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo) error {
-	configFiles := splitConfigFiles(info.ComposeConfigFiles)
-	if len(configFiles) == 0 || info.ComposeService == "" {
+	target := composeTargetFor(info)
+	if len(target.ConfigFiles) == 0 || target.Service == "" {
 		return fmt.Errorf("container %s: not compose-managed", info.Name)
 	}
 
@@ -66,7 +66,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 					cause, info.Name, shortID(oldImageID), oldImageRef, err)
 			}
 		}
-		if err := runner.UpNoDeps(rctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
+		if err := runner.UpNoDeps(rctx, target); err != nil {
 			return fmt.Errorf("%w; ROLLBACK FAILED, %s may be down: compose up: %v", cause, info.Name, err)
 		}
 		log.Printf("container %s: rolled back to previous image %s", info.Name, shortID(oldImageID))
@@ -74,7 +74,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	}
 
 	log.Printf("container %s: recreating compose service %s (image %s)", info.Name, info.ComposeService, info.Image)
-	if err := runner.UpNoDeps(ctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
+	if err := runner.UpNoDeps(ctx, target); err != nil {
 		cause := fmt.Errorf("recreating service %s: %w", info.ComposeService, err)
 		// Compose that failed before replacing anything -- an unreadable
 		// compose file, an invalid config -- leaves the original container

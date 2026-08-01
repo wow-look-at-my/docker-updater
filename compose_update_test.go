@@ -288,3 +288,43 @@ func TestComposeConvergeStillRollsBackWhenContainerStopped(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ROLLBACK FAILED")
 }
+
+// Compose must be addressed with the project name off the container's own
+// label. Letting compose derive it from the working directory resolves a
+// DIFFERENT project for any stack deployed with an explicit -p (Komodo,
+// Portainer) or a compose file with a top-level `name:` — compose finds no
+// container for the service, CREATES one, and dies on the name already in use:
+//
+//	Conflict. The container name "/s3" is already in use by container "b1af870..."
+func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {
+	info := composeServiceInfo()
+	// Komodo's shape: the project name is nothing like the directory basename.
+	info.ComposeProject = "unraid-config-v2"
+	cli := composeDocker("healthy")
+	cli.containerListFn = func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+		return []types.Container{{
+			ID: newServiceContainerID,
+			Labels: map[string]string{
+				"com.docker.compose.project": info.ComposeProject,
+				"com.docker.compose.service": "server",
+			},
+		}}, nil
+	}
+	runner := &fakeComposeRunner{}
+
+	require.NoError(t, recreateViaCompose(context.Background(), cli, runner, info))
+
+	assert.Equal(t, []string{"unraid-config-v2"}, runner.upNoDepsProjects,
+		"the compose invocation must carry -p from com.docker.compose.project")
+}
+
+// The project name reaches the argv, not just the runner: -p must be in the
+// command line compose actually receives.
+func TestComposeArgsCarryProjectName(t *testing.T) {
+	args := composeArgs(composeTargetFor(composeServiceInfo()), "up", "-d", "--no-deps", "server")
+
+	assert.Equal(t, []string{
+		"compose", "-f", serviceComposeFile, "--project-directory", serviceComposeDir,
+		"-p", "claude-host", "up", "-d", "--no-deps", "server",
+	}, args)
+}

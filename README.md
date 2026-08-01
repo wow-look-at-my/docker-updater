@@ -314,13 +314,13 @@ Checks a git remote for new commits on the tracked ref using the smart HTTP prot
 - When the derived image is stale (the base advanced), it rebuilds and recreates the service:
 
   ```bash
-  docker compose -f <config_files> --project-directory <working_dir> build --pull <service>
-  docker compose -f <config_files> --project-directory <working_dir> up -d <service>
+  docker compose -f <config_files> --project-directory <working_dir> -p <project> build --pull <service>
+  docker compose -f <config_files> --project-directory <working_dir> -p <project> up -d <service>
   ```
 
   The container is recreated **only if the rebuilt image ID actually changed** — a cache-hit rebuild that produces the identical image is a no-op (no churn), mirroring image mode.
 
-**Identifying the service.** docker-updater reads the service's compose identity from the standard compose labels Docker stamps on every compose-managed container (`com.docker.compose.project`, `.service`, `.project.config_files`, `.project.working_dir`), so no extra configuration beyond `mode: build` is usually needed.
+**Identifying the service.** docker-updater reads the service's compose identity from the standard compose labels Docker stamps on every compose-managed container (`com.docker.compose.project`, `.service`, `.project.config_files`, `.project.working_dir`), so no extra configuration beyond `mode: build` is usually needed. The project name is always passed as `-p`: compose otherwise derives it from the working directory, which is wrong for any stack deployed with an explicit project name (Komodo, Portainer) or a compose file with a top-level `name:` — compose would resolve an empty project, try to *create* the service, and fail with `Conflict. The container name "/x" is already in use`.
 
 **Determining the base image** (in preference order):
 

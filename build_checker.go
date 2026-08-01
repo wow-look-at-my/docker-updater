@@ -19,45 +19,61 @@ import (
 // Docker daemon or compose CLI. The real implementation shells out to the
 // `docker compose` plugin.
 type composeRunner interface {
-	// Build runs `docker compose -f <configFiles...> --project-directory
-	// <workingDir> build --pull <service>`.
-	Build(ctx context.Context, configFiles []string, workingDir, service string) error
-	// Up runs `docker compose -f <configFiles...> --project-directory
-	// <workingDir> up -d <service>`.
-	Up(ctx context.Context, configFiles []string, workingDir, service string) error
-	// UpNoDeps runs `docker compose -f <configFiles...> --project-directory
-	// <workingDir> up -d --no-deps <service>`. Image-mode recreates use this so
-	// converging one service can never restart its dependencies: a stack whose
-	// dependency owns durable state (a docker-in-docker daemon, a database)
-	// must not lose it because a sibling service took a new image.
-	UpNoDeps(ctx context.Context, configFiles []string, workingDir, service string) error
+	// Build runs `docker compose <target> build --pull <service>`.
+	Build(ctx context.Context, t composeTarget) error
+	// Up runs `docker compose <target> up -d <service>`.
+	Up(ctx context.Context, t composeTarget) error
+	// UpNoDeps runs `docker compose <target> up -d --no-deps <service>`.
+	// Image-mode recreates use this so converging one service can never restart
+	// its dependencies: a stack whose dependency owns durable state (a
+	// docker-in-docker daemon, a database) must not lose it because a sibling
+	// service took a new image.
+	UpNoDeps(ctx context.Context, t composeTarget) error
+}
+
+// composeTarget is the one service a compose invocation acts on, addressed
+// exactly as the running container reports itself. All four fields come from
+// the container's own compose labels — grouped in a struct so an invocation
+// cannot silently lose one (dropping Project made compose create a second
+// container instead of recreating the running one).
+type composeTarget struct {
+	ConfigFiles []string // com.docker.compose.project.config_files
+	WorkingDir  string   // com.docker.compose.project.working_dir
+	Project     string   // com.docker.compose.project
+	Service     string   // com.docker.compose.service
+}
+
+// composeTargetFor builds the target for a container's own compose service.
+func composeTargetFor(info ContainerInfo) composeTarget {
+	return composeTarget{
+		ConfigFiles: splitConfigFiles(info.ComposeConfigFiles),
+		WorkingDir:  info.ComposeWorkingDir,
+		Project:     info.ComposeProject,
+		Service:     info.ComposeService,
+	}
 }
 
 // execComposeRunner is the production composeRunner: it execs the docker CLI.
 type execComposeRunner struct{}
 
-func (execComposeRunner) Build(ctx context.Context, configFiles []string, workingDir, service string) error {
-	if err := checkComposeFilesVisible(configFiles); err != nil {
-		return err
-	}
-	args := composeArgs(configFiles, workingDir, "build", "--pull", service)
-	return runDockerCompose(ctx, args)
+func (execComposeRunner) Build(ctx context.Context, t composeTarget) error {
+	return t.run(ctx, "build", "--pull", t.Service)
 }
 
-func (execComposeRunner) Up(ctx context.Context, configFiles []string, workingDir, service string) error {
-	if err := checkComposeFilesVisible(configFiles); err != nil {
-		return err
-	}
-	args := composeArgs(configFiles, workingDir, "up", "-d", service)
-	return runDockerCompose(ctx, args)
+func (execComposeRunner) Up(ctx context.Context, t composeTarget) error {
+	return t.run(ctx, "up", "-d", t.Service)
 }
 
-func (execComposeRunner) UpNoDeps(ctx context.Context, configFiles []string, workingDir, service string) error {
-	if err := checkComposeFilesVisible(configFiles); err != nil {
+func (execComposeRunner) UpNoDeps(ctx context.Context, t composeTarget) error {
+	return t.run(ctx, "up", "-d", "--no-deps", t.Service)
+}
+
+// run pre-flights the compose files, then execs `docker compose <args>`.
+func (t composeTarget) run(ctx context.Context, args ...string) error {
+	if err := checkComposeFilesVisible(t.ConfigFiles); err != nil {
 		return err
 	}
-	args := composeArgs(configFiles, workingDir, "up", "-d", "--no-deps", service)
-	return runDockerCompose(ctx, args)
+	return runDockerCompose(ctx, composeArgs(t, args...))
 }
 
 // checkComposeFilesVisible verifies every compose file is readable by THIS
@@ -83,15 +99,27 @@ func checkComposeFilesVisible(configFiles []string) error {
 }
 
 // composeArgs assembles the `compose` argument list shared by Build and Up.
-func composeArgs(configFiles []string, workingDir string, rest ...string) []string {
+//
+// -p is not optional. Without it compose derives the project name from the
+// working directory, and a stack whose project name differs from that basename
+// — anything deployed by a tool that passes its own -p (Komodo, Portainer) or
+// a compose file with a top-level `name:` — resolves to a project holding no
+// containers. Compose then CREATES the service instead of recreating it and
+// dies on the name it is already using:
+//
+//	Conflict. The container name "/s3" is already in use by container "b1af870..."
+func composeArgs(t composeTarget, rest ...string) []string {
 	args := []string{"compose"}
-	for _, f := range configFiles {
+	for _, f := range t.ConfigFiles {
 		if f != "" {
 			args = append(args, "-f", f)
 		}
 	}
-	if workingDir != "" {
-		args = append(args, "--project-directory", workingDir)
+	if t.WorkingDir != "" {
+		args = append(args, "--project-directory", t.WorkingDir)
+	}
+	if t.Project != "" {
+		args = append(args, "-p", t.Project)
 	}
 	return append(args, rest...)
 }
@@ -475,8 +503,8 @@ func recordBuiltBase(info ContainerInfo, baseDigest string) {
 // rolling back is delegated to compose (re-running up -d with the prior image
 // is not generically possible here; instead we report a health failure).
 func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, newBase string, verifyPrefix bool) (changed bool, err error) {
-	configFiles := splitConfigFiles(info.ComposeConfigFiles)
-	if len(configFiles) == 0 {
+	target := composeTargetFor(info)
+	if len(target.ConfigFiles) == 0 {
 		return false, fmt.Errorf("container %s: no compose config files (com.docker.compose.project.config_files)", info.Name)
 	}
 	if info.ComposeService == "" {
@@ -489,7 +517,7 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 	runningID, derivedRef := serviceContainerState(ctx, cli, info)
 
 	log.Printf("container %s: rebuilding service %s (base %s changed)", info.Name, info.ComposeService, shortID(newBase))
-	if err := runner.Build(ctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
+	if err := runner.Build(ctx, target); err != nil {
 		return false, fmt.Errorf("building %s: %w", info.ComposeService, err)
 	}
 
@@ -512,7 +540,7 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 	}
 
 	log.Printf("container %s: recreating service %s on rebuilt image", info.Name, info.ComposeService)
-	if err := runner.Up(ctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
+	if err := runner.Up(ctx, target); err != nil {
 		return false, fmt.Errorf("recreating %s: %w", info.ComposeService, err)
 	}
 

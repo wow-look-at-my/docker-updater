@@ -235,3 +235,96 @@ func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T
 	assert.Equal(t, "server", got[0].ComposeService)
 	assert.Equal(t, serviceComposeDir, got[0].ComposeWorkingDir)
 }
+
+// composeDockerStillRunning is composeDocker with the pre-update container
+// reporting what it actually looks like when compose failed without touching
+// it: still running, still on its original image.
+func composeDockerStillRunning() *mockDocker {
+	cli := composeDocker("healthy")
+	inner := cli.containerInspectFn
+	cli.containerInspectFn = func(ctx context.Context, id string) (types.ContainerJSON, error) {
+		inspect, err := inner(ctx, id)
+		if err != nil || id != oldServiceContainerID {
+			return inspect, err
+		}
+		inspect.State = &types.ContainerState{Running: true}
+		return inspect, nil
+	}
+	return cli
+}
+
+// A compose invocation that fails before replacing the container (unreadable
+// compose file, invalid config) leaves the service exactly as it was. Claiming
+// "ROLLBACK FAILED, <service> may be down" then sends operators chasing a
+// service that never went down — and the rollback just re-runs the same
+// failing command.
+func TestComposeConvergeSkipsRollbackWhenContainerUntouched(t *testing.T) {
+	runner := &fakeComposeRunner{upNoDepsErr: errors.New("compose file not visible to docker-updater")}
+
+	err := recreateViaCompose(context.Background(), composeDockerStillRunning(), runner, composeServiceInfo())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "compose file not visible to docker-updater")
+	assert.NotContains(t, err.Error(), "ROLLBACK")
+	assert.Equal(t, 1, runner.upNoDepsCalls, "a no-op failure must not re-run the same failing compose command")
+}
+
+// The suppression is narrow: a container that compose did stop or replace is
+// unconfirmable as untouched, so the rollback still runs.
+func TestComposeConvergeStillRollsBackWhenContainerStopped(t *testing.T) {
+	cli := composeDockerStillRunning()
+	inner := cli.containerInspectFn
+	cli.containerInspectFn = func(ctx context.Context, id string) (types.ContainerJSON, error) {
+		inspect, err := inner(ctx, id)
+		if err == nil && id == oldServiceContainerID {
+			inspect.State = &types.ContainerState{Running: false}
+		}
+		return inspect, err
+	}
+	runner := &fakeComposeRunner{upNoDepsErr: errors.New("compose config invalid")}
+
+	err := recreateViaCompose(context.Background(), cli, runner, composeServiceInfo())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ROLLBACK FAILED")
+}
+
+// Compose must be addressed with the project name off the container's own
+// label. Letting compose derive it from the working directory resolves a
+// DIFFERENT project for any stack deployed with an explicit -p (Komodo,
+// Portainer) or a compose file with a top-level `name:` — compose finds no
+// container for the service, CREATES one, and dies on the name already in use:
+//
+//	Conflict. The container name "/s3" is already in use by container "b1af870..."
+func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {
+	info := composeServiceInfo()
+	// Komodo's shape: the project name is nothing like the directory basename.
+	info.ComposeProject = "unraid-config-v2"
+	cli := composeDocker("healthy")
+	cli.containerListFn = func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+		return []types.Container{{
+			ID: newServiceContainerID,
+			Labels: map[string]string{
+				"com.docker.compose.project": info.ComposeProject,
+				"com.docker.compose.service": "server",
+			},
+		}}, nil
+	}
+	runner := &fakeComposeRunner{}
+
+	require.NoError(t, recreateViaCompose(context.Background(), cli, runner, info))
+
+	assert.Equal(t, []string{"unraid-config-v2"}, runner.upNoDepsProjects,
+		"the compose invocation must carry -p from com.docker.compose.project")
+}
+
+// The project name reaches the argv, not just the runner: -p must be in the
+// command line compose actually receives.
+func TestComposeArgsCarryProjectName(t *testing.T) {
+	args := composeArgs(composeTargetFor(composeServiceInfo()), "up", "-d", "--no-deps", "server")
+
+	assert.Equal(t, []string{
+		"compose", "-f", serviceComposeFile, "--project-directory", serviceComposeDir,
+		"-p", "claude-host", "up", "-d", "--no-deps", "server",
+	}, args)
+}

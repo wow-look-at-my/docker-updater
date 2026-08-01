@@ -33,8 +33,8 @@ func composeManaged(info ContainerInfo) bool {
 // afterwards re-tags that image and converges the service back onto it, so a
 // failed update never leaves the service down.
 func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo) error {
-	configFiles := splitConfigFiles(info.ComposeConfigFiles)
-	if len(configFiles) == 0 || info.ComposeService == "" {
+	target := composeTargetFor(info)
+	if len(target.ConfigFiles) == 0 || target.Service == "" {
 		return fmt.Errorf("container %s: not compose-managed", info.Name)
 	}
 
@@ -66,7 +66,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 					cause, info.Name, shortID(oldImageID), oldImageRef, err)
 			}
 		}
-		if err := runner.UpNoDeps(rctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
+		if err := runner.UpNoDeps(rctx, target); err != nil {
 			return fmt.Errorf("%w; ROLLBACK FAILED, %s may be down: compose up: %v", cause, info.Name, err)
 		}
 		log.Printf("container %s: rolled back to previous image %s", info.Name, shortID(oldImageID))
@@ -74,8 +74,19 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	}
 
 	log.Printf("container %s: recreating compose service %s (image %s)", info.Name, info.ComposeService, info.Image)
-	if err := runner.UpNoDeps(ctx, configFiles, info.ComposeWorkingDir, info.ComposeService); err != nil {
-		return rollback(fmt.Errorf("recreating service %s: %w", info.ComposeService, err))
+	if err := runner.UpNoDeps(ctx, target); err != nil {
+		cause := fmt.Errorf("recreating service %s: %w", info.ComposeService, err)
+		// Compose that failed before replacing anything -- an unreadable
+		// compose file, an invalid config -- leaves the original container
+		// running on the original image. There is nothing to roll back, and
+		// rolling back anyway re-runs the same failing compose command, so the
+		// error reads "ROLLBACK FAILED, <service> may be down" about a service
+		// that never went anywhere. Report the real cause instead.
+		if containerUnchanged(ctx, cli, info.ID, oldImageID) {
+			log.Printf("container %s: compose failed before touching the container; still running on %s", info.Name, shortID(oldImageID))
+			return cause
+		}
+		return rollback(cause)
 	}
 
 	// Compose replaced the container, so the original ID is gone; re-find the
@@ -88,4 +99,20 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 
 	log.Printf("container %s updated and healthy via compose (%s)", info.Name, shortID(newID))
 	return nil
+}
+
+// containerUnchanged reports whether the pre-update container is still there,
+// still running, and still on the image it started with — i.e. the failed
+// compose invocation was a no-op. Anything it cannot confirm (an inspect
+// error, a gone container, a stopped one) reads as changed, so an uncertain
+// state still gets the rollback.
+func containerUnchanged(ctx context.Context, cli DockerClient, containerID, imageID string) bool {
+	if containerID == "" || imageID == "" {
+		return false
+	}
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return false
+	}
+	return inspect.State != nil && inspect.State.Running && inspect.Image == imageID
 }

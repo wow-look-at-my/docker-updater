@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,27 +34,31 @@ type fakeComposeRunner struct {
 	upNoDepsServices []string
 	upNoDepsFiles    [][]string
 	upNoDepsDirs     []string
+	upNoDepsProjects []string
+	buildTargets     []composeTarget
 	onUpNoDeps       func() // hook to mutate fixture state between converge attempts
 }
 
-func (f *fakeComposeRunner) Build(_ context.Context, _ []string, _, _ string) error {
+func (f *fakeComposeRunner) Build(_ context.Context, t composeTarget) error {
 	f.buildCalls++
+	f.buildTargets = append(f.buildTargets, t)
 	if f.onBuild != nil {
 		f.onBuild()
 	}
 	return f.buildErr
 }
 
-func (f *fakeComposeRunner) Up(_ context.Context, _ []string, _, _ string) error {
+func (f *fakeComposeRunner) Up(_ context.Context, _ composeTarget) error {
 	f.upCalls++
 	return f.upErr
 }
 
-func (f *fakeComposeRunner) UpNoDeps(_ context.Context, configFiles []string, workingDir, service string) error {
+func (f *fakeComposeRunner) UpNoDeps(_ context.Context, t composeTarget) error {
 	f.upNoDepsCalls++
-	f.upNoDepsFiles = append(f.upNoDepsFiles, configFiles)
-	f.upNoDepsDirs = append(f.upNoDepsDirs, workingDir)
-	f.upNoDepsServices = append(f.upNoDepsServices, service)
+	f.upNoDepsFiles = append(f.upNoDepsFiles, t.ConfigFiles)
+	f.upNoDepsDirs = append(f.upNoDepsDirs, t.WorkingDir)
+	f.upNoDepsServices = append(f.upNoDepsServices, t.Service)
+	f.upNoDepsProjects = append(f.upNoDepsProjects, t.Project)
 	if f.onUpNoDeps != nil {
 		f.onUpNoDeps()
 	}
@@ -678,8 +684,39 @@ func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
 
 	// No real docker CLI needed: whether the binary is missing or the args are
 	// rejected, the error must identify the full docker command line.
-	err := runDockerCompose(context.Background(), composeArgs([]string{"/srv/demo/docker-compose.yml"}, "/srv/demo", "build", "--pull", "opencode"))
+	err := runDockerCompose(context.Background(), composeArgs(composeTarget{ConfigFiles: []string{"/srv/demo/docker-compose.yml"}, WorkingDir: "/srv/demo", Project: "demo"}, "build", "--pull", "opencode"))
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo build --pull opencode")
+	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo -p demo build --pull opencode")
+}
+
+// A compose file the updater cannot see is the containerized-updater footgun:
+// the label carries a host path, and without a matching bind mount the docker
+// CLI fails with a bare "no such file or directory". Fail before exec'ing with
+// an error that names the actual fix.
+func TestComposeRunnerRejectsInvisibleComposeFile(t *testing.T) {
+	captureComposeLog(t)
+	missing := "/mnt/ssdpool/appdata/compose.manager/claude-host/docker-compose.yml"
+
+	err := execComposeRunner{}.UpNoDeps(context.Background(), composeTarget{
+		ConfigFiles: []string{missing},
+		WorkingDir:  "/mnt/ssdpool/appdata/compose.manager/claude-host",
+		Project:     "claude-host",
+		Service:     "dind",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missing)
+	assert.Contains(t, err.Error(), "not visible to docker-updater")
+	assert.Contains(t, err.Error(), "-v /mnt/ssdpool/appdata/compose.manager/claude-host:/mnt/ssdpool/appdata/compose.manager/claude-host:ro")
+	assert.NotContains(t, err.Error(), "exit status", "the docker CLI must never be reached")
+}
+
+func TestCheckComposeFilesVisiblePassesForReadableFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker-compose.yml")
+	require.NoError(t, os.WriteFile(path, []byte("services: {}\n"), 0o644))
+
+	assert.NoError(t, checkComposeFilesVisible([]string{path}))
+	assert.NoError(t, checkComposeFilesVisible(nil))
 }

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -35,18 +37,49 @@ type composeRunner interface {
 type execComposeRunner struct{}
 
 func (execComposeRunner) Build(ctx context.Context, configFiles []string, workingDir, service string) error {
+	if err := checkComposeFilesVisible(configFiles); err != nil {
+		return err
+	}
 	args := composeArgs(configFiles, workingDir, "build", "--pull", service)
 	return runDockerCompose(ctx, args)
 }
 
 func (execComposeRunner) Up(ctx context.Context, configFiles []string, workingDir, service string) error {
+	if err := checkComposeFilesVisible(configFiles); err != nil {
+		return err
+	}
 	args := composeArgs(configFiles, workingDir, "up", "-d", service)
 	return runDockerCompose(ctx, args)
 }
 
 func (execComposeRunner) UpNoDeps(ctx context.Context, configFiles []string, workingDir, service string) error {
+	if err := checkComposeFilesVisible(configFiles); err != nil {
+		return err
+	}
 	args := composeArgs(configFiles, workingDir, "up", "-d", "--no-deps", service)
 	return runDockerCompose(ctx, args)
+}
+
+// checkComposeFilesVisible verifies every compose file is readable by THIS
+// process before the docker CLI is exec'd. The paths come from the container's
+// com.docker.compose.project.config_files label and are HOST paths; a
+// containerized docker-updater sees them only if the compose tree is
+// bind-mounted at the identical path. Without this the operator gets compose's
+// bare "no such file or directory" with no hint that the file exists and the
+// mount is what is missing.
+func checkComposeFilesVisible(configFiles []string) error {
+	for _, f := range configFiles {
+		if _, err := os.Stat(f); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				dir := filepath.Dir(f)
+				return fmt.Errorf("compose file %s is not visible to docker-updater: it comes from the container's "+
+					"com.docker.compose.project.config_files label and must be reachable at that exact path here "+
+					"(mount it, e.g. -v %s:%s:ro)", f, dir, dir)
+			}
+			return fmt.Errorf("compose file %s: %w", f, err)
+		}
+	}
+	return nil
 }
 
 // composeArgs assembles the `compose` argument list shared by Build and Up.

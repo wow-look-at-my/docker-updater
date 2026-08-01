@@ -270,6 +270,13 @@ If the health check fails, the update is **rolled back**:
 
 Failures and rollbacks are reported via webhook notifications and surface as errors on the dashboard.
 
+A compose recreate that fails *before* compose replaces anything -- an unreadable
+compose file, an invalid config -- is reported as the plain cause, with no
+rollback attempted and no `ROLLBACK FAILED, <service> may be down`: the original
+container is confirmed still running on its original image, so there is nothing
+to restore and re-running the same failing command would only repeat the error.
+Rollback still runs whenever that cannot be confirmed.
+
 ```yaml
 labels:
   docker-updater.enable: "true"
@@ -351,7 +358,7 @@ A failed `docker compose build` / `up` is reported with the **last lines of the 
 
 The two failure signatures worth knowing:
 
-- **Compose tree not mounted.** Compose runs *inside* the docker-updater container, so it can only see the compose file and build context if they are bind-mounted into it at the **same absolute paths** recorded on the service's containers. An error like `stat /srv/stack/docker-compose.yml: no such file or directory` (or `no configuration file provided`) means the path exists on the host but not inside docker-updater — add a volume such as `-v /srv/stack:/srv/stack:ro` (read-write if the build writes into its context).
+- **Compose tree not mounted.** Compose runs *inside* the docker-updater container, so it can only see the compose file and build context if they are bind-mounted into it at the **same absolute paths** recorded on the service's containers. Every compose invocation is pre-flighted against the paths in the `config_files` label and fails before the CLI is reached with `compose file /srv/stack/docker-compose.yml is not visible to docker-updater ... (mount it, e.g. -v /srv/stack:/srv/stack:ro)`. Use read-write instead of `:ro` if the build writes into its context. This applies to plain image-mode services too: since a compose-managed container is recreated *through* compose, an unmounted compose tree blocks ordinary image updates, not just rebuilds.
 - **No writable temp dir.** `mkdir /tmp/dockerfileNNN: no such file or directory` means the image has no `/tmp` — buildx cannot materialize a `dockerfile_inline` (and compose cannot place its bake metadata file). The published image ships `/tmp` (mode `1777`) and sets `TMPDIR=/tmp`; if you build a custom `FROM scratch` image, ship the same.
 
 > **Locally-built images in image mode are skipped.** Even without migrating to build mode, a container in the default image mode whose image has no `RepoDigests` (locally built, no registry origin) is now **detected and skipped** with a warning — `image <x> is locally built and not in a registry; use docker-updater.mode=build` — instead of pull-erroring every cycle.

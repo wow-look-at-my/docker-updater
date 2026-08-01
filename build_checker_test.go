@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -682,4 +684,30 @@ func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo build --pull opencode")
+}
+
+// A compose file the updater cannot see is the containerized-updater footgun:
+// the label carries a host path, and without a matching bind mount the docker
+// CLI fails with a bare "no such file or directory". Fail before exec'ing with
+// an error that names the actual fix.
+func TestComposeRunnerRejectsInvisibleComposeFile(t *testing.T) {
+	captureComposeLog(t)
+	missing := "/mnt/ssdpool/appdata/compose.manager/claude-host/docker-compose.yml"
+
+	err := execComposeRunner{}.UpNoDeps(context.Background(), []string{missing}, "/mnt/ssdpool/appdata/compose.manager/claude-host", "dind")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), missing)
+	assert.Contains(t, err.Error(), "not visible to docker-updater")
+	assert.Contains(t, err.Error(), "-v /mnt/ssdpool/appdata/compose.manager/claude-host:/mnt/ssdpool/appdata/compose.manager/claude-host:ro")
+	assert.NotContains(t, err.Error(), "exit status", "the docker CLI must never be reached")
+}
+
+func TestCheckComposeFilesVisiblePassesForReadableFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker-compose.yml")
+	require.NoError(t, os.WriteFile(path, []byte("services: {}\n"), 0o644))
+
+	assert.NoError(t, checkComposeFilesVisible([]string{path}))
+	assert.NoError(t, checkComposeFilesVisible(nil))
 }

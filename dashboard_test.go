@@ -434,6 +434,7 @@ func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
 		"function onSearchInput",         // search/filter box handler
 		"function updatedHighlight",      // recently-updated green fade
 		"function renderOutOfSyncBanner", // mixed-asset startup guard
+		"function errorReport",           // copy-errors-to-clipboard button
 	} {
 		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)
 	}

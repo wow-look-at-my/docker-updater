@@ -285,8 +285,13 @@ function updatedHighlight(c, now) {
         title: "updated " + (fmtRelative(c.last_updated) || "just now"),
     };
 }
+// warningLines renders a container's configuration warnings under its name:
+// amber, one line each, full text (they name the label or endpoint to fix).
+function warningLines(c) {
+    return (c.warnings || []).map((w) => el("div", { class: "warn", title: w }, "⚠ " + w));
+}
 function row(c) {
-    const nameCell = el("td", null, el("span", { class: "cname" }, c.name || "—"), el("div", { class: "cmeta" }, c.image || "—", c.image_id ? " · " : null, c.image_id ? el("span", { class: "cref" }, c.image_id) : null));
+    const nameCell = el("td", null, el("span", { class: "cname" }, c.name || "—"), el("div", { class: "cmeta" }, c.image || "—", c.image_id ? " · " : null, c.image_id ? el("span", { class: "cref" }, c.image_id) : null), ...warningLines(c));
     const uptime = uptimeText(c);
     const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
     const highlight = updatedHighlight(c, Date.now());

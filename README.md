@@ -7,6 +7,7 @@ Automatic Docker container updater service. Monitors running containers and upda
 - **Image-based updates**: Detects new image digests from container registries (watchtower-style)
 - **Git-based updates**: Monitors git remote refs via smart HTTP protocol to detect new commits
 - **Build-based updates**: For locally-built (compose `build:`) services that are never pushed to a registry, watches the service's **base image** and rebuilds + recreates via `docker compose` when the derived image no longer extends the base's current release — instead of fruitlessly pulling a local-only tag every cycle
+- **Standard update-check endpoints**: containers expose `/.well-known/docker-updater/health` and `/.well-known/docker-updater/pre-update`; docker-updater discovers them with no configuration and warns about containers that serve neither
 - **Pre-update checks**: HTTP or exec-based checks to verify containers are ready before updating
 - **Post-update health checks**: HTTP or exec-based checks to verify new containers are healthy without requiring `curl` or any binary inside the image
 - **Automatic rollback**: if the replacement container fails its post-update health check, the previous image is restored under the same name -- a failed update never leaves the service down
@@ -64,6 +65,7 @@ a newer `index.html`:
 - **Last pulled**: when docker-updater last actually downloaded a newer image. An up-to-date check that downloads nothing does **not** advance it, so the column tracks genuine image changes instead of resetting every cycle
 - **No "last checked" column**: every monitored container is polled in the same cycle, so it read identically on every row. The top bar's **Last check** / **Next check** carries it once; the per-container timestamp stays in the JSON API as `last_checked`
 - **Upstream**: whether a newer image digest (or git commit) is available -- and, when it is, why it has not been applied yet -- or the last error
+- **Warnings**: amber lines under a container's name when it serves no standard [update-check endpoints](#update-checks-the-well-knowndocker-updater-endpoints), or overrides them with the older labels. Configuration notes, not failures -- updates still run
 
 Containers are grouped into four collapsible sections -- **Managed · online**,
 **Managed · offline**, **Unmanaged · online**, and **Unmanaged · offline** --
@@ -227,6 +229,31 @@ environment:
 Leave it empty (the default) to react to any package -- the right choice for a
 single-repository webhook.
 
+## Update Checks: the `/.well-known/docker-updater/` endpoints
+
+The standard way a container tells docker-updater whether it may be updated and
+whether it came back healthy. Serve two `GET` endpoints on your HTTP port and
+docker-updater finds them by itself -- **no labels**:
+
+| Path | 2xx means |
+|---|---|
+| `/.well-known/docker-updater/health` | the container is up after an update (polled until the timeout, else the update is rolled back) |
+| `/.well-known/docker-updater/pre-update` | it is OK to update right now (non-2xx holds the update to the next cycle). Optional -- a 404 here never blocks |
+
+docker-updater derives the address from the container's own network settings and
+its single exposed TCP port; set `docker-updater.well-known.port` when several
+are exposed. Containers that serve no HTTP at all opt out with
+`docker-updater.well-known: "false"`.
+
+Containers that serve neither endpoint keep working -- liveness falls back to
+Docker's `HEALTHCHECK` -- but the dashboard shows an amber warning naming what to
+implement. The older `pre-check.*` / `health-check.*` labels still work and take
+precedence; a container using them is flagged **nonstandard** so a fleet can be
+migrated deliberately.
+
+Full contract, discovery rules, warning texts, and copy-paste handlers:
+[docs/well-known-endpoints.md](docs/well-known-endpoints.md).
+
 ## Container Labels
 
 Add these labels to containers you want to monitor:
@@ -249,14 +276,18 @@ labels:
   docker-updater.pre-check.url: ":8080/ready-to-update"
   docker-updater.pre-check.command: "/check-ready.sh"
   docker-updater.pre-check.timeout: "30s"
+  # Standard update-check endpoints (see above): pick the port, or opt out
+  docker-updater.well-known.port: "8080"
+  docker-updater.well-known: "false"
   # Zero-downtime rolling update:
   docker-updater.rolling: "true"
 ```
 
 ### Post-Update Health Checks
 
-After starting the replacement container, docker-updater verifies it is healthy before completing the update. There are three ways to configure this:
+After starting the replacement container, docker-updater verifies it is healthy before completing the update. In order of precedence:
 
+0. **Standard endpoint** (`/.well-known/docker-updater/health`): used automatically when the container serves it and no health-check label is set -- see [Update Checks](#update-checks-the-well-knowndocker-updater-endpoints)
 1. **HTTP health check** (`docker-updater.health-check.url`): docker-updater polls the URL via HTTP GET from its own process -- no `curl` or other binary inside the container is required. This is the fix for images that ship without a shell or HTTP client (e.g. when `ollama` dropped `curl`, its in-container `HEALTHCHECK` could no longer run).
 2. **Exec health check** (`docker-updater.health-check.command`): docker-updater runs a command inside the container via `docker exec` (requires a shell). Exit code 0 means healthy.
 3. **Docker HEALTHCHECK fallback**: if neither label is set, docker-updater waits for Docker's built-in `HEALTHCHECK` to report `healthy`. The wait deadline is derived from the container's own `HEALTHCHECK` config (`start-period + retries × interval + probe timeout`, with a 30s floor and a 5-minute fallback when no config is present), so slow-starting containers only need the right `HEALTHCHECK` parameters.
@@ -368,7 +399,7 @@ The two failure signatures worth knowing:
 
 Before applying an update, docker-updater can verify that the container is ready to be updated. This prevents updates during critical operations like database migrations or active request processing.
 
-The check type is inferred from which label is set -- no separate type label needed.
+The standard way is the `/.well-known/docker-updater/pre-update` endpoint, used automatically with no labels at all -- see [Update Checks](#update-checks-the-well-knowndocker-updater-endpoints). The labels below are the older per-container form; they take precedence where set, and the check type is inferred from which one is set.
 
 #### HTTP Check
 

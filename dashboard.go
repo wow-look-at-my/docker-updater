@@ -207,6 +207,10 @@ type apiContainer struct {
 	Error           string     `json:"error,omitempty"`
 	Skipped         bool       `json:"skipped,omitempty"`
 	SkipReason      string     `json:"skip_reason,omitempty"`
+	// Warnings describe how the container is configured for update checks --
+	// no standard /.well-known/docker-updater/ endpoints, or nonstandard
+	// label overrides. Not errors: the update path still works.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // apiResponse is the top-level JSON payload served at /api/containers.
@@ -276,6 +280,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.LastChecked = nonZeroTime(st.LastChecked)
 			ac.LastPulled = nonZeroTime(st.LastPulled)
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)
+			ac.Warnings = st.Warnings
 		}
 
 		resp.Containers = append(resp.Containers, ac)

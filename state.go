@@ -24,6 +24,10 @@ type ContainerStatus struct {
 	CurrentRef      string // current digest or commit (short form)
 	AvailableRef    string // newer digest or commit (short form), if available
 
+	// Warnings about how the container is configured for update checks
+	// (missing standard endpoints, nonstandard label overrides).
+	Warnings []string
+
 	LastError  string // last error message, if the most recent check failed
 	Skipped    bool   // the most recent update was skipped by a pre-check
 	SkipReason string
@@ -65,6 +69,7 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.Mode = r.Container.Mode
 		st.LastChecked = r.CheckedAt
 		st.DryRun = r.DryRun
+		st.Warnings = r.Warnings
 		if r.Pulled {
 			st.LastPulled = r.CheckedAt
 		}

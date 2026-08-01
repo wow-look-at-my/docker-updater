@@ -48,6 +48,16 @@ type ContainerInfo struct {
 	PreCheckURL     string
 	PreCheckCommand string
 	PreCheckTimeout time.Duration
+	// PreCheckStandard marks PreCheckURL as the discovered standard endpoint
+	// rather than an operator-configured one. The standard pre-update endpoint
+	// is optional, so a 404 (or an unreachable container) means "no opinion,
+	// go ahead" instead of holding the update back.
+	PreCheckStandard bool
+
+	// Discovery inputs for the standard /.well-known/docker-updater/
+	// endpoints: where to reach the container, and which TCP ports it declares.
+	Address      string // container IP, or 127.0.0.1 under host networking
+	ExposedPorts []int  // declared TCP ports, ascending
 
 	// Rolling update: start new container before stopping old.
 	Rolling bool
@@ -73,4 +83,8 @@ type UpdateResult struct {
 	Skipped    bool
 	SkipReason string
 	Pulled     bool // a registry pull was performed during this check
+	// Warnings are operator-actionable notes about how this container is
+	// configured (no standard endpoints, nonstandard label overrides). They
+	// describe configuration, not the outcome of this cycle.
+	Warnings []string
 }

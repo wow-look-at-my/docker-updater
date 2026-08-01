@@ -193,7 +193,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		info.PreCheckURL = c.Labels["docker-updater.pre-check.url"]
 		info.PreCheckCommand = c.Labels["docker-updater.pre-check.command"]
 		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-			info.PreCheckTimeout = 30 * time.Second
+			info.PreCheckTimeout = defaultPreCheckTimeout
 			if t := c.Labels["docker-updater.pre-check.timeout"]; t != "" {
 				if d, err := time.ParseDuration(t); err == nil {
 					info.PreCheckTimeout = d
@@ -206,7 +206,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		info.HealthCheckURL = c.Labels["docker-updater.health-check.url"]
 		info.HealthCheckCommand = c.Labels["docker-updater.health-check.command"]
 		if info.HealthCheckURL != "" || info.HealthCheckCommand != "" {
-			info.HealthCheckTimeout = 60 * time.Second
+			info.HealthCheckTimeout = defaultHealthCheckTimeout
 			if t := c.Labels["docker-updater.health-check.timeout"]; t != "" {
 				if d, err := time.ParseDuration(t); err == nil {
 					info.HealthCheckTimeout = d
@@ -235,6 +235,13 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 				}
 			}
 		}
+
+		// Discovery inputs for the standard /.well-known/docker-updater/
+		// endpoints. Both come from the container's own settings, so a
+		// container that says nothing beyond the enable label is still
+		// reachable without configuration.
+		info.Address = containerAddress(inspect)
+		info.ExposedPorts = exposedTCPPorts(inspect)
 
 		// Apply the same resolution for health-check URL.
 		if strings.HasPrefix(info.HealthCheckURL, ":") && inspect.NetworkSettings != nil {

@@ -25,10 +25,17 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 	var results []UpdateResult
 
 	for _, info := range containers {
+		// Discover the standard /.well-known/docker-updater/ endpoints before
+		// the mode switch: they fill in the pre-update gate and the
+		// post-update liveness check for every container that serves them, and
+		// produce the warnings the dashboard shows for those that do not.
+		info, warnings := applyWellKnown(ctx, info)
+
 		result := UpdateResult{
 			Container: info,
 			CheckedAt: time.Now(),
 			DryRun:    cfg.DryRun,
+			Warnings:  warnings,
 		}
 
 		switch info.Mode {

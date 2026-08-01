@@ -1,0 +1,115 @@
+# The `/.well-known/docker-updater/` update-check contract
+
+The standard way a container tells docker-updater whether it may be updated and
+whether it came back healthy. It is HTTP, self-describing, and requires **no
+labels**: a container that serves the endpoints is discovered automatically.
+
+## Endpoints
+
+Both answer `GET`, carry their meaning in the **status code**, and should be
+cheap enough to call on every check cycle (default: every 5 minutes).
+
+| Path | Asked | 2xx | Other |
+|---|---|---|---|
+| `/.well-known/docker-updater/health` | after an update, until it passes or the timeout expires (default 60s) | the new container is up and serving | keep polling; on timeout the update is rolled back |
+| `/.well-known/docker-updater/pre-update` | once, immediately before an update is applied | go ahead | hold the update; retried next cycle, reported as `skipped` |
+
+`404` and `501` mean **not implemented**:
+
+- on `health`, that is the whole container being unconfigured — docker-updater
+  warns and falls back to Docker's `HEALTHCHECK` status.
+- on `pre-update`, it is a normal, supported choice. The endpoint is optional;
+  a container that only serves `health` is fully conformant and updates are
+  never held back for it.
+
+`pre-update` is the place to say "not right now": a migration is running, a
+long request is in flight, a queue is draining. It must not block — answer
+immediately with what is true at that moment.
+
+Neither endpoint needs a body. Anything returned is ignored, so a one-line
+handler is a complete implementation.
+
+## Discovery
+
+docker-updater builds the base URL from the container's own Docker state, so
+nothing is configured twice:
+
+- **Address** — the container's first network IP; `127.0.0.1` when it runs with
+  host networking. docker-updater is meant to run with `--network host` so it
+  can reach bridge IPs directly.
+- **Port** — the container's single exposed TCP port. With several exposed
+  ports there is no way to guess which one speaks HTTP, so discovery stops and
+  warns until `docker-updater.well-known.port` names one.
+
+A container is considered to implement the contract when `health` answers with
+anything other than 404/501. A `503` from a container that is currently
+unhealthy still counts: that is a health problem, not a configuration one.
+
+## Labels
+
+| Label | Effect |
+|---|---|
+| `docker-updater.well-known.port` | Which exposed port serves the endpoints. Required when the container exposes more than one TCP port |
+| `docker-updater.well-known` = `false` | Skip discovery entirely and stop warning. For containers that legitimately serve no HTTP — a database, a queue worker |
+
+## Warnings
+
+Warnings are shown per row on the dashboard (amber, under the container name)
+and logged once per container, re-logged only when they change. They never
+block an update — they describe configuration, not failure.
+
+- **Missing** — `does not serve /.well-known/docker-updater/health (probed
+  http://…); post-update liveness falls back to Docker HEALTHCHECK.` Implement
+  the endpoint, or opt out with `docker-updater.well-known=false`.
+- **Undiscoverable** — `no standard update endpoints: container exposes 3 TCP
+  ports (80, 443, 9000); set docker-updater.well-known.port to pick one.`
+- **Nonstandard** — `nonstandard update checks: docker-updater.health-check.url
+  overrides the standard /.well-known/docker-updater/ endpoints.` The container
+  works exactly as before; the warning marks it as not yet migrated.
+
+## Compatibility with the label-configured checks
+
+The original opt-in labels — `docker-updater.pre-check.url` / `.command` and
+`docker-updater.health-check.url` / `.command` — still work and always win.
+Discovery fills in only what no label set, per check: a container can carry an
+explicit `health-check.command` and still use the standard `pre-update`
+endpoint. Any of those labels marks the container nonstandard.
+
+To migrate: implement the two endpoints, delete the labels, and the warning
+goes away on the next cycle.
+
+## Implementing it
+
+Go:
+
+```go
+mux.HandleFunc("/.well-known/docker-updater/health", func(w http.ResponseWriter, _ *http.Request) {
+    if !ready() {
+        w.WriteHeader(http.StatusServiceUnavailable)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+})
+
+mux.HandleFunc("/.well-known/docker-updater/pre-update", func(w http.ResponseWriter, _ *http.Request) {
+    if migrationRunning() {
+        w.WriteHeader(http.StatusServiceUnavailable) // hold; asked again next cycle
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+})
+```
+
+Express:
+
+```js
+app.get('/.well-known/docker-updater/health', (_, res) => res.sendStatus(ready() ? 200 : 503));
+app.get('/.well-known/docker-updater/pre-update', (_, res) => res.sendStatus(busy() ? 503 : 200));
+```
+
+## Why `/.well-known/`
+
+[RFC 8615](https://www.rfc-editor.org/rfc/rfc8615) reserves the prefix for
+exactly this: a path an automated client may request without prior arrangement.
+It also keeps the contract out of an application's own namespace, so adding it
+cannot collide with an existing route.

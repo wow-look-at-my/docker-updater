@@ -33,11 +33,22 @@ func runHTTPCheck(ctx context.Context, info ContainerInfo) error {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		// The standard pre-update endpoint is optional and discovered, not
+		// declared: an unreachable container means "nothing to ask", never
+		// "hold every update forever". A URL the operator configured by label
+		// is a declared gate, so its failure still blocks.
+		if info.PreCheckStandard {
+			return nil
+		}
 		return fmt.Errorf("pre-check HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	if info.PreCheckStandard && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNotImplemented) {
+		// Serves /health but not /pre-update: the gate is opt-in per endpoint.
 		return nil
 	}
 

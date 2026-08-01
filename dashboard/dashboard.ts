@@ -39,6 +39,9 @@ interface ApiContainer {
   error?: string;
   skipped?: boolean;
   skip_reason?: string;
+  // Configuration notes, not failures: no standard
+  // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
+  warnings?: string[];
 }
 
 // ApiResponse mirrors apiResponse in dashboard.go (the payload of /api/containers).
@@ -330,6 +333,12 @@ function updatedHighlight(c: ApiContainer, now: number): { background: string; t
   };
 }
 
+// warningLines renders a container's configuration warnings under its name:
+// amber, one line each, full text (they name the label or endpoint to fix).
+function warningLines(c: ApiContainer): HTMLElement[] {
+  return (c.warnings || []).map((w) => el("div", { class: "warn", title: w }, "⚠ " + w));
+}
+
 function row(c: ApiContainer): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
@@ -338,6 +347,7 @@ function row(c: ApiContainer): HTMLElement {
       c.image_id ? " · " : null,
       c.image_id ? el("span", { class: "cref" }, c.image_id) : null,
     ),
+    ...warningLines(c),
   );
 
   const uptime = uptimeText(c);

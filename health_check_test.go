@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -415,4 +418,135 @@ func TestListMonitoredContainersHealthCheckURLResolve(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, 1, len(containers))
 	assert.Equal(t, "http://172.17.0.8:8080/health", containers[0].HealthCheckURL)
+}
+
+// --- post-update health gate: the address must follow the new container ---
+
+// serveOn starts an HTTP server bound to addr on an arbitrary port and returns
+// its port. Two loopback addresses stand in for Docker handing the replacement
+// container a different IP than the one the update destroyed.
+func serveOn(t *testing.T, addr string, status int) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", addr+":0")
+	require.NoError(t, err)
+	srv := &httptest.Server{
+		Listener: ln,
+		Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+		})},
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func inspectWithIP(ip string) types.ContainerJSON {
+	settings := &types.NetworkSettings{}
+	if ip != "" {
+		settings.Networks = map[string]*network.EndpointSettings{"bridge": {IPAddress: ip}}
+	}
+	return types.ContainerJSON{
+		ContainerJSONBase: &types.ContainerJSONBase{HostConfig: &container.HostConfig{}},
+		Config:            &container.Config{Image: "myapp:latest"},
+		NetworkSettings:   settings,
+	}
+}
+
+func TestWaitPostUpdateHealthyFollowsNewContainerAddress(t *testing.T) {
+	// The new container serves on 127.0.0.2; the URL built before the update
+	// still names 127.0.0.1, where nothing answers.
+	port := serveOn(t, "127.0.0.2", http.StatusOK)
+
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
+			require.Equal(t, "new123456789", id)
+			return inspectWithIP("127.0.0.2"), nil
+		},
+	}
+
+	info := ContainerInfo{
+		Name:                        "myapp",
+		HealthCheckURL:              fmt.Sprintf("http://127.0.0.1:%d%s", port, wellKnownHealth),
+		HealthCheckURLFromContainer: true,
+		HealthCheckTimeout:          2 * time.Second,
+	}
+
+	start := time.Now()
+	require.NoError(t, waitPostUpdateHealthy(context.Background(), cli, "new123456789", info))
+	assert.Less(t, time.Since(start), time.Second, "should pass on the new address, not burn the budget on the old one")
+}
+
+func TestWaitPostUpdateHealthyKeepsOperatorURL(t *testing.T) {
+	// An operator-written absolute URL names something else on purpose. The
+	// new container's address must not displace it.
+	port := serveOn(t, "127.0.0.2", http.StatusOK)
+
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return inspectWithIP("127.0.0.1"), nil
+		},
+	}
+
+	info := ContainerInfo{
+		Name:               "myapp",
+		HealthCheckURL:     fmt.Sprintf("http://127.0.0.2:%d/health", port),
+		HealthCheckTimeout: 2 * time.Second,
+	}
+
+	require.NoError(t, waitPostUpdateHealthy(context.Background(), cli, "new123456789", info))
+}
+
+func TestWaitPostUpdateHealthyNewContainerHasNoAddress(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return inspectWithIP(""), nil
+		},
+	}
+
+	info := ContainerInfo{
+		Name:                        "myapp",
+		HealthCheckURL:              "http://127.0.0.1:9999" + wellKnownHealth,
+		HealthCheckURLFromContainer: true,
+		HealthCheckTimeout:          2 * time.Second,
+	}
+
+	start := time.Now()
+	err := waitPostUpdateHealthy(context.Background(), cli, "new123456789", info)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no reachable address")
+	assert.Less(t, time.Since(start), time.Second, "must fail immediately, not fall back to the old address")
+}
+
+func TestWaitPostUpdateHealthyInspectFailsAfterUpdate(t *testing.T) {
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{}, errors.New("no such container")
+		},
+	}
+
+	info := ContainerInfo{
+		Name:                        "myapp",
+		HealthCheckURL:              "http://127.0.0.1:9999" + wellKnownHealth,
+		HealthCheckURLFromContainer: true,
+		HealthCheckTimeout:          2 * time.Second,
+	}
+
+	err := waitPostUpdateHealthy(context.Background(), cli, "new123456789", info)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no such container")
+}
+
+func TestWaitPostUpdateHealthyNoContainerToInspect(t *testing.T) {
+	// The compose path resolves the replacement container by service name and
+	// can come up empty; there is then nothing to re-resolve against.
+	info := ContainerInfo{
+		Name:                        "myapp",
+		HealthCheckURL:              "http://127.0.0.1:9999" + wellKnownHealth,
+		HealthCheckURLFromContainer: true,
+		HealthCheckTimeout:          2 * time.Second,
+	}
+
+	err := waitPostUpdateHealthy(context.Background(), &mockDocker{}, "", info)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no container")
 }

@@ -325,7 +325,7 @@ labels:
   docker-updater.health-check.timeout: "60s"  # optional, default 60s
 ```
 
-URLs starting with `:` (port prefix) are resolved using the container's bridge IP, the same way pre-check URLs are (see [Pre-Update Checks](#pre-update-checks)). If both `health-check.url` and `health-check.command` are set, the HTTP check takes precedence.
+URLs starting with `:` (port prefix) are resolved using the container's bridge IP, the same way pre-check URLs are (see [Pre-Update Checks](#pre-update-checks)). After an update the IP is re-resolved from the new container, since the replacement gets its own; an absolute URL is polled as written. If both `health-check.url` and `health-check.command` are set, the HTTP check takes precedence.
 
 ### Image Mode (default)
 

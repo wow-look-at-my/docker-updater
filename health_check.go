@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -26,8 +28,15 @@ var execPollInterval = 100 * time.Millisecond
 // HEALTHCHECK at all just has to stay running through a short grace period.
 func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID string, info ContainerInfo) error {
 	if info.HealthCheckURL != "" {
-		log.Printf("container %s: waiting for HTTP health check at %s", info.Name, info.HealthCheckURL)
-		return waitHTTPHealthy(ctx, info.HealthCheckURL, info.HealthCheckTimeout)
+		url := info.HealthCheckURL
+		if info.HealthCheckURLFromContainer {
+			var err error
+			if url, err = rehostToNewContainer(ctx, cli, containerID, url); err != nil {
+				return err
+			}
+		}
+		log.Printf("container %s: waiting for HTTP health check at %s", info.Name, url)
+		return waitHTTPHealthy(ctx, url, info.HealthCheckTimeout)
 	}
 	if info.HealthCheckCommand != "" {
 		log.Printf("container %s: waiting for exec health check: %s", info.Name, info.HealthCheckCommand)
@@ -36,6 +45,40 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 	// No health-check label: fall back to Docker's HEALTHCHECK status. waitHealthy
 	// derives its own budget from the container's healthcheck config.
 	return waitHealthy(ctx, cli, containerID)
+}
+
+// rehostToNewContainer points a container-derived health URL at the container
+// the update just started. The URL was built from the address of the container
+// the update destroyed, and Docker both gives the replacement its own IP and
+// may hand the old one to an unrelated container. Only the host moves: a
+// recreated container keeps the port and path it served on.
+//
+// An address it cannot resolve is a failure, never a fall back to the old one:
+// polling a dead or recycled address either times out the gate or passes it on
+// somebody else's health.
+func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, rawURL string) (string, error) {
+	if containerID == "" {
+		return "", fmt.Errorf("health check address: no container found after the update to resolve %s against", rawURL)
+	}
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspecting new container %s for health check address: %w", shortID(containerID), err)
+	}
+	address := containerAddress(inspect)
+	if address == "" {
+		return "", fmt.Errorf("new container %s has no reachable address for the health check", shortID(containerID))
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parsing health check URL %q: %w", rawURL, err)
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort(address, port)
+	} else {
+		u.Host = address
+	}
+	return u.String(), nil
 }
 
 // waitHTTPHealthy polls url every 2s until it returns a 2xx response or timeout.

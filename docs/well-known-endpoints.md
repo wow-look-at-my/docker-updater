@@ -45,6 +45,25 @@ A container is considered to implement the contract when `health` answers with
 anything other than 404/501. A `503` from a container that is currently
 unhealthy still counts: that is a health problem, not a configuration one.
 
+### The address after an update
+
+An update replaces the container, and Docker gives the replacement its own IP —
+so the address discovery resolved belongs to a container that no longer exists,
+and may since have been recycled onto an unrelated one. Before polling `health`,
+docker-updater re-resolves the address from the container it just started and
+rebuilds the URL; the port and path are unchanged, because a recreated container
+keeps the port it serves on.
+
+If the new container has no reachable address, the gate fails and the update
+rolls back. It never falls back to the pre-update address: that either burns the
+whole health budget on a dead IP or passes the gate on another service's health.
+
+This applies to every URL docker-updater builds itself — the standard endpoint,
+and the `:port/path` short form of `docker-updater.health-check.url`. An
+absolute `docker-updater.health-check.url` is polled exactly as written: it names
+something other than the container's own IP on purpose (a service name, a stable
+host), so its host is never rewritten.
+
 ## Labels
 
 | Label | Effect |

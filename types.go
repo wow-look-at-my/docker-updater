@@ -69,6 +69,12 @@ type ContainerInfo struct {
 	HealthCheckURL     string
 	HealthCheckCommand string
 	HealthCheckTimeout time.Duration
+	// HealthCheckURLFromContainer marks HealthCheckURL as built from the
+	// container's own address rather than written by an operator. Such a URL
+	// names the container being replaced, so the gate re-resolves its host
+	// against the container the update just started. An operator-written
+	// absolute URL names something else on purpose and is polled as written.
+	HealthCheckURLFromContainer bool
 }
 
 // UpdateResult records the outcome of an update check/action.

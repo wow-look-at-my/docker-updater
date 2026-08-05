@@ -243,11 +243,14 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		info.Address = containerAddress(inspect)
 		info.ExposedPorts = exposedTCPPorts(inspect)
 
-		// Apply the same resolution for health-check URL.
+		// Apply the same resolution for health-check URL. The address is this
+		// container's, so the post-update gate re-resolves it against the
+		// container that replaces it.
 		if strings.HasPrefix(info.HealthCheckURL, ":") && inspect.NetworkSettings != nil {
 			for _, net := range inspect.NetworkSettings.Networks {
 				if net.IPAddress != "" {
 					info.HealthCheckURL = "http://" + net.IPAddress + info.HealthCheckURL
+					info.HealthCheckURLFromContainer = true
 					break
 				}
 			}

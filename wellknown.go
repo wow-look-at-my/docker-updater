@@ -218,6 +218,9 @@ func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []s
 	if state.HealthURL != "" && info.HealthCheckURL == "" && info.HealthCheckCommand == "" {
 		info.HealthCheckURL = state.HealthURL
 		info.HealthCheckTimeout = defaultHealthCheckTimeout
+		// Built from this container's address, which the update replaces --
+		// see waitPostUpdateHealthy.
+		info.HealthCheckURLFromContainer = true
 	}
 	if state.PreUpdateURL != "" && info.PreCheckURL == "" && info.PreCheckCommand == "" {
 		info.PreCheckURL = state.PreUpdateURL

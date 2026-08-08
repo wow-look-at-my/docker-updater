@@ -82,10 +82,7 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 	assert.Contains(t, state.Warnings[0], wellKnownEnableLabel+"=false")
 }
 
-// A container that never answers is a different fault from one that answers
-// 404, and must not get the same sentence: "implement the endpoint" sends the
-// operator to write code that may already be there, while the actual break is
-// the route to the container or the port being probed.
+// A container that never answers must not get the 404 sentence: "implement the endpoint" sends the operator to write code that is already there.
 func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 	info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	srv.Close() // the address is still addressed, but nothing listens on it now
@@ -123,9 +120,7 @@ func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 	assert.Equal(t, state.Warnings, warnings)
 }
 
-// Choosing a nonstandard check is a choice you are told about, and the opt-out
-// does not buy silence from it: well-known=false says "there are no standard
-// endpoints here", not "stop mentioning the override".
+// well-known=false says there are no standard endpoints here; it does not buy silence from the override warning.
 func TestOptOutDoesNotSilenceTheNonstandardWarning(t *testing.T) {
 	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"

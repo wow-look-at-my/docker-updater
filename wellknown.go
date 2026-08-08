@@ -134,7 +134,9 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	implemented, reachErr := probeWellKnown(ctx, base+wellKnownHealth)
 	switch {
 	case reachErr != nil:
-		// No answer at all: the break is the route or the port, not the endpoint.
+		// No HTTP answer at all. Saying "implement the endpoint" here sends the
+		// operator to write code that may already exist: what is actually
+		// broken is the route to the container, or the port being probed.
 		return wellKnownState{Warnings: []string{
 			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); post-update liveness falls " +
 				"back to Docker HEALTHCHECK. docker-updater must share a network with the container (it is meant " +
@@ -195,7 +197,15 @@ func joinPorts(ports []int) string {
 	return strings.Join(parts, ", ")
 }
 
-// probeWellKnown separates "answered 404/501" (not implemented) from "did not answer at all" (reachErr): a merely unhealthy container still speaks the contract, and a network fault reported as missing code sends the operator to write what is already there.
+// probeWellKnown reports whether the endpoint exists, and separately whether
+// the container answered at all. Any HTTP answer other than 404/501 counts as
+// implemented: a container that is merely unhealthy right now still speaks the
+// contract, and reporting it as unconfigured would send the operator to fix the
+// wrong thing.
+//
+// A returned error means no answer arrived — refused, timed out, unroutable.
+// That is a different fault with a different fix, and collapsing it into "not
+// implemented" makes a network problem read as missing code.
 func probeWellKnown(ctx context.Context, url string) (implemented bool, reachErr error) {
 	ctx, cancel := context.WithTimeout(ctx, wellKnownProbeTimeout)
 	defer cancel()

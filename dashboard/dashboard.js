@@ -69,44 +69,68 @@ function uptimeText(c) {
         return null;
     return (c.status || "").replace(/\s*\(health[^)]*\)\s*/i, "").replace(/\s*\((un)?healthy\)\s*/i, "").trim() || null;
 }
-function stateCell(c) {
-    let dot = "dot-gray";
+// The text of each table cell lives in its own function, and both the cell
+// builder and stateSnapshot() call it. Anything the table draws is therefore
+// reachable by the copy button by construction — a value the snapshot could
+// omit is a value no column can render either.
+// stateIndicator is the colour of the row's state dot: the reported health
+// when Docker has one, else the container's own state.
+function stateIndicator(c) {
     if (c.health === "healthy")
-        dot = "dot-green";
-    else if (c.health === "unhealthy")
-        dot = "dot-red";
-    else if (c.health === "starting")
-        dot = "dot-amber";
-    else if (c.state === "running")
-        dot = "dot-green";
-    else if (c.state === "exited" || c.state === "dead")
-        dot = "dot-red";
+        return "green";
+    if (c.health === "unhealthy")
+        return "red";
+    if (c.health === "starting")
+        return "amber";
+    if (c.state === "running")
+        return "green";
+    if (c.state === "exited" || c.state === "dead")
+        return "red";
+    return "gray";
+}
+function stateText(c) {
+    return c.state || "unknown";
+}
+function stateCell(c) {
     const children = [
-        el("span", { class: "dot " + dot }),
-        el("span", { class: "state-text" }, c.state || "unknown"),
+        el("span", { class: "dot dot-" + stateIndicator(c) }),
+        el("span", { class: "state-text" }, stateText(c)),
     ];
     if (c.health)
         children.push(el("div", { class: "health-sub" }, c.health));
     return el("td", null, ...children);
 }
-// restartsCell renders Docker's restart count for the container. A nil count
-// (container could not be inspected) shows "—"; zero is dimmed as the unremarkable
-// healthy case; a positive count is highlighted to flag instability.
+// restartsText is the Restarts column: Docker's restart count, or "—" when the
+// container could not be inspected.
+function restartsText(c) {
+    const n = c.restarts;
+    return n === undefined || n === null ? "—" : String(n);
+}
+// restartsCell dims the unremarkable cases (uninspectable, zero) and highlights
+// a positive count to flag instability.
 function restartsCell(c) {
     const n = c.restarts;
-    if (n === undefined || n === null)
-        return el("td", { class: "up-na" }, "—");
-    if (n === 0)
-        return el("td", { class: "up-na" }, "0");
+    const text = restartsText(c);
+    if (n === undefined || n === null || n === 0)
+        return el("td", { class: "up-na" }, text);
     const title = "Restarted " + n + " time" + (n !== 1 ? "s" : "") + " since the container was last (re)created";
-    return el("td", { class: "restarts-warn", title }, String(n));
+    return el("td", { class: "restarts-warn", title }, text);
+}
+// monitoringText is the Auto-update column's badge text.
+function monitoringText(c) {
+    return c.auto_update ? "Auto · " + (c.mode || "image") : "Manual";
 }
 function autoUpdateCell(c) {
     if (!c.auto_update) {
-        return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, "Manual"));
+        return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, monitoringText(c)));
     }
     const cls = c.mode === "git" ? "badge badge-git" : "badge badge-auto";
-    return el("td", null, el("span", { class: cls }, "Auto · " + (c.mode || "image")));
+    return el("td", null, el("span", { class: cls }, monitoringText(c)));
+}
+// lastPulledText is the Last pulled column: how long ago a newer image was
+// actually downloaded. Unmonitored containers are never pulled.
+function lastPulledText(c) {
+    return c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 }
 // heldBackReason explains why a detected update has not been applied. The three
 // cases mirror the backend's mutually-exclusive branches (see state.go Record):
@@ -119,37 +143,32 @@ function heldBackReason(c) {
         return "skipped: " + (c.skip_reason || "pre-check");
     return "dry-run — not applied";
 }
-function upstreamCell(c) {
-    const td = el("td", null);
-    if (!c.auto_update) {
-        td.appendChild(el("span", { class: "up-na" }, "—"));
-        return td;
-    }
+function upstreamView(c) {
+    if (!c.auto_update)
+        return { cls: "up-na", status: "—", detail: null };
     // An available update means one was detected but held back. Always surface it
     // as such — even when it also errored — so the row matches the "updates
     // pending" count instead of hiding behind a bare "error".
     if (c.update_available) {
-        td.appendChild(el("span", { class: "up-available" }, "update available"));
         let detail = "";
         if (c.current_ref || c.available_ref) {
             detail = (c.current_ref || "?") + " → " + (c.available_ref || "?");
         }
         const reason = heldBackReason(c);
-        detail = detail ? detail + " · " + reason : reason;
-        td.appendChild(el("div", { class: "detail" }, detail));
-        return td;
+        return { cls: "up-available", status: "update available", detail: detail ? detail + " · " + reason : reason };
     }
     // Errored with no newer ref detected: a plain failure, not a pending update.
-    if (c.error) {
-        td.appendChild(el("span", { class: "up-error" }, "error"));
-        td.appendChild(el("div", { class: "detail" }, c.error));
-        return td;
-    }
+    if (c.error)
+        return { cls: "up-error", status: "error", detail: c.error };
     // Up to date.
-    td.appendChild(el("span", { class: "up-uptodate" }, "up to date"));
     const updated = fmtRelative(c.last_updated);
-    if (updated)
-        td.appendChild(el("div", { class: "detail" }, "updated " + updated));
+    return { cls: "up-uptodate", status: "up to date", detail: updated ? "updated " + updated : null };
+}
+function upstreamCell(c) {
+    const view = upstreamView(c);
+    const td = el("td", null, el("span", { class: view.cls }, view.status));
+    if (view.detail)
+        td.appendChild(el("div", { class: "detail" }, view.detail));
     return td;
 }
 // errored is the exact predicate behind the "errors" card: a monitored
@@ -182,13 +201,123 @@ function errorReport(data) {
     });
     return [header, ...blocks].join("\n\n") + "\n";
 }
-// stateSnapshot renders the entire /api/containers payload as pretty JSON:
-// config, cycle timestamps, and every container's full status -- including the
-// fields no column draws (last_checked, skip_reason, the untruncated error).
-// The payload carries its own generated_at, so the copy dates itself rather
-// than claiming to be the state at the moment of the click.
+// rowView renders one container the way row() does, as data instead of DOM.
+function rowView(c, query) {
+    const group = GROUPS.find((g) => g.match(c));
+    const upstream = upstreamView(c);
+    return {
+        group: group ? group.id : "",
+        group_label: group ? group.label : "",
+        visible: matchesQuery(c, query),
+        monitoring: monitoringText(c),
+        state: stateText(c),
+        state_indicator: stateIndicator(c),
+        health: c.health || null,
+        uptime: uptimeText(c) || "—",
+        restarts: restartsText(c),
+        last_pulled: lastPulledText(c),
+        upstream: upstream.status,
+        upstream_detail: upstream.detail,
+        warnings: c.warnings || [],
+        pending: pending(c),
+        recently_updated: updatedHighlight(c, Date.now()) !== null,
+    };
+}
+// textOf reads an element's rendered text. Used for the page chrome — the
+// summary cards, the header timestamps, the group headings — so the snapshot
+// reports the numbers and strings on screen rather than a second computation
+// that could disagree with them.
+function textOf(id) {
+    const node = document.getElementById(id);
+    return node ? (node.textContent || "").trim() : "";
+}
+function numberOf(id) {
+    const raw = textOf(id);
+    const n = Number(raw);
+    return raw !== "" && Number.isFinite(n) ? n : null;
+}
+function isHidden(id) {
+    const node = document.getElementById(id);
+    return node ? node.classList.contains("hidden") : true;
+}
+// stateSnapshot captures everything the dashboard is showing, as pretty JSON:
+// the served /api/containers payload in full, plus the layer the page adds on
+// top of it — the summary counts, the header timestamps, the filter and what it
+// is hiding, the four group sections, the error banner, and each row's rendered
+// cells.
+//
+// Two rules make it a complete capture rather than a sample. Every container
+// field the API can omit is normalized to an explicit null / false / [], so a
+// reader can tell "no warnings" from "not reported" — an absent key reads as
+// the second. And the payload is spread rather than re-listed, so a field
+// added to the API on the server side lands in the copy without this file
+// knowing about it.
 function stateSnapshot(data) {
-    return JSON.stringify(data, null, 2) + "\n";
+    const containers = data.containers || [];
+    const query = searchQuery();
+    const visible = containers.filter((c) => matchesQuery(c, query));
+    return JSON.stringify({
+        captured_at: new Date().toISOString(),
+        source: "docker-updater dashboard",
+        page_url: location.href,
+        refresh_seconds: REFRESH_SECONDS,
+        // The page chrome, read back from the DOM: what the operator is looking at.
+        header: {
+            dry_run_badge: !isHidden("dry-run-badge"),
+            last_check: textOf("last-cycle"),
+            next_check: textOf("next-cycle"),
+            refreshed: textOf("refreshed"),
+            check_interval: textOf("cfg-interval"),
+            label: textOf("cfg-label"),
+            build_version: textOf("build-version"),
+        },
+        totals: {
+            containers: numberOf("stat-total"),
+            auto_updated: numberOf("stat-auto"),
+            manual: numberOf("stat-manual"),
+            updates_pending: numberOf("stat-updates"),
+            errors: numberOf("stat-errors"),
+        },
+        filter: {
+            query: query,
+            visible: visible.length,
+            hidden: containers.length - visible.length,
+            empty_message: isHidden("empty") ? null : textOf("empty"),
+        },
+        // Only shown when the last poll failed, and then the container data below
+        // is the last good payload rather than the current one.
+        error_banner: isHidden("error-banner") ? null : textOf("error-banner"),
+        groups: GROUPS.map((g) => {
+            var _a, _b;
+            return ({
+                id: g.id,
+                label: g.label,
+                heading: textOf(g.id + "-summary"),
+                count: visible.filter(g.match).length,
+                shown: !isHidden(g.id),
+                expanded: (_b = (_a = document.getElementById(g.id)) === null || _a === void 0 ? void 0 : _a.open) !== null && _b !== void 0 ? _b : false,
+            });
+        }),
+        ...data,
+        containers: containers.map((c) => {
+            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+            return ({
+                ...c,
+                restarts: (_a = c.restarts) !== null && _a !== void 0 ? _a : null,
+                mode: (_b = c.mode) !== null && _b !== void 0 ? _b : null,
+                last_checked: (_c = c.last_checked) !== null && _c !== void 0 ? _c : null,
+                last_pulled: (_d = c.last_pulled) !== null && _d !== void 0 ? _d : null,
+                last_updated: (_e = c.last_updated) !== null && _e !== void 0 ? _e : null,
+                current_ref: (_f = c.current_ref) !== null && _f !== void 0 ? _f : null,
+                available_ref: (_g = c.available_ref) !== null && _g !== void 0 ? _g : null,
+                error: (_h = c.error) !== null && _h !== void 0 ? _h : null,
+                skipped: (_j = c.skipped) !== null && _j !== void 0 ? _j : false,
+                skip_reason: (_k = c.skip_reason) !== null && _k !== void 0 ? _k : null,
+                warnings: (_l = c.warnings) !== null && _l !== void 0 ? _l : [],
+                row: rowView(c, query),
+            });
+        }),
+    }, null, 2) + "\n";
 }
 // copyText writes to the clipboard, falling back to a hidden textarea +
 // execCommand: the dashboard is normally served over plain http on a LAN, where
@@ -326,7 +455,7 @@ function warningLines(c) {
 function row(c) {
     const nameCell = el("td", null, el("span", { class: "cname" }, c.name || "—"), el("div", { class: "cmeta" }, c.image || "—", c.image_id ? " · " : null, c.image_id ? el("span", { class: "cref" }, c.image_id) : null), ...warningLines(c));
     const uptime = uptimeText(c);
-    const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
+    const lastPulled = lastPulledText(c);
     const highlight = updatedHighlight(c, Date.now());
     const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null }, nameCell, autoUpdateCell(c), stateCell(c), el("td", { class: uptime ? null : "up-na" }, uptime || "—"), restartsCell(c), el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled), upstreamCell(c));
     // Inline style so the alpha can fade with age. It wins over .row-pending's

@@ -102,11 +102,23 @@ so a broken update is one click away from a bug report. It is disabled when
 there are no errors, and falls back to a hidden-textarea copy on plain `http`,
 where the browser clipboard API is unavailable.
 
-The top bar's **copy JSON** button puts the whole dashboard state on the
-clipboard: the full `/api/containers` payload, pretty-printed -- settings, cycle
-times, and every container's status including the fields no column draws
-(`last_checked`, `skip_reason`, the untruncated error). It copies the page's
-current payload, which dates itself via its own `generated_at`.
+The top bar's **copy JSON** button puts everything the page is showing on the
+clipboard as pretty JSON, so a paste explains the screen on its own. It carries
+the full `/api/containers` payload -- settings, cycle times, and every
+container's status including the fields no column draws (`last_checked`,
+`skip_reason`, the untruncated error) -- plus the layer the page adds on top of
+it: the summary counts, the header timestamps, the filter and how many rows it
+is hiding, the four group sections with their headings and expanded state, the
+error banner, and each row's rendered cells under `row` (its group, its
+Auto-update badge, uptime, restarts, last pulled, the Upstream verdict and
+detail line, and its warnings).
+
+Two properties make it a capture rather than a sample. Every field the API can
+omit is spelled out as an explicit `null` / `false` / `[]`, so `"warnings": []`
+means *none* rather than *not reported*. And each cell's text comes from the
+same function that draws that cell, so the copy cannot fall behind a column --
+`dashboard/snapshot.test.mts` renders the compiled dashboard and fails CI on any
+string that is on screen but missing from the copy.
 
 The page auto-refreshes every few seconds. The footer shows the **build hash of
 the running docker-updater** (short SHA; hover for the full one — the same

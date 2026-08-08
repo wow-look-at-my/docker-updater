@@ -435,8 +435,26 @@ func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
 		"function updatedHighlight",      // recently-updated green fade
 		"function renderOutOfSyncBanner", // mixed-asset startup guard
 		"function errorReport",           // copy-errors-to-clipboard button
+		"function stateSnapshot",         // copy-state-as-JSON button
 		"function warningLines",          // per-container configuration warnings
 	} {
 		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)
+	}
+}
+
+// TestDashboardCopyButtonsWired pins the ids the copy buttons are wired by to
+// BOTH sides of the contract. The script looks each one up with
+// getElementById and silently does nothing when it is absent, so a renamed or
+// dropped button in index.html would leave a dead control on the page with no
+// error anywhere.
+func TestDashboardCopyButtonsWired(t *testing.T) {
+	html, err := dashboardAssets.ReadFile("dashboard/index.html")
+	require.Nil(t, err)
+	js, err := dashboardAssets.ReadFile("dashboard/dashboard.js")
+	require.Nil(t, err)
+
+	for _, id := range []string{"copy-errors", "copy-state"} {
+		assert.Contains(t, string(html), `id="`+id+`"`, "index.html is missing the %q button", id)
+		assert.Contains(t, string(js), `"`+id+`"`, "compiled dashboard.js never references %q", id)
 	}
 }

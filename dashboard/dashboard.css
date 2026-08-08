@@ -95,11 +95,10 @@ body {
 #card-updates.clickable { cursor: pointer; transition: border-color 0.15s; }
 #card-updates.clickable:hover { border-color: var(--accent); }
 
-/* "copy" button inside the errors card. Disabled (and muted) whenever the
-   error count is zero, so it never promises an empty clipboard. */
+/* Copy-to-clipboard buttons: the top bar's "copy JSON" and the errors card's
+   "copy". Both are disabled (and muted) while they have nothing to copy, so
+   neither ever promises an empty clipboard. */
 .copy-btn {
-  margin-top: 6px;
-  align-self: flex-start;
   background: var(--bg);
   color: var(--text-dim);
   border: 1px solid var(--border);
@@ -111,8 +110,11 @@ body {
   letter-spacing: 0.04em;
   cursor: pointer;
 }
-.copy-btn:hover:not(:disabled) { border-color: var(--red); color: var(--text); }
+.copy-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .copy-btn:disabled { opacity: 0.4; cursor: default; }
+/* In a summary card the button sits under the count and takes the card's colour. */
+.card .copy-btn { margin-top: 6px; align-self: flex-start; }
+.card-error .copy-btn:hover:not(:disabled) { border-color: var(--red); }
 
 main { padding: 0 24px 24px; }
 
@@ -184,9 +186,11 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
 .health-sub { color: var(--text-dim); font-size: 11px; }
 
 .up-uptodate { color: var(--green); }
-.up-available { color: var(--amber); font-weight: 600; }
 .up-error { color: var(--red); }
 .up-na { color: var(--text-dim); }
+/* Needs-attention emphasis: a held-back update, and a container that has been
+   restarting. */
+.up-available,
 .restarts-warn { color: var(--amber); font-weight: 600; }
 
 /* Per-container configuration warnings (missing or nonstandard update-check

@@ -220,6 +220,15 @@ function errorReport(data: ApiResponse): string {
   return [header, ...blocks].join("\n\n") + "\n";
 }
 
+// stateSnapshot renders the entire /api/containers payload as pretty JSON:
+// config, cycle timestamps, and every container's full status -- including the
+// fields no column draws (last_checked, skip_reason, the untruncated error).
+// The payload carries its own generated_at, so the copy dates itself rather
+// than claiming to be the state at the moment of the click.
+function stateSnapshot(data: ApiResponse): string {
+  return JSON.stringify(data, null, 2) + "\n";
+}
+
 // copyText writes to the clipboard, falling back to a hidden textarea +
 // execCommand: the dashboard is normally served over plain http on a LAN, where
 // navigator.clipboard does not exist (non-secure context).
@@ -246,31 +255,60 @@ async function copyText(text: string): Promise<boolean> {
   return ok;
 }
 
-// copyBtnResetTimer keeps the transient "copied" label from being cleared by a
-// timer armed on an earlier click.
-let copyBtnResetTimer: number | undefined;
+// How long a copy button shows "copied" / "copy failed" before its real label
+// comes back.
+const COPY_FEEDBACK_MS = 1500;
 
-// updateCopyButton keeps the button's label and enabled state in step with the
-// current error count. Called from render(), so it tracks every poll.
-function updateCopyButton(count: number): void {
-  const btn = document.getElementById("copy-errors") as HTMLButtonElement | null;
-  if (!btn || copyBtnResetTimer !== undefined) return; // mid-feedback: leave the label alone
-  btn.disabled = count === 0;
-  btn.textContent = count > 0 ? "copy " + count : "copy";
+// copyResetTimers holds the pending label-restore timer per button id. Keyed by
+// id so one button's feedback never cancels the other's, and so a render that
+// lands mid-feedback leaves that button's label alone.
+const copyResetTimers = new Map<string, number>();
+
+// flashCopyResult copies text and shows the outcome on the button itself, then
+// hands the label back to updateCopyButtons once the flash expires.
+async function flashCopyResult(btn: HTMLButtonElement, text: string): Promise<void> {
+  const ok = await copyText(text);
+  btn.textContent = ok ? "copied" : "copy failed";
+  const pending = copyResetTimers.get(btn.id);
+  if (pending !== undefined) clearTimeout(pending);
+  copyResetTimers.set(btn.id, setTimeout(() => {
+    copyResetTimers.delete(btn.id);
+    updateCopyButtons(latestData);
+  }, COPY_FEEDBACK_MS));
 }
 
-// onCopyErrors copies the report and flashes the outcome on the button itself,
-// then hands the label back to updateCopyButton on the next render.
+function errorCount(data: ApiResponse | null): number {
+  return data ? (data.containers || []).filter(errored).length : 0;
+}
+
+// updateCopyButtons keeps both copy buttons' labels and enabled state in step
+// with the latest payload. Called from render(), so it tracks every poll.
+// Neither button is enabled while it has nothing to copy: the errors button
+// until something errors, the state button until the first payload arrives.
+function updateCopyButtons(data: ApiResponse | null): void {
+  const errors = errorCount(data);
+  const errorsBtn = document.getElementById("copy-errors") as HTMLButtonElement | null;
+  if (errorsBtn && !copyResetTimers.has("copy-errors")) {
+    errorsBtn.disabled = errors === 0;
+    errorsBtn.textContent = errors > 0 ? "copy " + errors : "copy";
+  }
+  const stateBtn = document.getElementById("copy-state") as HTMLButtonElement | null;
+  if (stateBtn && !copyResetTimers.has("copy-state")) {
+    stateBtn.disabled = data === null;
+    stateBtn.textContent = "copy JSON";
+  }
+}
+
 async function onCopyErrors(): Promise<void> {
   const btn = document.getElementById("copy-errors") as HTMLButtonElement | null;
   if (!btn || !latestData) return;
-  const ok = await copyText(errorReport(latestData));
-  btn.textContent = ok ? "copied" : "copy failed";
-  if (copyBtnResetTimer !== undefined) clearTimeout(copyBtnResetTimer);
-  copyBtnResetTimer = setTimeout(() => {
-    copyBtnResetTimer = undefined;
-    updateCopyButton(latestData ? (latestData.containers || []).filter(errored).length : 0);
-  }, 1500);
+  await flashCopyResult(btn, errorReport(latestData));
+}
+
+async function onCopyState(): Promise<void> {
+  const btn = document.getElementById("copy-state") as HTMLButtonElement | null;
+  if (!btn || !latestData) return;
+  await flashCopyResult(btn, stateSnapshot(latestData));
 }
 
 // pending reports whether a container has an update detected but not yet applied
@@ -382,7 +420,7 @@ function render(data: ApiResponse): void {
   // narrowed by the search filter.
   const auto = containers.filter((c) => c.auto_update).length;
   const updates = containers.filter(pending).length;
-  const errors = containers.filter(errored).length;
+  const errors = errorCount(data);
 
   setText("stat-total", containers.length);
   setText("stat-auto", auto);
@@ -394,7 +432,7 @@ function render(data: ApiResponse): void {
   const updatesCard = document.getElementById("card-updates");
   if (updatesCard) updatesCard.classList.toggle("clickable", updates > 0);
 
-  updateCopyButton(errors);
+  updateCopyButtons(data);
 
   document.getElementById("dry-run-badge")!.classList.toggle("hidden", !data.dry_run);
   setText("cfg-interval", data.interval || "—");
@@ -539,8 +577,11 @@ function initDashboard(): void {
   const updatesCard = document.getElementById("card-updates");
   if (updatesCard) updatesCard.addEventListener("click", jumpToPending);
 
-  const copyBtn = document.getElementById("copy-errors");
-  if (copyBtn) copyBtn.addEventListener("click", () => void onCopyErrors());
+  const copyErrorsBtn = document.getElementById("copy-errors");
+  if (copyErrorsBtn) copyErrorsBtn.addEventListener("click", () => void onCopyErrors());
+
+  const copyStateBtn = document.getElementById("copy-state");
+  if (copyStateBtn) copyStateBtn.addEventListener("click", () => void onCopyState());
 
   const searchBox = document.getElementById("search") as HTMLInputElement | null;
   if (searchBox) searchBox.addEventListener("input", onSearchInput);

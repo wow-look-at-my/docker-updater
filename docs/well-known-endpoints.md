@@ -79,7 +79,14 @@ block an update — they describe configuration, not failure.
 
 - **Missing** — `does not serve /.well-known/docker-updater/health (probed
   http://…); post-update liveness falls back to Docker HEALTHCHECK.` Implement
-  the endpoint, or opt out with `docker-updater.well-known=false`.
+  the endpoint, or opt out with `docker-updater.well-known=false`. The container
+  answered: this is the only warning that says anything about its code.
+- **Unreachable** — `cannot reach http://…/.well-known/docker-updater/health
+  (dial tcp …: connect: connection refused); … docker-updater must share a
+  network with the container …`. No answer arrived, so nothing has been learned
+  about whether the endpoint exists. Check that docker-updater can route to the
+  container — it is meant to run with `--network host` — and that
+  `docker-updater.well-known.port` names a port the container serves on.
 - **Undiscoverable** — `no standard update endpoints: container exposes 3 TCP
   ports (80, 443, 9000); set docker-updater.well-known.port to pick one.`
 - **Nonstandard** — `nonstandard update checks: docker-updater.health-check.url

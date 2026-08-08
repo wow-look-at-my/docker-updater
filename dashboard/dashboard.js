@@ -201,123 +201,10 @@ function errorReport(data) {
     });
     return [header, ...blocks].join("\n\n") + "\n";
 }
-// rowView renders one container the way row() does, as data instead of DOM.
-function rowView(c, query) {
-    const group = GROUPS.find((g) => g.match(c));
-    const upstream = upstreamView(c);
-    return {
-        group: group ? group.id : "",
-        group_label: group ? group.label : "",
-        visible: matchesQuery(c, query),
-        monitoring: monitoringText(c),
-        state: stateText(c),
-        state_indicator: stateIndicator(c),
-        health: c.health || null,
-        uptime: uptimeText(c) || "—",
-        restarts: restartsText(c),
-        last_pulled: lastPulledText(c),
-        upstream: upstream.status,
-        upstream_detail: upstream.detail,
-        warnings: c.warnings || [],
-        pending: pending(c),
-        recently_updated: updatedHighlight(c, Date.now()) !== null,
-    };
-}
-// textOf reads an element's rendered text. Used for the page chrome — the
-// summary cards, the header timestamps, the group headings — so the snapshot
-// reports the numbers and strings on screen rather than a second computation
-// that could disagree with them.
-function textOf(id) {
-    const node = document.getElementById(id);
-    return node ? (node.textContent || "").trim() : "";
-}
-function numberOf(id) {
-    const raw = textOf(id);
-    const n = Number(raw);
-    return raw !== "" && Number.isFinite(n) ? n : null;
-}
-function isHidden(id) {
-    const node = document.getElementById(id);
-    return node ? node.classList.contains("hidden") : true;
-}
-// stateSnapshot captures everything the dashboard is showing, as pretty JSON:
-// the served /api/containers payload in full, plus the layer the page adds on
-// top of it — the summary counts, the header timestamps, the filter and what it
-// is hiding, the four group sections, the error banner, and each row's rendered
-// cells.
-//
-// Two rules make it a complete capture rather than a sample. Every container
-// field the API can omit is normalized to an explicit null / false / [], so a
-// reader can tell "no warnings" from "not reported" — an absent key reads as
-// the second. And the payload is spread rather than re-listed, so a field
-// added to the API on the server side lands in the copy without this file
-// knowing about it.
-function stateSnapshot(data) {
-    const containers = data.containers || [];
-    const query = searchQuery();
-    const visible = containers.filter((c) => matchesQuery(c, query));
-    return JSON.stringify({
-        captured_at: new Date().toISOString(),
-        source: "docker-updater dashboard",
-        page_url: location.href,
-        refresh_seconds: REFRESH_SECONDS,
-        // The page chrome, read back from the DOM: what the operator is looking at.
-        header: {
-            dry_run_badge: !isHidden("dry-run-badge"),
-            last_check: textOf("last-cycle"),
-            next_check: textOf("next-cycle"),
-            refreshed: textOf("refreshed"),
-            check_interval: textOf("cfg-interval"),
-            label: textOf("cfg-label"),
-            build_version: textOf("build-version"),
-        },
-        totals: {
-            containers: numberOf("stat-total"),
-            auto_updated: numberOf("stat-auto"),
-            manual: numberOf("stat-manual"),
-            updates_pending: numberOf("stat-updates"),
-            errors: numberOf("stat-errors"),
-        },
-        filter: {
-            query: query,
-            visible: visible.length,
-            hidden: containers.length - visible.length,
-            empty_message: isHidden("empty") ? null : textOf("empty"),
-        },
-        // Only shown when the last poll failed, and then the container data below
-        // is the last good payload rather than the current one.
-        error_banner: isHidden("error-banner") ? null : textOf("error-banner"),
-        groups: GROUPS.map((g) => {
-            var _a, _b;
-            return ({
-                id: g.id,
-                label: g.label,
-                heading: textOf(g.id + "-summary"),
-                count: visible.filter(g.match).length,
-                shown: !isHidden(g.id),
-                expanded: (_b = (_a = document.getElementById(g.id)) === null || _a === void 0 ? void 0 : _a.open) !== null && _b !== void 0 ? _b : false,
-            });
-        }),
-        ...data,
-        containers: containers.map((c) => {
-            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
-            return ({
-                ...c,
-                restarts: (_a = c.restarts) !== null && _a !== void 0 ? _a : null,
-                mode: (_b = c.mode) !== null && _b !== void 0 ? _b : null,
-                last_checked: (_c = c.last_checked) !== null && _c !== void 0 ? _c : null,
-                last_pulled: (_d = c.last_pulled) !== null && _d !== void 0 ? _d : null,
-                last_updated: (_e = c.last_updated) !== null && _e !== void 0 ? _e : null,
-                current_ref: (_f = c.current_ref) !== null && _f !== void 0 ? _f : null,
-                available_ref: (_g = c.available_ref) !== null && _g !== void 0 ? _g : null,
-                error: (_h = c.error) !== null && _h !== void 0 ? _h : null,
-                skipped: (_j = c.skipped) !== null && _j !== void 0 ? _j : false,
-                skip_reason: (_k = c.skip_reason) !== null && _k !== void 0 ? _k : null,
-                warnings: (_l = c.warnings) !== null && _l !== void 0 ? _l : [],
-                row: rowView(c, query),
-            });
-        }),
-    }, null, 2) + "\n";
+// stateSnapshot serializes the state the page was drawn from, stamped with the
+// moment of the copy.
+function stateSnapshot(state) {
+    return JSON.stringify({ captured_at: new Date().toISOString(), ...state }, null, 2) + "\n";
 }
 // copyText writes to the clipboard, falling back to a hidden textarea +
 // execCommand: the dashboard is normally served over plain http on a LAN, where
@@ -363,7 +250,7 @@ async function flashCopyResult(btn, text) {
         clearTimeout(pending);
     copyResetTimers.set(btn.id, setTimeout(() => {
         copyResetTimers.delete(btn.id);
-        updateCopyButtons(latestData);
+        updateCopyButtons(currentState);
     }, COPY_FEEDBACK_MS));
 }
 function errorCount(data) {
@@ -388,15 +275,15 @@ function updateCopyButtons(data) {
 }
 async function onCopyErrors() {
     const btn = document.getElementById("copy-errors");
-    if (!btn || !latestData)
+    if (!btn || !currentState)
         return;
-    await flashCopyResult(btn, errorReport(latestData));
+    await flashCopyResult(btn, errorReport(currentState));
 }
 async function onCopyState() {
     const btn = document.getElementById("copy-state");
-    if (!btn || !latestData)
+    if (!btn || !currentState)
         return;
-    await flashCopyResult(btn, stateSnapshot(latestData));
+    await flashCopyResult(btn, stateSnapshot(currentState));
 }
 // pending reports whether a container has an update detected but not yet applied
 // — the exact condition counted by the "updates pending" card.
@@ -415,18 +302,33 @@ const GROUPS = [
     { id: "group-unmanaged-online", label: "Unmanaged · online", match: (c) => !c.auto_update && isOnline(c) },
     { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !c.auto_update && !isOnline(c) },
 ];
-// searchQuery returns the normalized filter-box text: trimmed and lowercased,
-// "" meaning "no filter".
-function searchQuery() {
+// searchBoxValue returns the filter box's text as typed. The state carries it
+// verbatim (so re-rendering can restore it without rewriting what someone is
+// mid-way through typing); normalizing for matching is normalizeQuery's job.
+function searchBoxValue() {
     const box = document.getElementById("search");
-    return box ? box.value.trim().toLowerCase() : "";
+    return box ? box.value : "";
+}
+function normalizeQuery(raw) {
+    return raw.trim().toLowerCase();
 }
 // matchesQuery is a case-insensitive substring match against the container
-// name and image; either matching keeps the row visible.
+// name and image; either matching keeps the row visible. `query` is normalized.
 function matchesQuery(c, query) {
     if (!query)
         return true;
     return (c.name || "").toLowerCase().includes(query) || (c.image || "").toLowerCase().includes(query);
+}
+// expandedGroups reads which sections are open. Collapsing one hides its rows,
+// so it is part of what the page is showing and belongs in the state.
+function expandedGroups() {
+    const out = {};
+    for (const g of GROUPS) {
+        const section = document.getElementById(g.id);
+        if (section)
+            out[g.id] = section.open;
+    }
+    return out;
 }
 // updatedHighlight computes the fading green background for a container whose
 // last update was applied within UPDATED_HIGHLIGHT_MS: full strength when
@@ -470,7 +372,13 @@ function setText(id, text) {
     if (node)
         node.textContent = String(text);
 }
-function render(data) {
+// render draws the state. Everything it puts on screen is derived here, from
+// that one object — nothing is read back out of the DOM, and nothing it draws
+// is stored. Given the same state it produces the same page, which is what
+// makes a copied snapshot reproducible.
+function render(state) {
+    const data = state;
+    const ui = state.ui;
     const containers = data.containers || [];
     // The summary cards are fleet totals: computed over every container, never
     // narrowed by the search filter.
@@ -486,11 +394,16 @@ function render(data) {
     const updatesCard = document.getElementById("card-updates");
     if (updatesCard)
         updatesCard.classList.toggle("clickable", updates > 0);
-    updateCopyButtons(data);
+    updateCopyButtons(state);
     document.getElementById("dry-run-badge").classList.toggle("hidden", !data.dry_run);
     setText("cfg-interval", data.interval || "—");
     setText("cfg-label", data.label || "—");
-    setText("refresh-interval", REFRESH_SECONDS);
+    setText("refresh-interval", ui.refresh_seconds);
+    // The banner is the one thing on the page no payload can carry: it is up
+    // exactly when the last poll produced no payload at all.
+    const banner = document.getElementById("error-banner");
+    banner.textContent = ui.error_banner || "";
+    banner.classList.toggle("hidden", ui.error_banner === null);
     // The updater's own build hash: shortened for the footer, full SHA on
     // hover. Guarded lookup (like card-updates) rather than REQUIRED_IDS, since
     // the dashboard works fine without the footer element.
@@ -505,28 +418,68 @@ function render(data) {
     const nextCycle = fmtRelative(data.next_cycle);
     setText("next-cycle", nextCycle ? "Next check " + nextCycle : "");
     setText("refreshed", "Updated " + new Date(data.generated_at).toLocaleTimeString());
-    const query = searchQuery();
+    // Writing the box back is what lets a state rendered into a fresh page carry
+    // its filter with it. Guarded, so re-rendering while someone types does not
+    // move their cursor.
+    const box = document.getElementById("search");
+    if (box.value !== ui.query)
+        box.value = ui.query;
+    const query = normalizeQuery(ui.query);
     const visible = containers.filter((c) => matchesQuery(c, query));
-    // Only tbody contents, summary counts, and the hidden class change per
-    // render. The <details> elements themselves are static (and their open state
-    // is never touched), so the user's expand/collapse choices survive refreshes.
+    // Row contents, summary counts, the hidden class, and the open state change
+    // per render. Applying `open` from the state is what makes a re-render
+    // reproduce the page; in normal use it writes back the value it was read
+    // from, so an expand/collapse survives every poll.
     for (const g of GROUPS) {
         const members = visible.filter(g.match);
         document.getElementById(g.id + "-rows").replaceChildren(...members.map(row));
         document.getElementById(g.id + "-summary").textContent = g.label + " (" + members.length + ")";
-        document.getElementById(g.id).classList.toggle("hidden", members.length === 0);
+        const section = document.getElementById(g.id);
+        section.classList.toggle("hidden", members.length === 0);
+        const open = ui.expanded[g.id];
+        if (open !== undefined && section.open !== open)
+            section.open = open;
     }
     // Every container lands in exactly one group, so "all groups hidden" is
     // exactly "no visible containers": none exist, or the filter matched none.
     const empty = document.getElementById("empty");
     empty.textContent = query && containers.length > 0
-        ? 'No containers match "' + query + '".'
+        ? 'No containers match "' + ui.query.trim() + '".'
         : "No containers found.";
     empty.classList.toggle("hidden", visible.length > 0);
 }
-// latestData holds the most recent successful /api/containers payload so the
-// search box can re-render instantly without refetching; the poll replaces it.
+// The two inputs the state is assembled from: the last payload that arrived
+// (kept so the filter can re-render without refetching), and the failure of the
+// most recent poll, if it failed.
 let latestData = null;
+let pollFailure = null;
+// currentState is the object the page was last drawn from, and the one the copy
+// button serializes. Null until the first payload arrives.
+let currentState = null;
+// repaint rebuilds the state from those inputs plus the browser-side state, and
+// draws it. Every path that changes anything the page shows ends here, so the
+// object and the screen are never out of step.
+function repaint() {
+    if (!latestData) {
+        // Nothing has arrived yet: there is no state to draw, only the failure to
+        // report. The copy button stays disabled, having nothing to copy.
+        const banner = document.getElementById("error-banner");
+        banner.textContent = pollFailure || "";
+        banner.classList.toggle("hidden", pollFailure === null);
+        return;
+    }
+    currentState = {
+        ui: {
+            page_url: location.href,
+            refresh_seconds: REFRESH_SECONDS,
+            query: searchBoxValue(),
+            expanded: expandedGroups(),
+            error_banner: pollFailure,
+        },
+        ...latestData,
+    };
+    render(currentState);
+}
 // OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
 // an index.html from one build paired with a dashboard.js/css from another
 // (a cache or proxy in front of the server, or two docker-updater containers
@@ -541,21 +494,19 @@ function isNullElementError(err) {
     return err instanceof TypeError && /null|undefined/i.test(err.message);
 }
 async function refresh() {
-    const banner = document.getElementById("error-banner");
     try {
         const resp = await fetch("api/containers", { cache: "no-store" });
         if (!resp.ok)
             throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
         latestData = (await resp.json());
-        render(latestData);
-        banner.classList.add("hidden");
+        pollFailure = null;
     }
     catch (err) {
-        banner.textContent = isNullElementError(err)
+        pollFailure = isNullElementError(err)
             ? OUT_OF_SYNC_HINT
             : "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
-        banner.classList.remove("hidden");
     }
+    repaint();
 }
 // jumpToPending scrolls to the first container with a held-back update, flashing
 // it so "N updates pending" always points at concrete rows. Every row lives in
@@ -572,11 +523,11 @@ function jumpToPending() {
     void first.offsetWidth; // reflow so the animation restarts on repeat clicks
     first.classList.add("row-flash");
 }
-// onSearchInput re-renders the groups from the last fetched payload — no
-// refetch; the poll keeps replacing latestData underneath as usual.
-function onSearchInput() {
-    if (latestData)
-        render(latestData);
+// Typing in the filter and expanding a section both change what the page shows
+// without any new data, so both rebuild the state — no refetch; the poll keeps
+// replacing latestData underneath as usual.
+function onUiChange() {
+    repaint();
 }
 // REQUIRED_IDS is the startup contract between this script and index.html:
 // every element id the code above dereferences unconditionally (the four group
@@ -623,7 +574,15 @@ function initDashboard() {
         copyStateBtn.addEventListener("click", () => void onCopyState());
     const searchBox = document.getElementById("search");
     if (searchBox)
-        searchBox.addEventListener("input", onSearchInput);
+        searchBox.addEventListener("input", onUiChange);
+    // Expanding or collapsing a section changes what is on screen, so the state
+    // has to follow it. render() writes the same value straight back, so this
+    // cannot loop.
+    for (const g of GROUPS) {
+        const section = document.getElementById(g.id);
+        if (section)
+            section.addEventListener("toggle", onUiChange);
+    }
     // Keyboard niceties: "/" focuses the filter box, Escape clears it.
     document.addEventListener("keydown", (e) => {
         if (!searchBox)
@@ -638,7 +597,7 @@ function initDashboard() {
         }
         else if (e.key === "Escape" && target === searchBox) {
             searchBox.value = "";
-            onSearchInput();
+            onUiChange();
             searchBox.blur();
         }
     });

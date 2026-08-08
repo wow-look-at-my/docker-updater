@@ -102,23 +102,25 @@ so a broken update is one click away from a bug report. It is disabled when
 there are no errors, and falls back to a hidden-textarea copy on plain `http`,
 where the browser clipboard API is unavailable.
 
-The top bar's **copy JSON** button puts everything the page is showing on the
-clipboard as pretty JSON, so a paste explains the screen on its own. It carries
-the full `/api/containers` payload -- settings, cycle times, and every
-container's status including the fields no column draws (`last_checked`,
-`skip_reason`, the untruncated error) -- plus the layer the page adds on top of
-it: the summary counts, the header timestamps, the filter and how many rows it
-is hiding, the four group sections with their headings and expanded state, the
-error banner, and each row's rendered cells under `row` (its group, its
-Auto-update badge, uptime, restarts, last pulled, the Upstream verdict and
-detail line, and its warnings).
+The top bar's **copy JSON** button copies the object the page is drawn from, as
+pretty JSON. That is the whole `/api/containers` payload -- settings, cycle
+times, and every container's status including the fields no column draws
+(`last_checked`, `skip_reason`, the untruncated error) -- plus a `ui` block
+holding the state the server cannot know: the filter box as typed, which
+sections are expanded, and the error banner, which is up exactly when the last
+poll produced no payload at all (so the containers listed under it are the last
+one that *did* arrive).
 
-Two properties make it a capture rather than a sample. Every field the API can
-omit is spelled out as an explicit `null` / `false` / `[]`, so `"warnings": []`
-means *none* rather than *not reported*. And each cell's text comes from the
-same function that draws that cell, so the copy cannot fall behind a column --
-`dashboard/snapshot.test.mts` renders the compiled dashboard and fails CI on any
-string that is on screen but missing from the copy.
+What is deliberately **not** in it: the summary counts, the group headings, the
+uptime strings, the Upstream verdict. Every one is arithmetic over the payload,
+and a stored copy of a fact beside the fact is a thing that goes stale;
+`render()` computes them on the way to the DOM instead.
+
+That makes the copy a reproduction rather than a description, and gives the test
+in `dashboard/snapshot.test.mts` a property worth asserting: it copies the JSON,
+renders it into a second empty page through the dashboard's own render path, and
+fails CI unless the markup comes back identical -- filter text and collapsed
+sections included.
 
 The page auto-refreshes every few seconds. The footer shows the **build hash of
 the running docker-updater** (short SHA; hover for the full one — the same

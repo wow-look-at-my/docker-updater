@@ -82,6 +82,25 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 	assert.Contains(t, state.Warnings[0], wellKnownEnableLabel+"=false")
 }
 
+// A container that never answers is a different fault from one that answers
+// 404, and must not get the same sentence: "implement the endpoint" sends the
+// operator to write code that may already be there, while the actual break is
+// the route to the container or the port being probed.
+func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
+	info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
+	srv.Close() // the address is still addressed, but nothing listens on it now
+
+	state := resolveWellKnown(context.Background(), info)
+
+	assert.Empty(t, state.HealthURL)
+	require.Len(t, state.Warnings, 1)
+	assert.Contains(t, state.Warnings[0], "cannot reach")
+	assert.Contains(t, state.Warnings[0], "--network host")
+	assert.Contains(t, state.Warnings[0], wellKnownPortLabel)
+	assert.NotContains(t, state.Warnings[0], "Implement the endpoint",
+		"nothing about an unanswered probe shows the endpoint is missing")
+}
+
 // Compatibility with the original opt-in setup: the check labels still win,
 // and are reported as nonstandard rather than silently honored.
 func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {

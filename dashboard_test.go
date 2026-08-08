@@ -266,7 +266,6 @@ func TestDashboardServesStaticAssets(t *testing.T) {
 		{"/dashboard.css", ":root"},
 		{"/dashboard.js", "REFRESH_SECONDS"},
 		{"/favicon.svg", "<svg"},
-		{"/favicon.png", "\x89PNG"},
 		{"/healthz", "ok"},
 	}
 	for _, tc := range cases {
@@ -299,7 +298,7 @@ func TestDashboardAssetCaching(t *testing.T) {
 	defer ts.Close()
 
 	etags := map[string]string{}
-	for _, path := range []string{"/", "/index.html", "/dashboard.css", "/dashboard.js", "/favicon.svg", "/favicon.png"} {
+	for _, path := range []string{"/", "/index.html", "/dashboard.css", "/dashboard.js", "/favicon.svg"} {
 		resp, err := http.Get(ts.URL + path)
 		require.Nil(t, err, path)
 		body, _ := io.ReadAll(resp.Body)

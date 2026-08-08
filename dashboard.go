@@ -16,7 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-//go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg dashboard/favicon.png
+//go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
 // dashboardServer serves the read-only status dashboard and JSON API.
@@ -93,7 +93,6 @@ func staticAssetHandler() http.HandlerFunc {
 	css := read("dashboard.css")
 	html := read("index.html")
 	favicon := read("favicon.svg")
-	faviconPNG := read("favicon.png")
 
 	// Version-stamp the asset references before hashing index.html, so the
 	// page's own ETag covers the rewritten bytes.
@@ -118,7 +117,6 @@ func staticAssetHandler() http.HandlerFunc {
 		{"dashboard.css", "text/css; charset=utf-8", css},
 		{"dashboard.js", "text/javascript; charset=utf-8", js},
 		{"favicon.svg", "image/svg+xml", favicon},
-		{"favicon.png", "image/png", faviconPNG},
 	} {
 		if f.body == nil {
 			continue

@@ -102,6 +102,12 @@ so a broken update is one click away from a bug report. It is disabled when
 there are no errors, and falls back to a hidden-textarea copy on plain `http`,
 where the browser clipboard API is unavailable.
 
+The top bar's **copy JSON** button puts the whole dashboard state on the
+clipboard: the full `/api/containers` payload, pretty-printed -- settings, cycle
+times, and every container's status including the fields no column draws
+(`last_checked`, `skip_reason`, the untruncated error). It copies the page's
+current payload, which dates itself via its own `generated_at`.
+
 The page auto-refreshes every few seconds. The footer shows the **build hash of
 the running docker-updater** (short SHA; hover for the full one — the same
 commit the image's `org.opencontainers.image.version` label carries), so you can

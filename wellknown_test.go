@@ -123,6 +123,25 @@ func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 	assert.Equal(t, state.Warnings, warnings)
 }
 
+// A third-party image cannot be migrated onto the standard endpoints, so its
+// URL check is the right answer permanently. The opt-out says that out loud:
+// the check keeps running, the nonstandard warning stops.
+func TestOptOutSilencesTheNonstandardWarningAndKeepsTheCheck(t *testing.T) {
+	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
+	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"
+	info.HealthCheckURL = "http://10.0.0.5:9000/healthz"
+	info.Labels[wellKnownEnableLabel] = "false"
+
+	state := resolveWellKnown(context.Background(), info)
+	assert.Empty(t, state.Warnings, "an acknowledged override is a clean state, not a nag")
+
+	applied, warnings := applyWellKnown(context.Background(), info)
+	assert.Empty(t, warnings)
+	assert.Equal(t, "http://10.0.0.5:9000/healthz", applied.HealthCheckURL,
+		"silencing the warning must not disarm the check the operator configured")
+	assert.False(t, applied.PreCheckStandard)
+}
+
 // Containers that serve no HTTP at all (a database) can opt out entirely
 // instead of warning on every cycle.
 func TestWellKnownOptOutSilencesTheWarning(t *testing.T) {

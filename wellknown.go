@@ -117,20 +117,14 @@ func overrideLabels(info ContainerInfo) []string {
 // with the original opt-in setup — but they are reported as nonstandard so a
 // fleet can be migrated deliberately rather than by accident.
 func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
-	// The opt-out is checked FIRST, and it silences the nonstandard warning as
-	// well as the discovery ones. Migrating a fleet is the point of that
-	// warning, but a third-party image cannot be migrated at all -- so without
-	// this, a container whose URL check IS the right answer warns forever, and
-	// an operator with no way to reach a clean state stops reading warnings.
-	if info.Labels[wellKnownEnableLabel] == "false" {
-		return wellKnownState{}
-	}
 	if set := overrideLabels(info); len(set) > 0 {
 		return wellKnownState{Warnings: []string{
 			"nonstandard update checks: " + strings.Join(set, ", ") + " override the standard " +
-				wellKnownPrefix + " endpoints. Set " + wellKnownEnableLabel + "=false as well if this " +
-				"container cannot serve them (a third-party image), to say so deliberately and silence this",
+				wellKnownPrefix + " endpoints",
 		}}
+	}
+	if info.Labels[wellKnownEnableLabel] == "false" {
+		return wellKnownState{}
 	}
 
 	base, err := wellKnownBaseURL(info)

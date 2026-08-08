@@ -269,9 +269,7 @@ Containers that serve neither endpoint keep working -- liveness falls back to
 Docker's `HEALTHCHECK` -- but the dashboard shows an amber warning naming what to
 implement. The older `pre-check.*` / `health-check.*` labels still work and take
 precedence; a container using them is flagged **nonstandard** so a fleet can be
-migrated deliberately. Add `docker-updater.well-known: "false"` beside such a
-label to say the override is permanent -- for a third-party image there is
-nothing to migrate to -- which silences the warning and leaves the check running.
+migrated deliberately.
 
 Full contract, discovery rules, warning texts, and copy-paste handlers:
 [docs/well-known-endpoints.md](docs/well-known-endpoints.md).

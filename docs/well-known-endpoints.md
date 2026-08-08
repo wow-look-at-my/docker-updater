@@ -104,12 +104,11 @@ endpoint. Any of those labels marks the container nonstandard.
 To migrate: implement the two endpoints, delete the labels, and the warning
 goes away on the next cycle.
 
-For an image you do not build there is nothing to migrate to, so the URL check
-is the permanent right answer. Say so with `docker-updater.well-known: "false"`
-alongside the check label: the opt-out is read first, so it silences the
-nonstandard warning while the check itself keeps running exactly as configured.
-Without that, such a container warns forever and an operator with no reachable
-clean state stops reading warnings at all.
+`docker-updater.well-known: "false"` does not silence this one. It answers a
+different question -- "are there standard endpoints to look for here" -- and
+choosing a nonstandard check is a choice you are told about for as long as it
+is in effect. An image you do not build keeps the warning permanently, which is
+accurate: its checks are nonstandard permanently.
 
 ## Implementing it
 

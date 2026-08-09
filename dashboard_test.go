@@ -431,11 +431,13 @@ func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
 	for _, fn := range []string{
 		"function uptimeText",            // status-string helper (original canary)
 		"function isOnline",              // four-group split (managed/unmanaged × online/offline)
-		"function onSearchInput",         // search/filter box handler
+		"function onUiChange",            // filter box + section expand/collapse handler
 		"function updatedHighlight",      // recently-updated green fade
 		"function renderOutOfSyncBanner", // mixed-asset startup guard
 		"function errorReport",           // copy-errors-to-clipboard button
 		"function stateSnapshot",         // copy-state-as-JSON button
+		"function repaint",               // the one state that button copies and render() draws
+		"function expandedGroups",        // collapsed sections are part of that state
 		"function warningLines",          // per-container configuration warnings
 	} {
 		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)

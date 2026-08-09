@@ -46,10 +46,13 @@ const (
 	defaultHealthCheckTimeout = 60 * time.Second
 )
 
-// containerAddress returns the address docker-updater reaches a container on:
-// its first network IP, or 127.0.0.1 when it shares the host's namespace (host
-// networking has no per-container IP, and docker-updater is meant to run with
-// --network host itself).
+// containerAddress returns the container's own IP -- the address docker-updater
+// dials it on from a network they share. Empty when the container has no IP of
+// its own (host, none, or container: network mode), and there is no substitute
+// to fall back on: 127.0.0.1 is docker-updater's OWN loopback, so probing it
+// reports on the wrong process entirely and can pass a post-update health gate
+// against docker-updater itself. Such a container needs an absolute
+// docker-updater.health-check.url instead.
 func containerAddress(inspect types.ContainerJSON) string {
 	if inspect.NetworkSettings == nil {
 		return ""
@@ -58,12 +61,6 @@ func containerAddress(inspect types.ContainerJSON) string {
 		if net.IPAddress != "" {
 			return net.IPAddress
 		}
-	}
-	// HostConfig is promoted through the embedded *ContainerJSONBase (unlike
-	// NetworkSettings, which is a direct field), so the base has to be checked
-	// before it.
-	if inspect.ContainerJSONBase != nil && inspect.HostConfig != nil && inspect.HostConfig.NetworkMode.IsHost() {
-		return "127.0.0.1"
 	}
 	return ""
 }
@@ -85,9 +82,9 @@ func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
 }
 
 // exposedTCPPorts returns the container's declared TCP ports, ascending. These
-// are the ports the image/compose file declares, not only published ones: with
-// host networking or a shared bridge, docker-updater reaches an unpublished
-// port fine.
+// are the ports the image/compose file declares, not only published ones:
+// docker-updater dials the container directly on a network they share, so an
+// unpublished port is reachable.
 func exposedTCPPorts(inspect types.ContainerJSON) []int {
 	if inspect.Config == nil {
 		return nil
@@ -158,8 +155,8 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 		// broken is the route to the container, or the port being probed.
 		return wellKnownState{Warnings: []string{
 			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); " + fallbackPhrase(info) +
-				". docker-updater must share a network with the container (it is meant " +
-				"to run with --network host), and " + wellKnownPortLabel + " must name a port it serves on",
+				". docker-updater must be attached to a network the container is on, and " +
+				wellKnownPortLabel + " must name a port it serves on",
 		}}
 	case !implemented:
 		return wellKnownState{Warnings: []string{
@@ -190,12 +187,12 @@ func fallbackPhrase(info ContainerInfo) string {
 }
 
 // wellKnownBaseURL builds http://<address>:<port> for a container, or explains
-// why it cannot. Address comes from the container's own network settings
-// (127.0.0.1 under host networking); the port is the label override, else the
-// container's single exposed TCP port.
+// why it cannot. Address is the container's own IP; the port is the label
+// override, else the container's single exposed TCP port.
 func wellKnownBaseURL(info ContainerInfo) (string, error) {
 	if info.Address == "" {
-		return "", fmt.Errorf("container has no reachable address")
+		return "", errors.New("container has no IP of its own (host, none, or container: network mode); " +
+			"give it an absolute docker-updater.health-check.url instead")
 	}
 	port, err := wellKnownPort(info)
 	if err != nil {

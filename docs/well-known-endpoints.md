@@ -36,9 +36,11 @@ handler is a complete implementation.
 docker-updater builds the base URL from the container's own Docker state, so
 nothing is configured twice:
 
-- **Address** — the container's first network IP; `127.0.0.1` when it runs with
-  host networking. docker-updater is meant to run with `--network host` so it
-  can reach bridge IPs directly.
+- **Address** — the container's first network IP. docker-updater dials it
+  directly, so it has to be attached to a network the container is on. A
+  container with no IP of its own (`host`, `none`, or `container:` network
+  mode) cannot be discovered; give it an absolute
+  `docker-updater.health-check.url` instead.
 - **Port** — the container's single exposed TCP port. With several exposed
   ports there is no way to guess which one speaks HTTP, so discovery stops and
   warns until `docker-updater.well-known.port` names one.
@@ -56,9 +58,9 @@ docker-updater re-resolves the address from the container it just started and
 rebuilds the URL; the port and path are unchanged, because a recreated container
 keeps the port it serves on.
 
-If the new container has no reachable address, the gate fails and the update
-rolls back. It never falls back to the pre-update address: that either burns the
-whole health budget on a dead IP or passes the gate on another service's health.
+If the new container has no IP of its own, the gate fails and the update rolls
+back. It never falls back to the pre-update address: that either burns the whole
+health budget on a dead IP or passes the gate on another service's health.
 
 This applies to every URL docker-updater builds itself — the standard endpoint,
 and the `:port/path` short form of `docker-updater.health-check.url`. An
@@ -93,11 +95,12 @@ there is one, and otherwise degrades to the grace period. Printing the
 `HEALTHCHECK` sentence for that container would tell an operator an update was
 verified when nothing verified it.
 - **Unreachable** — `cannot reach http://…/.well-known/docker-updater/health
-  (dial tcp …: connect: connection refused); … docker-updater must share a
-  network with the container …`. No answer arrived, so nothing has been learned
-  about whether the endpoint exists. Check that docker-updater can route to the
-  container — it is meant to run with `--network host` — and that
-  `docker-updater.well-known.port` names a port the container serves on.
+  (dial tcp …: connect: connection refused); … docker-updater must be attached
+  to a network the container is on …`. No answer arrived, so nothing has been
+  learned about whether the endpoint exists. Check that docker-updater is
+  attached to one of the container's networks (`docker network connect <net>
+  docker-updater`) and that `docker-updater.well-known.port` names a port the
+  container serves on.
 - **Undiscoverable** — `no standard update endpoints: container exposes 3 TCP
   ports (80, 443, 9000); set docker-updater.well-known.port to pick one.`
 - **Nonstandard** — `nonstandard update checks: docker-updater.health-check.url

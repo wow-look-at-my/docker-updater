@@ -226,7 +226,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			continue
 		}
 
-		// Resolve a ":"-prefixed pre-check URL to the container's bridge IP.
+		// Resolve a ":"-prefixed pre-check URL to the container's own IP.
 		if strings.HasPrefix(info.PreCheckURL, ":") && inspect.NetworkSettings != nil {
 			for _, net := range inspect.NetworkSettings.Networks {
 				if net.IPAddress != "" {

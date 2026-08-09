@@ -22,12 +22,13 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 ```bash
 docker run -d \
-  --network host \
+  --network my-stack \
+  -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/wow-look-at-my/docker-updater
 ```
 
-Host networking is recommended so docker-updater can reach containers' pre-check endpoints directly via their bridge IPs, without joining every container's network.
+docker-updater reaches a container's update-check endpoints at the container's own IP, so attach it to every network whose containers it monitors. `--network` takes one at a time; add the rest with `docker network connect <net> docker-updater`.
 
 ## Configuration
 
@@ -130,10 +131,9 @@ tell at a glance which build is answering. The same hash is printed at startup
 JSON API. The same data is available as JSON at `/api/containers`, and
 `/healthz` returns `200 ok` for external liveness probes.
 
-With `--network host` (recommended), the dashboard is reachable on the host's
-port directly, e.g. `http://<host>:8080`. Without host networking, publish the
-port (`-p 8080:8080`). Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different address
-(e.g. `:9000`) to move it, or to an empty string to disable it entirely.
+Publish the port (`-p 8080:8080`) to reach the dashboard at `http://<host>:8080`.
+Set `DOCKER_UPDATER_DASHBOARD_ADDR` to a different address (e.g. `:9000`) to move
+it, or to an empty string to disable it entirely.
 
 Note that "last pulled" and "last checked" only apply to monitored containers;
 the tool never polls the registry for containers it isn't watching.
@@ -198,8 +198,7 @@ environment:
   DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET: "use-a-long-random-string"
 ```
 
-With `--network host` the endpoint is reachable on the host's port directly
-(e.g. `http://<host>:9000`); otherwise publish it (`-p 9000:9000`). Because the
+Publish the port (`-p 9000:9000`) so GitHub can reach it. Because the
 request carries a secret, terminate TLS in front of it (a reverse proxy such as
 nginx, Traefik, or Caddy) so deliveries travel over HTTPS. The webhook accepts
 any request path, so route whatever public path you like to it.
@@ -345,7 +344,7 @@ labels:
   docker-updater.health-check.timeout: "60s"  # optional, default 60s
 ```
 
-URLs starting with `:` (port prefix) are resolved using the container's bridge IP, the same way pre-check URLs are (see [Pre-Update Checks](#pre-update-checks)). After an update the IP is re-resolved from the new container, since the replacement gets its own; an absolute URL is polled as written. If both `health-check.url` and `health-check.command` are set, the HTTP check takes precedence.
+URLs starting with `:` (port prefix) are resolved using the container's own IP, the same way pre-check URLs are (see [Pre-Update Checks](#pre-update-checks)). After an update the IP is re-resolved from the new container, since the replacement gets its own; an absolute URL is polled as written. If both `health-check.url` and `health-check.command` are set, the HTTP check takes precedence.
 
 ### Image Mode (default)
 
@@ -432,7 +431,7 @@ labels:
   docker-updater.pre-check.timeout: "10s"  # optional, default 30s
 ```
 
-URLs starting with `:` (port prefix) are resolved using the container's bridge IP at runtime. docker-updater inspects the container, finds its IP, and constructs the full URL (e.g., `http://172.17.0.5:8080/ready-to-update`). This requires docker-updater to run with `--network host`.
+URLs starting with `:` (port prefix) are resolved using the container's own IP at runtime. docker-updater inspects the container, finds its IP, and constructs the full URL (e.g., `http://172.17.0.5:8080/ready-to-update`). This requires docker-updater to be attached to a network the container is on.
 
 Full URLs (e.g., `http://myapp:8080/ready`) are used as-is and require docker-updater to share a network with the target container.
 
@@ -495,7 +494,7 @@ This matters: without it, a docker-updater fix you publish never reaches the *ru
 
 To avoid that, when the container due for an update is docker-updater's own, it does **not** recreate itself inline. Instead it:
 
-1. Detects its own container ID (from `/proc/self/mountinfo`, which works even under `network_mode: host`; override with `DOCKER_UPDATER_CONTAINER_ID` if detection ever fails).
+1. Detects its own container ID (from `/proc/self/mountinfo`, which works whatever the container's hostname or network mode; override with `DOCKER_UPDATER_CONTAINER_ID` if detection ever fails).
 2. Spawns a short-lived **detached helper container** from the freshly-pulled new image, given the same Docker socket mount.
 3. Returns. The helper -- a separate container with its own lifecycle -- then stops, removes, and recreates the docker-updater container on the new image, and exits (it is `--rm`'d).
 
@@ -507,7 +506,10 @@ The helper reuses the same recreate path as every other update, so the **rollbac
 services:
   docker-updater:
     image: ghcr.io/wow-look-at-my/docker-updater
-    network_mode: host  # dashboard reachable at http://<host>:8080
+    networks: [appnet]  # reach monitored containers at their own IPs
+    ports:
+      - "8080:8080"     # dashboard at http://<host>:8080
+      - "9000:9000"     # optional GitHub webhook
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.docker/config.json:/config.json:ro
@@ -527,10 +529,14 @@ services:
 
   my-app:
     image: myapp:latest
+    networks: [appnet]
     labels:
       docker-updater.enable: "true"
       # HTTP health check from docker-updater's process -- no curl needed in the image:
       docker-updater.health-check.url: ":8080/health"
       docker-updater.health-check.timeout: "60s"
       docker-updater.pre-check.url: ":8080/ready-to-update"
+
+networks:
+  appnet:
 ```

@@ -66,7 +66,8 @@ func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, ra
 	}
 	address := containerAddress(inspect)
 	if address == "" {
-		return "", fmt.Errorf("new container %s has no reachable address for the health check", shortID(containerID))
+		return "", fmt.Errorf("new container %s has no IP of its own to poll the health check on; "+
+			"give it an absolute docker-updater.health-check.url", shortID(containerID))
 	}
 
 	u, err := url.Parse(rawURL)

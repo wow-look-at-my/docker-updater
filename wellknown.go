@@ -59,10 +59,29 @@ func containerAddress(inspect types.ContainerJSON) string {
 			return net.IPAddress
 		}
 	}
-	if inspect.HostConfig != nil && inspect.HostConfig.NetworkMode.IsHost() {
+	// HostConfig is promoted through the embedded *ContainerJSONBase (unlike
+	// NetworkSettings, which is a direct field), so the base has to be checked
+	// before it.
+	if inspect.ContainerJSONBase != nil && inspect.HostConfig != nil && inspect.HostConfig.NetworkMode.IsHost() {
 		return "127.0.0.1"
 	}
 	return ""
+}
+
+// hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker
+// HEALTHCHECK. It reads State.Health, which is exactly what waitHealthy
+// branches on -- so a warning built from this can never promise a fallback the
+// gate will not actually take. Reading the image's Config.Healthcheck instead
+// would over-report: `--no-healthcheck` and a `["NONE"]` test both leave the
+// config populated while the runtime has no health at all.
+// State is promoted through the embedded *ContainerJSONBase, so the base has
+// to be checked before it -- reaching straight for .State panics on a
+// zero-value inspect.
+func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
+	if inspect.ContainerJSONBase == nil || inspect.State == nil {
+		return false
+	}
+	return inspect.State.Health != nil
 }
 
 // exposedTCPPorts returns the container's declared TCP ports, ascending. These
@@ -138,14 +157,14 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 		// operator to write code that may already exist: what is actually
 		// broken is the route to the container, or the port being probed.
 		return wellKnownState{Warnings: []string{
-			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); post-update liveness falls " +
-				"back to Docker HEALTHCHECK. docker-updater must share a network with the container (it is meant " +
+			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); " + fallbackPhrase(info) +
+				". docker-updater must share a network with the container (it is meant " +
 				"to run with --network host), and " + wellKnownPortLabel + " must name a port it serves on",
 		}}
 	case !implemented:
 		return wellKnownState{Warnings: []string{
-			"does not serve " + wellKnownHealth + " (probed " + base + "); post-update liveness falls back to " +
-				"Docker HEALTHCHECK. Implement the endpoint, or set " + wellKnownEnableLabel + "=false to silence this",
+			"does not serve " + wellKnownHealth + " (probed " + base + "); " + fallbackPhrase(info) +
+				". Implement the endpoint, or set " + wellKnownEnableLabel + "=false to silence this",
 		}}
 	}
 	// A container answering /health is assumed to speak the contract. The
@@ -153,6 +172,21 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	// treats a 404 there as "not implemented, go ahead", so a second discovery
 	// request would buy nothing.
 	return wellKnownState{HealthURL: base + wellKnownHealth, PreUpdateURL: base + wellKnownPreUpdate}
+}
+
+// fallbackPhrase names the post-update gate this container will ACTUALLY get
+// once the standard endpoint is out of the picture, which is not the same
+// sentence for every container: waitPostUpdateHealthy falls through to
+// waitHealthy, and waitHealthy only waits for a health STATUS when the
+// container has one. Without a HEALTHCHECK the gate degrades to "it stayed
+// running", and an operator told they still have HEALTHCHECK cover would
+// believe an update was verified when nothing verified it.
+func fallbackPhrase(info ContainerInfo) string {
+	if info.DockerHealthcheck {
+		return "post-update liveness falls back to Docker HEALTHCHECK"
+	}
+	return "post-update liveness is UNVERIFIED beyond the container staying up briefly " +
+		"(this container has no Docker HEALTHCHECK to fall back to)"
 }
 
 // wellKnownBaseURL builds http://<address>:<port> for a container, or explains

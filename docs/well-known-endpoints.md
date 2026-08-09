@@ -17,7 +17,9 @@ cheap enough to call on every check cycle (default: every 5 minutes).
 `404` and `501` mean **not implemented**:
 
 - on `health`, that is the whole container being unconfigured — docker-updater
-  warns and falls back to Docker's `HEALTHCHECK` status.
+  warns and falls back to Docker's `HEALTHCHECK` status, or, for a container
+  that has no `HEALTHCHECK` either, to nothing but the grace period. The
+  warning says which, because those are very different guarantees.
 - on `pre-update`, it is a normal, supported choice. The endpoint is optional;
   a container that only serves `health` is fully conformant and updates are
   never held back for it.
@@ -81,6 +83,15 @@ block an update — they describe configuration, not failure.
   http://…); post-update liveness falls back to Docker HEALTHCHECK.` Implement
   the endpoint, or opt out with `docker-updater.well-known=false`. The container
   answered: this is the only warning that says anything about its code.
+
+Both warnings name the gate the container will ACTUALLY get, which is not the
+same sentence for every container. One with a Docker `HEALTHCHECK` really does
+fall back to it. One WITHOUT gets `post-update liveness is UNVERIFIED beyond
+the container staying up briefly (this container has no Docker HEALTHCHECK to
+fall back to)` — because `waitHealthy` only waits for a health status when
+there is one, and otherwise degrades to the grace period. Printing the
+`HEALTHCHECK` sentence for that container would tell an operator an update was
+verified when nothing verified it.
 - **Unreachable** — `cannot reach http://…/.well-known/docker-updater/health
   (dial tcp …: connect: connection refused); … docker-updater must share a
   network with the container …`. No answer arrived, so nothing has been learned

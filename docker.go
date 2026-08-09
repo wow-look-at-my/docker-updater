@@ -240,7 +240,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		// endpoints. Both come from the container's own settings, so a
 		// container that says nothing beyond the enable label is still
 		// reachable without configuration.
-		info.Address = containerAddress(inspect)
+		info.Address, info.AddressNetwork = containerEndpoint(inspect)
 		info.ExposedPorts = exposedTCPPorts(inspect)
 		info.DockerHealthcheck = hasDockerHealthcheck(inspect)
 

@@ -22,13 +22,12 @@ Automatic Docker container updater service. Monitors running containers and upda
 
 ```bash
 docker run -d \
-  --network my-stack \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/wow-look-at-my/docker-updater
 ```
 
-docker-updater reaches a container's update-check endpoints at the container's own IP, so attach it to every network whose containers it monitors. `--network` takes one at a time; add the rest with `docker network connect <net> docker-updater`.
+docker-updater reaches a container's update-check endpoints at the container's own IP, so it **attaches itself** to the networks of the containers it monitors -- it holds the Docker socket, so no `docker network connect` is needed. Publishing `-p 8080:8080` is only for the dashboard.
 
 ## Configuration
 
@@ -431,7 +430,7 @@ labels:
   docker-updater.pre-check.timeout: "10s"  # optional, default 30s
 ```
 
-URLs starting with `:` (port prefix) are resolved using the container's own IP at runtime. docker-updater inspects the container, finds its IP, and constructs the full URL (e.g., `http://172.17.0.5:8080/ready-to-update`). This requires docker-updater to be attached to a network the container is on.
+URLs starting with `:` (port prefix) are resolved using the container's own IP at runtime. docker-updater inspects the container, finds its IP, attaches itself to that network if it is not on it already, and constructs the full URL (e.g., `http://172.17.0.5:8080/ready-to-update`).
 
 Full URLs (e.g., `http://myapp:8080/ready`) are used as-is and require docker-updater to share a network with the target container.
 
@@ -506,10 +505,9 @@ The helper reuses the same recreate path as every other update, so the **rollbac
 services:
   docker-updater:
     image: ghcr.io/wow-look-at-my/docker-updater
-    networks: [appnet]  # reach monitored containers at their own IPs
     ports:
-      - "8080:8080"     # dashboard at http://<host>:8080
-      - "9000:9000"     # optional GitHub webhook
+      - "8080:8080"  # dashboard at http://<host>:8080
+      - "9000:9000"  # optional GitHub webhook
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ~/.docker/config.json:/config.json:ro
@@ -529,14 +527,10 @@ services:
 
   my-app:
     image: myapp:latest
-    networks: [appnet]
     labels:
       docker-updater.enable: "true"
       # HTTP health check from docker-updater's process -- no curl needed in the image:
       docker-updater.health-check.url: ":8080/health"
       docker-updater.health-check.timeout: "60s"
       docker-updater.pre-check.url: ":8080/ready-to-update"
-
-networks:
-  appnet:
 ```

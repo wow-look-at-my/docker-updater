@@ -42,18 +42,20 @@ func main() {
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
 
-	// Determine our own container ID so we can update ourselves correctly. A
-	// self-update can't recreate its own container inline (that would kill this
-	// process mid-swap); when SelfContainerID is known, updateContainer routes
-	// the updater's own update through a detached helper instead. An explicit
-	// DOCKER_UPDATER_CONTAINER_ID wins; otherwise we auto-detect.
+	// Determine our own container ID. Two things need it: a self-update can't
+	// recreate its own container inline (that would kill this process
+	// mid-swap), so updateContainer routes it through a detached helper; and
+	// attaching to a monitored container's network means naming the container
+	// to connect. An explicit DOCKER_UPDATER_CONTAINER_ID wins; otherwise we
+	// auto-detect.
 	if cfg.SelfContainerID == "" {
 		cfg.SelfContainerID = detectOwnContainerID()
 	}
 	if cfg.SelfContainerID != "" {
-		log.Printf("self-update enabled (own container %s)", shortID(cfg.SelfContainerID))
+		log.Printf("self-update and network self-attach enabled (own container %s)", shortID(cfg.SelfContainerID))
 	} else {
-		log.Print("self-update disabled: could not determine own container ID (set DOCKER_UPDATER_CONTAINER_ID to enable)")
+		log.Print("self-update and network self-attach disabled: could not determine own container ID " +
+			"(set DOCKER_UPDATER_CONTAINER_ID to enable); update checks only reach containers on a network docker-updater already shares")
 	}
 
 	var resolveAuth AuthResolver

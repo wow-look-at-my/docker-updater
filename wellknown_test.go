@@ -313,11 +313,13 @@ func TestLabelPreCheckStillFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "404")
 }
 
-func TestContainerAddressIsTheContainersOwnIP(t *testing.T) {
+func TestContainerEndpointIsTheContainersOwnIPAndNetwork(t *testing.T) {
 	bridged := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{
-		Networks: map[string]*network.EndpointSettings{"bridge": {IPAddress: "172.17.0.4"}},
+		Networks: map[string]*network.EndpointSettings{"bridge": {IPAddress: "172.17.0.4", NetworkID: "net-bridge"}},
 	}}
-	assert.Equal(t, "172.17.0.4", containerAddress(bridged))
+	addr, netID := containerEndpoint(bridged)
+	assert.Equal(t, "172.17.0.4", addr)
+	assert.Equal(t, "net-bridge", netID, "the network to attach to, so the address is dialable")
 
 	// A container with no IP of its own gets no substitute: 127.0.0.1 is
 	// docker-updater's own loopback, so a probe would answer for the wrong
@@ -327,7 +329,29 @@ func TestContainerAddressIsTheContainersOwnIP(t *testing.T) {
 		NetworkSettings:   &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{"host": {}}},
 		ContainerJSONBase: &types.ContainerJSONBase{HostConfig: &container.HostConfig{NetworkMode: "host"}},
 	}
-	assert.Empty(t, containerAddress(hostNet))
+	addr, netID = containerEndpoint(hostNet)
+	assert.Empty(t, addr)
+	assert.Empty(t, netID)
 
-	assert.Empty(t, containerAddress(types.ContainerJSON{}))
+	addr, netID = containerEndpoint(types.ContainerJSON{})
+	assert.Empty(t, addr)
+	assert.Empty(t, netID)
+}
+
+// Map iteration is randomized, so a multi-network container would otherwise
+// resolve to a different address on different cycles -- which makes the updater
+// join a second network for nothing, and lets the post-update health gate
+// re-resolve onto a network it never probed.
+func TestContainerEndpointIsStableAcrossCycles(t *testing.T) {
+	multi := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{
+		"zulu":  {IPAddress: "172.30.0.9", NetworkID: "net-zulu"},
+		"alpha": {IPAddress: "172.20.0.5", NetworkID: "net-alpha"},
+		"mike":  {IPAddress: "172.25.0.7", NetworkID: "net-mike"},
+	}}}
+
+	for range 20 {
+		addr, netID := containerEndpoint(multi)
+		assert.Equal(t, "172.20.0.5", addr)
+		assert.Equal(t, "net-alpha", netID)
+	}
 }

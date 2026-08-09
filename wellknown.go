@@ -46,23 +46,37 @@ const (
 	defaultHealthCheckTimeout = 60 * time.Second
 )
 
-// containerAddress returns the container's own IP -- the address docker-updater
-// dials it on from a network they share. Empty when the container has no IP of
-// its own (host, none, or container: network mode), and there is no substitute
-// to fall back on: 127.0.0.1 is docker-updater's OWN loopback, so probing it
-// reports on the wrong process entirely and can pass a post-update health gate
-// against docker-updater itself. Such a container needs an absolute
+// containerEndpoint returns the container's own IP and the ID of the network it
+// belongs to -- the address docker-updater dials, and the network it has to
+// join to get there.
+//
+// Both are empty when the container has no IP of its own (host, none, or
+// container: network mode), and there is no substitute to fall back on:
+// 127.0.0.1 is docker-updater's OWN loopback, so probing it reports on the
+// wrong process entirely and can pass a post-update health gate against
+// docker-updater itself. Such a container needs an absolute
 // docker-updater.health-check.url instead.
-func containerAddress(inspect types.ContainerJSON) string {
+//
+// Networks are considered in name order because Go randomizes map iteration: a
+// multi-network container must resolve to the SAME endpoint every cycle, or the
+// updater joins a second network for nothing and the address the health gate
+// re-resolves after an update belongs to a different network than the one it
+// probed before it.
+func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) {
 	if inspect.NetworkSettings == nil {
-		return ""
+		return "", ""
 	}
-	for _, net := range inspect.NetworkSettings.Networks {
-		if net.IPAddress != "" {
-			return net.IPAddress
+	names := make([]string, 0, len(inspect.NetworkSettings.Networks))
+	for name := range inspect.NetworkSettings.Networks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if net := inspect.NetworkSettings.Networks[name]; net.IPAddress != "" {
+			return net.IPAddress, net.NetworkID
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker
@@ -265,7 +279,8 @@ func wellKnownGet(ctx context.Context, url string) (*http.Response, error) {
 
 // applyWellKnown folds discovery into a container's check configuration: the
 // standard endpoints fill in wherever no explicit label set one. Returns the
-// updated info and the warnings for this cycle.
+// updated info and the warnings for this cycle; the caller logs them together
+// with everything else it collected for the container.
 func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []string) {
 	state := resolveWellKnown(ctx, info)
 
@@ -284,7 +299,6 @@ func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []s
 		info.PreCheckStandard = true
 	}
 
-	logWellKnownWarnings(info.Name, state.Warnings)
 	return info, state.Warnings
 }
 
@@ -293,7 +307,7 @@ func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []s
 // live state regardless).
 var warnedOnce sync.Map
 
-func logWellKnownWarnings(name string, warnings []string) {
+func logContainerWarnings(name string, warnings []string) {
 	key := name
 	joined := strings.Join(warnings, "; ")
 	if prev, ok := warnedOnce.Load(key); ok && prev == joined {

@@ -69,6 +69,14 @@ something else attached would break reachability docker-updater did not create.
 A join that fails is reported as a per-container warning naming the network and
 the error, since it is the reason the probe that follows cannot connect.
 
+**It does not route between the networks it joins.** Membership of two networks
+is not a bridge between them: `ip_forward` is a per-namespace sysctl that starts
+at `0` in a container, nothing in another container routes via docker-updater,
+and Docker's own inter-network isolation rules are untouched. What each join
+does add is the other direction — docker-updater has an address and a DNS name
+on that network, so its dashboard and webhook ports are reachable from it. Set
+`DOCKER_UPDATER_DASHBOARD_ADDR` empty to drop the dashboard from that surface.
+
 ### The address after an update
 
 An update replaces the container, and Docker gives the replacement its own IP —

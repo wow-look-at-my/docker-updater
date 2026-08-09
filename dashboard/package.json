@@ -5,9 +5,13 @@
   "description": "Build tooling for the docker-updater web dashboard: compiles dashboard.ts to the embedded dashboard.js.",
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test snapshot.test.mts"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.2.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.7.2"
   }
 }

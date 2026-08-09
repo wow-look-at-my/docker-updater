@@ -82,6 +82,25 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 	assert.Contains(t, state.Warnings[0], wellKnownEnableLabel+"=false")
 }
 
+// A container that never answers is a different fault from one that answers
+// 404, and must not get the same sentence: "implement the endpoint" sends the
+// operator to write code that may already be there, while the actual break is
+// the route to the container or the port being probed.
+func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
+	info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
+	srv.Close() // the address is still addressed, but nothing listens on it now
+
+	state := resolveWellKnown(context.Background(), info)
+
+	assert.Empty(t, state.HealthURL)
+	require.Len(t, state.Warnings, 1)
+	assert.Contains(t, state.Warnings[0], "cannot reach")
+	assert.Contains(t, state.Warnings[0], "--network host")
+	assert.Contains(t, state.Warnings[0], wellKnownPortLabel)
+	assert.NotContains(t, state.Warnings[0], "Implement the endpoint",
+		"nothing about an unanswered probe shows the endpoint is missing")
+}
+
 // Compatibility with the original opt-in setup: the check labels still win,
 // and are reported as nonstandard rather than silently honored.
 func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
@@ -102,6 +121,20 @@ func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 	assert.Equal(t, "http://10.0.0.5:9000/healthz", applied.HealthCheckURL)
 	assert.False(t, applied.PreCheckStandard)
 	assert.Equal(t, state.Warnings, warnings)
+}
+
+// Choosing a nonstandard check is a choice you are told about, and the opt-out
+// does not buy silence from it: well-known=false says "there are no standard
+// endpoints here", not "stop mentioning the override".
+func TestOptOutDoesNotSilenceTheNonstandardWarning(t *testing.T) {
+	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
+	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"
+	info.HealthCheckURL = "http://10.0.0.5:9000/healthz"
+	info.Labels[wellKnownEnableLabel] = "false"
+
+	state := resolveWellKnown(context.Background(), info)
+	require.Len(t, state.Warnings, 1)
+	assert.Contains(t, state.Warnings[0], "nonstandard")
 }
 
 // Containers that serve no HTTP at all (a database) can opt out entirely

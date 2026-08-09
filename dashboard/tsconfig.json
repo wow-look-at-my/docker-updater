@@ -3,6 +3,10 @@
     "target": "ES2019",
     "module": "none",
     "lib": ["ES2019", "DOM", "DOM.Iterable"],
+    // Browser code: no ambient node types, whatever @types/* the test tooling
+    // installs. Otherwise node's setTimeout (returning Timeout, not number)
+    // shadows the DOM's and the build breaks on a devDependency.
+    "types": [],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

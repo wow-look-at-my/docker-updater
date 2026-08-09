@@ -111,39 +111,69 @@ function uptimeText(c: ApiContainer): string | null {
   return (c.status || "").replace(/\s*\(health[^)]*\)\s*/i, "").replace(/\s*\((un)?healthy\)\s*/i, "").trim() || null;
 }
 
-function stateCell(c: ApiContainer): HTMLElement {
-  let dot = "dot-gray";
-  if (c.health === "healthy") dot = "dot-green";
-  else if (c.health === "unhealthy") dot = "dot-red";
-  else if (c.health === "starting") dot = "dot-amber";
-  else if (c.state === "running") dot = "dot-green";
-  else if (c.state === "exited" || c.state === "dead") dot = "dot-red";
+// The text of each table cell lives in its own function, and both the cell
+// builder and stateSnapshot() call it. Anything the table draws is therefore
+// reachable by the copy button by construction — a value the snapshot could
+// omit is a value no column can render either.
 
+// stateIndicator is the colour of the row's state dot: the reported health
+// when Docker has one, else the container's own state.
+function stateIndicator(c: ApiContainer): string {
+  if (c.health === "healthy") return "green";
+  if (c.health === "unhealthy") return "red";
+  if (c.health === "starting") return "amber";
+  if (c.state === "running") return "green";
+  if (c.state === "exited" || c.state === "dead") return "red";
+  return "gray";
+}
+
+function stateText(c: ApiContainer): string {
+  return c.state || "unknown";
+}
+
+function stateCell(c: ApiContainer): HTMLElement {
   const children: Child[] = [
-    el("span", { class: "dot " + dot }),
-    el("span", { class: "state-text" }, c.state || "unknown"),
+    el("span", { class: "dot dot-" + stateIndicator(c) }),
+    el("span", { class: "state-text" }, stateText(c)),
   ];
   if (c.health) children.push(el("div", { class: "health-sub" }, c.health));
   return el("td", null, ...children);
 }
 
-// restartsCell renders Docker's restart count for the container. A nil count
-// (container could not be inspected) shows "—"; zero is dimmed as the unremarkable
-// healthy case; a positive count is highlighted to flag instability.
+// restartsText is the Restarts column: Docker's restart count, or "—" when the
+// container could not be inspected.
+function restartsText(c: ApiContainer): string {
+  const n = c.restarts;
+  return n === undefined || n === null ? "—" : String(n);
+}
+
+// restartsCell dims the unremarkable cases (uninspectable, zero) and highlights
+// a positive count to flag instability.
 function restartsCell(c: ApiContainer): HTMLElement {
   const n = c.restarts;
-  if (n === undefined || n === null) return el("td", { class: "up-na" }, "—");
-  if (n === 0) return el("td", { class: "up-na" }, "0");
+  const text = restartsText(c);
+  if (n === undefined || n === null || n === 0) return el("td", { class: "up-na" }, text);
   const title = "Restarted " + n + " time" + (n !== 1 ? "s" : "") + " since the container was last (re)created";
-  return el("td", { class: "restarts-warn", title }, String(n));
+  return el("td", { class: "restarts-warn", title }, text);
+}
+
+// monitoringText is the Auto-update column's badge text.
+function monitoringText(c: ApiContainer): string {
+  return c.auto_update ? "Auto · " + (c.mode || "image") : "Manual";
 }
 
 function autoUpdateCell(c: ApiContainer): HTMLElement {
   if (!c.auto_update) {
-    return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, "Manual"));
+    return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, monitoringText(c)));
   }
   const cls = c.mode === "git" ? "badge badge-git" : "badge badge-auto";
-  return el("td", null, el("span", { class: cls }, "Auto · " + (c.mode || "image")));
+  return el("td", null, el("span", { class: cls }, monitoringText(c)));
+}
+
+// lastPulledText is the Last pulled column: how long ago a newer image was
+// actually downloaded. Unmonitored containers are never pulled.
+function lastPulledText(c: ApiContainer): string {
+  return c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 }
 
 // heldBackReason explains why a detected update has not been applied. The three
@@ -156,36 +186,39 @@ function heldBackReason(c: ApiContainer): string {
   return "dry-run — not applied";
 }
 
-function upstreamCell(c: ApiContainer): HTMLElement {
-  const td = el("td", null);
-  if (!c.auto_update) {
-    td.appendChild(el("span", { class: "up-na" }, "—"));
-    return td;
-  }
+// UpstreamView is the Upstream column: a one-word verdict and the detail line
+// under it (a ref transition, the reason an update is held back, or the full
+// error text).
+interface UpstreamView {
+  cls: string;
+  status: string;
+  detail: string | null;
+}
+
+function upstreamView(c: ApiContainer): UpstreamView {
+  if (!c.auto_update) return { cls: "up-na", status: "—", detail: null };
   // An available update means one was detected but held back. Always surface it
   // as such — even when it also errored — so the row matches the "updates
   // pending" count instead of hiding behind a bare "error".
   if (c.update_available) {
-    td.appendChild(el("span", { class: "up-available" }, "update available"));
     let detail = "";
     if (c.current_ref || c.available_ref) {
       detail = (c.current_ref || "?") + " → " + (c.available_ref || "?");
     }
     const reason = heldBackReason(c);
-    detail = detail ? detail + " · " + reason : reason;
-    td.appendChild(el("div", { class: "detail" }, detail));
-    return td;
+    return { cls: "up-available", status: "update available", detail: detail ? detail + " · " + reason : reason };
   }
   // Errored with no newer ref detected: a plain failure, not a pending update.
-  if (c.error) {
-    td.appendChild(el("span", { class: "up-error" }, "error"));
-    td.appendChild(el("div", { class: "detail" }, c.error));
-    return td;
-  }
+  if (c.error) return { cls: "up-error", status: "error", detail: c.error };
   // Up to date.
-  td.appendChild(el("span", { class: "up-uptodate" }, "up to date"));
   const updated = fmtRelative(c.last_updated);
-  if (updated) td.appendChild(el("div", { class: "detail" }, "updated " + updated));
+  return { cls: "up-uptodate", status: "up to date", detail: updated ? "updated " + updated : null };
+}
+
+function upstreamCell(c: ApiContainer): HTMLElement {
+  const view = upstreamView(c);
+  const td = el("td", null, el("span", { class: view.cls }, view.status));
+  if (view.detail) td.appendChild(el("div", { class: "detail" }, view.detail));
   return td;
 }
 
@@ -220,13 +253,41 @@ function errorReport(data: ApiResponse): string {
   return [header, ...blocks].join("\n\n") + "\n";
 }
 
-// stateSnapshot renders the entire /api/containers payload as pretty JSON:
-// config, cycle timestamps, and every container's full status -- including the
-// fields no column draws (last_checked, skip_reason, the untruncated error).
-// The payload carries its own generated_at, so the copy dates itself rather
-// than claiming to be the state at the moment of the click.
-function stateSnapshot(data: ApiResponse): string {
-  return JSON.stringify(data, null, 2) + "\n";
+// ---------------------------------------------------------------------------
+// The state the page is drawn from
+//
+// One object: the served /api/containers payload, plus the state the server
+// cannot know — what the operator typed into the filter, which sections they
+// expanded, and whether the last poll failed. render() draws exactly this
+// object and the copy button serializes exactly this object, so a paste
+// reproduces the page rather than describing it.
+//
+// Deliberately NOT in here: the summary counts, the group headings, uptime
+// strings, the Upstream verdict. Every one is arithmetic over the payload, and
+// keeping a second copy of a fact beside the fact is how the two drift apart.
+// render() computes them on the way to the DOM, every time.
+// ---------------------------------------------------------------------------
+
+interface UiState {
+  page_url: string;
+  refresh_seconds: number;
+  // The filter box verbatim, so a re-render restores what was typed rather
+  // than the normalized form matching uses.
+  query: string;
+  expanded: Record<string, boolean>;
+  // Set only when the last poll failed — and then the containers below it are
+  // the last payload that arrived, not the current one. This is the one thing
+  // on the page that no payload can carry, because it exists exactly when none
+  // did.
+  error_banner: string | null;
+}
+
+type DashboardState = ApiResponse & { ui: UiState };
+
+// stateSnapshot serializes the state the page was drawn from, stamped with the
+// moment of the copy.
+function stateSnapshot(state: DashboardState): string {
+  return JSON.stringify({ captured_at: new Date().toISOString(), ...state }, null, 2) + "\n";
 }
 
 // copyText writes to the clipboard, falling back to a hidden textarea +
@@ -273,7 +334,7 @@ async function flashCopyResult(btn: HTMLButtonElement, text: string): Promise<vo
   if (pending !== undefined) clearTimeout(pending);
   copyResetTimers.set(btn.id, setTimeout(() => {
     copyResetTimers.delete(btn.id);
-    updateCopyButtons(latestData);
+    updateCopyButtons(currentState);
   }, COPY_FEEDBACK_MS));
 }
 
@@ -301,14 +362,14 @@ function updateCopyButtons(data: ApiResponse | null): void {
 
 async function onCopyErrors(): Promise<void> {
   const btn = document.getElementById("copy-errors") as HTMLButtonElement | null;
-  if (!btn || !latestData) return;
-  await flashCopyResult(btn, errorReport(latestData));
+  if (!btn || !currentState) return;
+  await flashCopyResult(btn, errorReport(currentState));
 }
 
 async function onCopyState(): Promise<void> {
   const btn = document.getElementById("copy-state") as HTMLButtonElement | null;
-  if (!btn || !latestData) return;
-  await flashCopyResult(btn, stateSnapshot(latestData));
+  if (!btn || !currentState) return;
+  await flashCopyResult(btn, stateSnapshot(currentState));
 }
 
 // pending reports whether a container has an update detected but not yet applied
@@ -340,18 +401,34 @@ const GROUPS: Group[] = [
   { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !c.auto_update && !isOnline(c) },
 ];
 
-// searchQuery returns the normalized filter-box text: trimmed and lowercased,
-// "" meaning "no filter".
-function searchQuery(): string {
+// searchBoxValue returns the filter box's text as typed. The state carries it
+// verbatim (so re-rendering can restore it without rewriting what someone is
+// mid-way through typing); normalizing for matching is normalizeQuery's job.
+function searchBoxValue(): string {
   const box = document.getElementById("search") as HTMLInputElement | null;
-  return box ? box.value.trim().toLowerCase() : "";
+  return box ? box.value : "";
+}
+
+function normalizeQuery(raw: string): string {
+  return raw.trim().toLowerCase();
 }
 
 // matchesQuery is a case-insensitive substring match against the container
-// name and image; either matching keeps the row visible.
+// name and image; either matching keeps the row visible. `query` is normalized.
 function matchesQuery(c: ApiContainer, query: string): boolean {
   if (!query) return true;
   return (c.name || "").toLowerCase().includes(query) || (c.image || "").toLowerCase().includes(query);
+}
+
+// expandedGroups reads which sections are open. Collapsing one hides its rows,
+// so it is part of what the page is showing and belongs in the state.
+function expandedGroups(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const g of GROUPS) {
+    const section = document.getElementById(g.id) as HTMLDetailsElement | null;
+    if (section) out[g.id] = section.open;
+  }
+  return out;
 }
 
 // updatedHighlight computes the fading green background for a container whose
@@ -389,7 +466,7 @@ function row(c: ApiContainer): HTMLElement {
   );
 
   const uptime = uptimeText(c);
-  const lastPulled = c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
+  const lastPulled = lastPulledText(c);
 
   const highlight = updatedHighlight(c, Date.now());
   const tr = el("tr", { class: pending(c) ? "row-pending" : null, title: highlight ? highlight.title : null },
@@ -413,7 +490,13 @@ function setText(id: string, text: string | number): void {
   if (node) node.textContent = String(text);
 }
 
-function render(data: ApiResponse): void {
+// render draws the state. Everything it puts on screen is derived here, from
+// that one object — nothing is read back out of the DOM, and nothing it draws
+// is stored. Given the same state it produces the same page, which is what
+// makes a copied snapshot reproducible.
+function render(state: DashboardState): void {
+  const data: ApiResponse = state;
+  const ui = state.ui;
   const containers = data.containers || [];
 
   // The summary cards are fleet totals: computed over every container, never
@@ -432,12 +515,18 @@ function render(data: ApiResponse): void {
   const updatesCard = document.getElementById("card-updates");
   if (updatesCard) updatesCard.classList.toggle("clickable", updates > 0);
 
-  updateCopyButtons(data);
+  updateCopyButtons(state);
 
   document.getElementById("dry-run-badge")!.classList.toggle("hidden", !data.dry_run);
   setText("cfg-interval", data.interval || "—");
   setText("cfg-label", data.label || "—");
-  setText("refresh-interval", REFRESH_SECONDS);
+  setText("refresh-interval", ui.refresh_seconds);
+
+  // The banner is the one thing on the page no payload can carry: it is up
+  // exactly when the last poll produced no payload at all.
+  const banner = document.getElementById("error-banner")!;
+  banner.textContent = ui.error_banner || "";
+  banner.classList.toggle("hidden", ui.error_banner === null);
 
   // The updater's own build hash: shortened for the footer, full SHA on
   // hover. Guarded lookup (like card-updates) rather than REQUIRED_IDS, since
@@ -455,31 +544,72 @@ function render(data: ApiResponse): void {
   setText("next-cycle", nextCycle ? "Next check " + nextCycle : "");
   setText("refreshed", "Updated " + new Date(data.generated_at).toLocaleTimeString());
 
-  const query = searchQuery();
+  // Writing the box back is what lets a state rendered into a fresh page carry
+  // its filter with it. Guarded, so re-rendering while someone types does not
+  // move their cursor.
+  const box = document.getElementById("search") as HTMLInputElement;
+  if (box.value !== ui.query) box.value = ui.query;
+
+  const query = normalizeQuery(ui.query);
   const visible = containers.filter((c) => matchesQuery(c, query));
 
-  // Only tbody contents, summary counts, and the hidden class change per
-  // render. The <details> elements themselves are static (and their open state
-  // is never touched), so the user's expand/collapse choices survive refreshes.
+  // Row contents, summary counts, the hidden class, and the open state change
+  // per render. Applying `open` from the state is what makes a re-render
+  // reproduce the page; in normal use it writes back the value it was read
+  // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
     document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
     document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
-    document.getElementById(g.id)!.classList.toggle("hidden", members.length === 0);
+    const section = document.getElementById(g.id) as HTMLDetailsElement;
+    section.classList.toggle("hidden", members.length === 0);
+    const open = ui.expanded[g.id];
+    if (open !== undefined && section.open !== open) section.open = open;
   }
 
   // Every container lands in exactly one group, so "all groups hidden" is
   // exactly "no visible containers": none exist, or the filter matched none.
   const empty = document.getElementById("empty")!;
   empty.textContent = query && containers.length > 0
-    ? 'No containers match "' + query + '".'
+    ? 'No containers match "' + ui.query.trim() + '".'
     : "No containers found.";
   empty.classList.toggle("hidden", visible.length > 0);
 }
 
-// latestData holds the most recent successful /api/containers payload so the
-// search box can re-render instantly without refetching; the poll replaces it.
+// The two inputs the state is assembled from: the last payload that arrived
+// (kept so the filter can re-render without refetching), and the failure of the
+// most recent poll, if it failed.
 let latestData: ApiResponse | null = null;
+let pollFailure: string | null = null;
+
+// currentState is the object the page was last drawn from, and the one the copy
+// button serializes. Null until the first payload arrives.
+let currentState: DashboardState | null = null;
+
+// repaint rebuilds the state from those inputs plus the browser-side state, and
+// draws it. Every path that changes anything the page shows ends here, so the
+// object and the screen are never out of step.
+function repaint(): void {
+  if (!latestData) {
+    // Nothing has arrived yet: there is no state to draw, only the failure to
+    // report. The copy button stays disabled, having nothing to copy.
+    const banner = document.getElementById("error-banner")!;
+    banner.textContent = pollFailure || "";
+    banner.classList.toggle("hidden", pollFailure === null);
+    return;
+  }
+  currentState = {
+    ui: {
+      page_url: location.href,
+      refresh_seconds: REFRESH_SECONDS,
+      query: searchBoxValue(),
+      expanded: expandedGroups(),
+      error_banner: pollFailure,
+    },
+    ...latestData,
+  };
+  render(currentState);
+}
 
 // OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
 // an index.html from one build paired with a dashboard.js/css from another
@@ -498,19 +628,17 @@ function isNullElementError(err: unknown): boolean {
 }
 
 async function refresh(): Promise<void> {
-  const banner = document.getElementById("error-banner")!;
   try {
     const resp = await fetch("api/containers", { cache: "no-store" });
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
     latestData = (await resp.json()) as ApiResponse;
-    render(latestData);
-    banner.classList.add("hidden");
+    pollFailure = null;
   } catch (err) {
-    banner.textContent = isNullElementError(err)
+    pollFailure = isNullElementError(err)
       ? OUT_OF_SYNC_HINT
       : "Failed to load container data: " + (err instanceof Error ? err.message : String(err));
-    banner.classList.remove("hidden");
   }
+  repaint();
 }
 
 // jumpToPending scrolls to the first container with a held-back update, flashing
@@ -527,10 +655,11 @@ function jumpToPending(): void {
   first.classList.add("row-flash");
 }
 
-// onSearchInput re-renders the groups from the last fetched payload — no
-// refetch; the poll keeps replacing latestData underneath as usual.
-function onSearchInput(): void {
-  if (latestData) render(latestData);
+// Typing in the filter and expanding a section both change what the page shows
+// without any new data, so both rebuild the state — no refetch; the poll keeps
+// replacing latestData underneath as usual.
+function onUiChange(): void {
+  repaint();
 }
 
 // REQUIRED_IDS is the startup contract between this script and index.html:
@@ -584,7 +713,15 @@ function initDashboard(): void {
   if (copyStateBtn) copyStateBtn.addEventListener("click", () => void onCopyState());
 
   const searchBox = document.getElementById("search") as HTMLInputElement | null;
-  if (searchBox) searchBox.addEventListener("input", onSearchInput);
+  if (searchBox) searchBox.addEventListener("input", onUiChange);
+
+  // Expanding or collapsing a section changes what is on screen, so the state
+  // has to follow it. render() writes the same value straight back, so this
+  // cannot loop.
+  for (const g of GROUPS) {
+    const section = document.getElementById(g.id);
+    if (section) section.addEventListener("toggle", onUiChange);
+  }
 
   // Keyboard niceties: "/" focuses the filter box, Escape clears it.
   document.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -598,7 +735,7 @@ function initDashboard(): void {
       searchBox.select();
     } else if (e.key === "Escape" && target === searchBox) {
       searchBox.value = "";
-      onSearchInput();
+      onUiChange();
       searchBox.blur();
     }
   });

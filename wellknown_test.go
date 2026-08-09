@@ -68,9 +68,13 @@ func TestWellKnownTreatsUnhealthyAsConfigured(t *testing.T) {
 }
 
 // The warning every unconfigured container gets: what is missing, what was
-// probed, what happens instead, and how to silence it.
+// probed, what happens instead, and how to silence it. The container here HAS
+// a Docker HEALTHCHECK, so "falls back to Docker HEALTHCHECK" is the truth --
+// TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck covers the other
+// container, where that same sentence would be a lie.
 func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 	info, srv := wellKnownServer(t, 0, 0) // no routes: 404 for both
+	info.DockerHealthcheck = true
 
 	state := resolveWellKnown(context.Background(), info)
 
@@ -78,8 +82,66 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 	require.Len(t, state.Warnings, 1)
 	assert.Contains(t, state.Warnings[0], wellKnownHealth)
 	assert.Contains(t, state.Warnings[0], srv.URL)
-	assert.Contains(t, state.Warnings[0], "Docker HEALTHCHECK")
+	assert.Contains(t, state.Warnings[0], "falls back to Docker HEALTHCHECK")
 	assert.Contains(t, state.Warnings[0], wellKnownEnableLabel+"=false")
+}
+
+// A container with NO Docker HEALTHCHECK does not fall back to one -- it falls
+// through waitHealthy to waitStaysRunning, so the update is verified by
+// nothing but the process not crashing immediately. Promising HEALTHCHECK
+// cover here tells an operator an update was checked when it was not, which is
+// the whole reason the sentence is computed per container.
+//
+// Both discovery failures say it, because both end at the same gate: a
+// container we cannot reach and one that answers 404 are different faults with
+// the same consequence.
+func TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck(t *testing.T) {
+	t.Run("endpoint missing", func(t *testing.T) {
+		info, _ := wellKnownServer(t, 0, 0)
+		info.DockerHealthcheck = false
+
+		state := resolveWellKnown(context.Background(), info)
+
+		require.Len(t, state.Warnings, 1)
+		assert.Contains(t, state.Warnings[0], "UNVERIFIED")
+		assert.Contains(t, state.Warnings[0], "no Docker HEALTHCHECK to fall back to")
+		assert.NotContains(t, state.Warnings[0], "falls back to Docker HEALTHCHECK",
+			"there is no HEALTHCHECK here: saying it falls back to one is a promise nothing keeps")
+	})
+
+	t.Run("unreachable", func(t *testing.T) {
+		info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
+		info.DockerHealthcheck = false
+		srv.Close()
+
+		state := resolveWellKnown(context.Background(), info)
+
+		require.Len(t, state.Warnings, 1)
+		assert.Contains(t, state.Warnings[0], "cannot reach")
+		assert.Contains(t, state.Warnings[0], "UNVERIFIED")
+		assert.NotContains(t, state.Warnings[0], "falls back to Docker HEALTHCHECK")
+	})
+}
+
+// hasDockerHealthcheck must read the RUNTIME health, not the image config:
+// `docker run --no-healthcheck` (and a HEALTHCHECK NONE) leave the config
+// populated while State.Health stays nil, and State.Health is exactly what
+// waitHealthy branches on. Reading the config would re-introduce the lie in a
+// subtler place.
+func TestHasDockerHealthcheckReadsRuntimeState(t *testing.T) {
+	withHealth := types.ContainerJSON{ContainerJSONBase: &types.ContainerJSONBase{
+		State: &types.ContainerState{Health: &types.Health{Status: "healthy"}},
+	}}
+	assert.True(t, hasDockerHealthcheck(withHealth))
+
+	disabled := types.ContainerJSON{
+		ContainerJSONBase: &types.ContainerJSONBase{State: &types.ContainerState{}},
+		Config:            &container.Config{Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}},
+	}
+	assert.False(t, hasDockerHealthcheck(disabled),
+		"a disabled healthcheck leaves Config populated; only State.Health tells the truth")
+
+	assert.False(t, hasDockerHealthcheck(types.ContainerJSON{}))
 }
 
 // A container that never answers is a different fault from one that answers
@@ -88,6 +150,7 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 // the route to the container or the port being probed.
 func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 	info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
+	info.DockerHealthcheck = true
 	srv.Close() // the address is still addressed, but nothing listens on it now
 
 	state := resolveWellKnown(context.Background(), info)

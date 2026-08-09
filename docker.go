@@ -242,6 +242,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		// reachable without configuration.
 		info.Address = containerAddress(inspect)
 		info.ExposedPorts = exposedTCPPorts(inspect)
+		info.DockerHealthcheck = hasDockerHealthcheck(inspect)
 
 		// Apply the same resolution for health-check URL. The address is this
 		// container's, so the post-update gate re-resolves it against the

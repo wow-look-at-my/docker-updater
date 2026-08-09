@@ -58,6 +58,11 @@ type ContainerInfo struct {
 	// endpoints: where to reach the container, and which TCP ports it declares.
 	Address      string // container IP, or 127.0.0.1 under host networking
 	ExposedPorts []int  // declared TCP ports, ascending
+	// DockerHealthcheck reports whether the container has an effective Docker
+	// HEALTHCHECK -- the same signal waitHealthy branches on (State.Health).
+	// It is what makes a discovery warning able to name the fallback the
+	// container will ACTUALLY get instead of the one it might have had.
+	DockerHealthcheck bool
 
 	// Rolling update: start new container before stopping old.
 	Rolling bool

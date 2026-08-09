@@ -16,7 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-//go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js
+//go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
 // dashboardServer serves the read-only status dashboard and JSON API.
@@ -52,7 +52,7 @@ type staticAsset struct {
 // realistic collision between deploys while keeping URLs readable.
 const assetVersionLen = 12
 
-// staticAssetHandler serves the three embedded dashboard files with a strong
+// staticAssetHandler serves the embedded dashboard files with a strong
 // SHA-256 ETag and Cache-Control: no-cache. Embedded files carry a zero
 // modtime, so the old http.FileServer emitted no validators at all — browsers
 // and intermediary caches fell back to heuristic caching and could keep
@@ -60,7 +60,7 @@ const assetVersionLen = 12
 // index.html, which then crashes on the previous markup's element ids.
 // no-cache means every load revalidates (any cache in the path included) and
 // gets a cheap 304 while the binary is unchanged; a deploy changes the hashes
-// and all three assets flip atomically. Hashes are computed once here, not per
+// and all assets flip atomically. Hashes are computed once here, not per
 // request. Last-Modified is deliberately never sent (a zero modtime is
 // meaningless), leaving the ETag as the only — and sufficient — validator.
 //
@@ -92,6 +92,7 @@ func staticAssetHandler() http.HandlerFunc {
 	js := read("dashboard.js")
 	css := read("dashboard.css")
 	html := read("index.html")
+	favicon := read("favicon.svg")
 
 	// Version-stamp the asset references before hashing index.html, so the
 	// page's own ETag covers the rewritten bytes.
@@ -115,6 +116,7 @@ func staticAssetHandler() http.HandlerFunc {
 		{"index.html", "text/html; charset=utf-8", html},
 		{"dashboard.css", "text/css; charset=utf-8", css},
 		{"dashboard.js", "text/javascript; charset=utf-8", js},
+		{"favicon.svg", "image/svg+xml", favicon},
 	} {
 		if f.body == nil {
 			continue

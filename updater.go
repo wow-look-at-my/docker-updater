@@ -22,14 +22,26 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 
 	log.Printf("checking %d monitored container(s)", len(containers))
 
+	// Join the networks of the containers being checked before probing them:
+	// discovery dials each container's own IP, which is only routable from a
+	// network they share.
+	attacher := newSelfAttacher(ctx, cli, cfg.SelfContainerID)
+
 	var results []UpdateResult
 
 	for _, info := range containers {
+		var warnings []string
+		if w := attacher.ensure(ctx, info); w != "" {
+			warnings = append(warnings, w)
+		}
+
 		// Discover the standard /.well-known/docker-updater/ endpoints before
 		// the mode switch: they fill in the pre-update gate and the
 		// post-update liveness check for every container that serves them, and
 		// produce the warnings the dashboard shows for those that do not.
-		info, warnings := applyWellKnown(ctx, info)
+		info, wellKnownWarnings := applyWellKnown(ctx, info)
+		warnings = append(warnings, wellKnownWarnings...)
+		logContainerWarnings(info.Name, warnings)
 
 		result := UpdateResult{
 			Container: info,

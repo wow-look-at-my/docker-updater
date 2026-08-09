@@ -56,8 +56,11 @@ type ContainerInfo struct {
 
 	// Discovery inputs for the standard /.well-known/docker-updater/
 	// endpoints: where to reach the container, and which TCP ports it declares.
-	Address      string // container IP, or 127.0.0.1 under host networking
+	Address      string // the container's own IP; empty when it has none
 	ExposedPorts []int  // declared TCP ports, ascending
+	// AddressNetwork is the ID of the network Address belongs to.
+	// docker-updater attaches itself to it so the address is dialable.
+	AddressNetwork string
 	// DockerHealthcheck reports whether the container has an effective Docker
 	// HEALTHCHECK -- the same signal waitHealthy branches on (State.Health).
 	// It is what makes a discovery warning able to name the fallback the

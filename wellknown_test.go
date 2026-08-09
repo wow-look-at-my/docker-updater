@@ -158,7 +158,7 @@ func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 	assert.Empty(t, state.HealthURL)
 	require.Len(t, state.Warnings, 1)
 	assert.Contains(t, state.Warnings[0], "cannot reach")
-	assert.Contains(t, state.Warnings[0], "--network host")
+	assert.Contains(t, state.Warnings[0], "attached to a network the container is on")
 	assert.Contains(t, state.Warnings[0], wellKnownPortLabel)
 	assert.NotContains(t, state.Warnings[0], "Implement the endpoint",
 		"nothing about an unanswered probe shows the endpoint is missing")
@@ -248,13 +248,14 @@ func TestWellKnownPortSelection(t *testing.T) {
 	assert.Contains(t, err.Error(), "not a valid port")
 }
 
-// A container with no address (never started, no network) is a warning, not a
-// crash or a bogus URL.
+// A container with no address (never started, no network of its own) is a
+// warning naming the way out, not a crash or a bogus URL.
 func TestWellKnownWarnsWithoutAddress(t *testing.T) {
 	state := resolveWellKnown(context.Background(), ContainerInfo{Name: "x", Labels: map[string]string{}, ExposedPorts: []int{80}})
 
 	require.Len(t, state.Warnings, 1)
-	assert.Contains(t, state.Warnings[0], "no reachable address")
+	assert.Contains(t, state.Warnings[0], "no IP of its own")
+	assert.Contains(t, state.Warnings[0], "docker-updater.health-check.url")
 }
 
 // Discovery fills in BOTH checks for a conforming container, and marks the
@@ -312,17 +313,45 @@ func TestLabelPreCheckStillFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "404")
 }
 
-func TestContainerAddressPrefersNetworkIPThenHost(t *testing.T) {
+func TestContainerEndpointIsTheContainersOwnIPAndNetwork(t *testing.T) {
 	bridged := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{
-		Networks: map[string]*network.EndpointSettings{"bridge": {IPAddress: "172.17.0.4"}},
+		Networks: map[string]*network.EndpointSettings{"bridge": {IPAddress: "172.17.0.4", NetworkID: "net-bridge"}},
 	}}
-	assert.Equal(t, "172.17.0.4", containerAddress(bridged))
+	addr, netID := containerEndpoint(bridged)
+	assert.Equal(t, "172.17.0.4", addr)
+	assert.Equal(t, "net-bridge", netID, "the network to attach to, so the address is dialable")
 
+	// A container with no IP of its own gets no substitute: 127.0.0.1 is
+	// docker-updater's own loopback, so a probe would answer for the wrong
+	// process -- and could pass a post-update health gate against the updater's
+	// own dashboard. An empty address is a loud failure everywhere it is used.
 	hostNet := types.ContainerJSON{
 		NetworkSettings:   &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{"host": {}}},
 		ContainerJSONBase: &types.ContainerJSONBase{HostConfig: &container.HostConfig{NetworkMode: "host"}},
 	}
-	assert.Equal(t, "127.0.0.1", containerAddress(hostNet))
+	addr, netID = containerEndpoint(hostNet)
+	assert.Empty(t, addr)
+	assert.Empty(t, netID)
 
-	assert.Empty(t, containerAddress(types.ContainerJSON{}))
+	addr, netID = containerEndpoint(types.ContainerJSON{})
+	assert.Empty(t, addr)
+	assert.Empty(t, netID)
+}
+
+// Map iteration is randomized, so a multi-network container would otherwise
+// resolve to a different address on different cycles -- which makes the updater
+// join a second network for nothing, and lets the post-update health gate
+// re-resolve onto a network it never probed.
+func TestContainerEndpointIsStableAcrossCycles(t *testing.T) {
+	multi := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{
+		"zulu":  {IPAddress: "172.30.0.9", NetworkID: "net-zulu"},
+		"alpha": {IPAddress: "172.20.0.5", NetworkID: "net-alpha"},
+		"mike":  {IPAddress: "172.25.0.7", NetworkID: "net-mike"},
+	}}}
+
+	for range 20 {
+		addr, netID := containerEndpoint(multi)
+		assert.Equal(t, "172.20.0.5", addr)
+		assert.Equal(t, "net-alpha", netID)
+	}
 }

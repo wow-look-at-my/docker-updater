@@ -226,7 +226,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			continue
 		}
 
-		// Resolve a ":"-prefixed pre-check URL to the container's bridge IP.
+		// Resolve a ":"-prefixed pre-check URL to the container's own IP.
 		if strings.HasPrefix(info.PreCheckURL, ":") && inspect.NetworkSettings != nil {
 			for _, net := range inspect.NetworkSettings.Networks {
 				if net.IPAddress != "" {
@@ -240,7 +240,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		// endpoints. Both come from the container's own settings, so a
 		// container that says nothing beyond the enable label is still
 		// reachable without configuration.
-		info.Address = containerAddress(inspect)
+		info.Address, info.AddressNetwork = containerEndpoint(inspect)
 		info.ExposedPorts = exposedTCPPorts(inspect)
 		info.DockerHealthcheck = hasDockerHealthcheck(inspect)
 

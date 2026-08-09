@@ -513,7 +513,7 @@ func TestWaitPostUpdateHealthyNewContainerHasNoAddress(t *testing.T) {
 	start := time.Now()
 	err := waitPostUpdateHealthy(context.Background(), cli, "new123456789", info)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no reachable address")
+	assert.Contains(t, err.Error(), "no IP of its own")
 	assert.Less(t, time.Since(start), time.Second, "must fail immediately, not fall back to the old address")
 }
 

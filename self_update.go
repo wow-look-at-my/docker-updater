@@ -45,7 +45,7 @@ var containerIDRe = regexp.MustCompile(`[0-9a-f]{64}`)
 // /proc/self/mountinfo first: Docker bind-mounts /etc/hostname, /etc/hosts and
 // /etc/resolv.conf from /var/lib/docker/containers/<id>/, so the ID is present
 // there regardless of network mode -- unlike the hostname==short-ID convention,
-// which network_mode: host (used by the documented deployment) defeats. Falls
+// which any container carrying an explicit or inherited hostname defeats. Falls
 // back to /proc/self/cgroup for cgroup v1 hosts.
 func detectOwnContainerID() string {
 	if id := containerIDFromMountinfo(readFileString("/proc/self/mountinfo")); id != "" {

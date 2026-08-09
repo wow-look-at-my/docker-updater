@@ -36,9 +36,12 @@ handler is a complete implementation.
 docker-updater builds the base URL from the container's own Docker state, so
 nothing is configured twice:
 
-- **Address** — the container's first network IP; `127.0.0.1` when it runs with
-  host networking. docker-updater is meant to run with `--network host` so it
-  can reach bridge IPs directly.
+- **Address** — the container's network IP, taking its networks in name order
+  so a multi-network container resolves to the same endpoint every cycle.
+  docker-updater dials it directly, [attaching itself](#attaching-to-the-network)
+  to that network first if it is not on it already. A container with no IP of
+  its own (`host`, `none`, or `container:` network mode) cannot be discovered;
+  give it an absolute `docker-updater.health-check.url` instead.
 - **Port** — the container's single exposed TCP port. With several exposed
   ports there is no way to guess which one speaks HTTP, so discovery stops and
   warns until `docker-updater.well-known.port` names one.
@@ -46,6 +49,32 @@ nothing is configured twice:
 A container is considered to implement the contract when `health` answers with
 anything other than 404/501. A `503` from a container that is currently
 unhealthy still counts: that is a health problem, not a configuration one.
+
+### Attaching to the network
+
+An IP on a Docker network is only routable from that network, so before probing
+its containers docker-updater connects **itself** to each one it is not already
+on. It holds the Docker socket to stop, create and start containers, so the
+connect costs no extra access, and an operator never runs `docker network
+connect` for a stack.
+
+The join needs docker-updater's own container ID — the same one self-update
+uses, auto-detected from `/proc/self/mountinfo` or set explicitly with
+`DOCKER_UPDATER_CONTAINER_ID`. Without it, attaching is off (said once at
+startup) and checks only reach containers on a network it already shares.
+
+Networks are joined once per check cycle and never disconnected: an endpoint
+left behind by a departed container is harmless, while dropping a network
+something else attached would break reachability docker-updater did not create.
+A join that fails is reported as a per-container warning naming the network and
+the error, since it is the reason the probe that follows cannot connect.
+
+**It does not route between the networks it joins.** Membership of two networks
+is not a bridge between them: `ip_forward` is a per-namespace sysctl that starts
+at `0` in a container, nothing in another container routes via docker-updater,
+and Docker's own inter-network isolation rules are untouched. What each join
+does add is the other direction — docker-updater has an address and a DNS name
+on that network, so its dashboard and webhook ports are reachable from it.
 
 ### The address after an update
 
@@ -56,9 +85,9 @@ docker-updater re-resolves the address from the container it just started and
 rebuilds the URL; the port and path are unchanged, because a recreated container
 keeps the port it serves on.
 
-If the new container has no reachable address, the gate fails and the update
-rolls back. It never falls back to the pre-update address: that either burns the
-whole health budget on a dead IP or passes the gate on another service's health.
+If the new container has no IP of its own, the gate fails and the update rolls
+back. It never falls back to the pre-update address: that either burns the whole
+health budget on a dead IP or passes the gate on another service's health.
 
 This applies to every URL docker-updater builds itself — the standard endpoint,
 and the `:port/path` short form of `docker-updater.health-check.url`. An
@@ -93,11 +122,15 @@ there is one, and otherwise degrades to the grace period. Printing the
 `HEALTHCHECK` sentence for that container would tell an operator an update was
 verified when nothing verified it.
 - **Unreachable** — `cannot reach http://…/.well-known/docker-updater/health
-  (dial tcp …: connect: connection refused); … docker-updater must share a
-  network with the container …`. No answer arrived, so nothing has been learned
-  about whether the endpoint exists. Check that docker-updater can route to the
-  container — it is meant to run with `--network host` — and that
-  `docker-updater.well-known.port` names a port the container serves on.
+  (dial tcp …: connect: connection refused); … docker-updater must be attached
+  to a network the container is on …`. No answer arrived, so nothing has been
+  learned about whether the endpoint exists. docker-updater attaches itself to
+  the network, so the usual cause is the port: check that
+  `docker-updater.well-known.port` names one the container serves on. An
+  **Unattached** warning in the same cycle explains it instead.
+- **Unattached** — `cannot attach docker-updater to this container's network
+  <id>: <error>.` The join failed, so nothing is routable to that container this
+  cycle; it is retried on the next one.
 - **Undiscoverable** — `no standard update endpoints: container exposes 3 TCP
   ports (80, 443, 9000); set docker-updater.well-known.port to pick one.`
 - **Nonstandard** — `nonstandard update checks: docker-updater.health-check.url

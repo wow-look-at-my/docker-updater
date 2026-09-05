@@ -16,6 +16,14 @@ FROM docker:28-cli AS dockercli
 # CLI has a place for ~/.docker without creating it at container runtime.
 RUN mkdir -p /skel/tmp /skel/root && chmod 1777 /skel/tmp && chmod 700 /skel/root
 
+# The APE trampoline is a shell script, and it shells out -- cksum, tr, mkdir,
+# cp so far. Installing every applet name against the one static busybox costs
+# a directory of symlinks and stops the next command it needs from being
+# another failed container start. The links are relative, because this
+# directory lands somewhere else in the final image.
+RUN mkdir -p /shell && cp /bin/busybox /shell/busybox \
+    && for a in $(/shell/busybox --list); do ln -sf busybox "/shell/$a"; done
+
 FROM scratch
 
 ARG VERSION=dev
@@ -33,13 +41,24 @@ COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 # path, so `docker compose` / `docker buildx` resolve without configuration.
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
-COPY --chmod=755 build/docker-updater_linux_amd64 /docker-updater
+# An APE starts through its own shell trampoline: the file is a polyglot whose
+# header is a shell script, and the kernel cannot exec it without either a
+# binfmt handler or a shell to interpret that header. scratch ships neither, so
+# the image carries the busybox the skeleton stage already pulls.
+COPY --from=dockercli /shell /bin
+# The APE sits under /usr/local/lib and a shebang launcher takes its place at
+# the entrypoint path. A launcher the kernel can exec keeps the shell an
+# implementation detail of this image: a container recreated from an older
+# container's config still names /docker-updater, and still starts, instead of
+# exiting 126 on a bare exec.
+COPY --chmod=755 build/docker-updater /usr/local/lib/docker-updater/docker-updater
+COPY --chmod=755 scripts/image-launcher.sh /docker-updater
 
 # scratch defines no PATH, HOME, or TMPDIR: PATH lets the updater exec `docker`
 # for build-mode rebuilds; HOME points the CLI at the /root shipped above for
 # its config dir (~/.docker); TMPDIR pins temp usage to the /tmp shipped above
 # (belt and braces -- Go's os.TempDir defaults to /tmp anyway).
-ENV PATH=/usr/local/bin
+ENV PATH=/usr/local/bin:/bin
 ENV HOME=/root
 ENV TMPDIR=/tmp
 

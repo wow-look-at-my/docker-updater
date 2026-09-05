@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/wow-look-at-my/go-containers/set"
 	"strings"
 )
 
@@ -88,14 +89,14 @@ func parseBaseImageFromDockerfile(dockerfile string) string {
 	}
 
 	base := stages[len(stages)-1].base
-	seen := make(map[string]bool)
+	seen := set.New[string]()
 	for {
 		key := strings.ToLower(base)
-		if seen[key] {
+		if seen.Contains(key) {
 			// Cycle (malformed Dockerfile); stop and return what we have.
 			return base
 		}
-		seen[key] = true
+		seen.Add(key)
 		ref, ok := byName[key]
 		if !ok {
 			return base

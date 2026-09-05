@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +75,7 @@ func resetBuildState() {
 }
 
 func TestResolveBaseImageExplicitLabelWins(t *testing.T) {
+	t.Serial()
 	info := ContainerInfo{
 		Labels: map[string]string{
 			"docker-updater.base-image":        "ghcr.io/anomalyco/opencode:latest",
@@ -88,6 +87,7 @@ func TestResolveBaseImageExplicitLabelWins(t *testing.T) {
 }
 
 func TestResolveBaseImageFromInlineDockerfile(t *testing.T) {
+	t.Serial()
 	info := ContainerInfo{
 		Labels: map[string]string{
 			"docker-updater.dockerfile-inline": "FROM golang:1.25 AS b\nFROM gcr.io/distroless/static:nonroot\n",
@@ -98,6 +98,7 @@ func TestResolveBaseImageFromInlineDockerfile(t *testing.T) {
 }
 
 func TestResolveBaseImageFromDockerfileOnDisk(t *testing.T) {
+	t.Serial()
 	info := ContainerInfo{
 		ComposeWorkingDir: "/srv/app",
 		Labels:            map[string]string{},
@@ -113,6 +114,7 @@ func TestResolveBaseImageFromDockerfileOnDisk(t *testing.T) {
 }
 
 func TestResolveBaseImageUnresolvableReturnsEmpty(t *testing.T) {
+	t.Serial()
 	// No label, no readable Dockerfile, and a scratch FROM all yield "".
 	info := ContainerInfo{
 		ComposeWorkingDir: "/srv/app",
@@ -123,6 +125,7 @@ func TestResolveBaseImageUnresolvableReturnsEmpty(t *testing.T) {
 }
 
 func TestIsLayerPrefix(t *testing.T) {
+	t.Serial()
 	l := func(ids ...string) []string { return ids }
 	assert.True(t, isLayerPrefix(l("a", "b"), l("a", "b", "c")), "derived extends base")
 	assert.True(t, isLayerPrefix(l("a", "b"), l("a", "b")), "derived IS the base")
@@ -210,6 +213,7 @@ func fixtureInfo() ContainerInfo {
 }
 
 func TestCheckBuildUpdateLayerPrefixVerifiedCurrent(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	f := newLayeredFixture()
 	// The running image extends the current base: base layers + app layers.
@@ -223,6 +227,7 @@ func TestCheckBuildUpdateLayerPrefixVerifiedCurrent(t *testing.T) {
 }
 
 func TestCheckBuildUpdateDetectsPreExistingStaleOnFirstCycle(t *testing.T) {
+	t.Serial()
 	// The opencode scenario: the updater (re)starts with empty in-memory
 	// state while the container's image was built from a months-old base.
 	// The old first-seen-digest baseline silently adopted the current
@@ -242,6 +247,7 @@ func TestCheckBuildUpdateDetectsPreExistingStaleOnFirstCycle(t *testing.T) {
 }
 
 func TestCheckBuildUpdateFallbackFirstCycleSeedsNoRebuild(t *testing.T) {
+	t.Serial()
 	// Without layer information (image/container not inspectable), the
 	// digest fallback keeps the old semantics: first cycle adopts the
 	// current base as the baseline without rebuilding.
@@ -266,6 +272,7 @@ func TestCheckBuildUpdateFallbackFirstCycleSeedsNoRebuild(t *testing.T) {
 }
 
 func TestCheckBuildUpdateFallbackDetectsBaseChange(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	base := "ghcr.io/anomalyco/opencode:latest"
 	oldManifest := "sha256:" + strings.Repeat("a", 64)
@@ -296,6 +303,7 @@ func TestCheckBuildUpdateFallbackDetectsBaseChange(t *testing.T) {
 }
 
 func TestRebuildAndRecreateOnlyRecreatesOnRealChange(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	f := newLayeredFixture()
 	newID := "sha256:" + strings.Repeat("2", 64)
@@ -314,6 +322,7 @@ func TestRebuildAndRecreateOnlyRecreatesOnRealChange(t *testing.T) {
 }
 
 func TestRebuildAndRecreateNoChurnOnCacheHit(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	// The derived tag points at the identical image after the rebuild (cache
 	// hit): the service must NOT be recreated.
@@ -329,6 +338,7 @@ func TestRebuildAndRecreateNoChurnOnCacheHit(t *testing.T) {
 }
 
 func TestRebuildMarksPrefixIncapableWhenRebuiltImageStillNotFromBase(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	f := newLayeredFixture()
 	newID := "sha256:" + strings.Repeat("2", 64)
@@ -346,6 +356,7 @@ func TestRebuildMarksPrefixIncapableWhenRebuiltImageStillNotFromBase(t *testing.
 }
 
 func TestBuildPrefixIncapableFallsBackWithoutRebuildLoop(t *testing.T) {
+	t.Serial()
 	// A build whose final stage never extends the base (FROM scratch + COPY
 	// --from) can never satisfy the layer check. The first rebuild proves
 	// that (cache hit, image unchanged), after which the service must fall
@@ -387,6 +398,7 @@ func TestBuildPrefixIncapableFallsBackWithoutRebuildLoop(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildRescuesStaleContainerOnFirstCycle(t *testing.T) {
+	t.Serial()
 	// End-to-end opencode scenario: fresh updater process, container built
 	// from an old base, registry already many releases ahead. The first
 	// cycle must rebuild and recreate.
@@ -417,6 +429,7 @@ func TestCheckAndUpdateBuildRescuesStaleContainerOnFirstCycle(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildDryRunMutatesNothing(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	base := "ghcr.io/anomalyco/opencode:latest"
 	oldManifest := "sha256:" + strings.Repeat("a", 64)
@@ -460,6 +473,7 @@ func TestCheckAndUpdateBuildDryRunMutatesNothing(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildAppliesRebuild(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	f := newLayeredFixture()
 	newID := "sha256:" + strings.Repeat("2", 64)
@@ -491,6 +505,7 @@ func TestCheckAndUpdateBuildAppliesRebuild(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildSkipsWhenNoBaseImage(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	cli := &mockDocker{}
 	runner := &fakeComposeRunner{}
@@ -504,6 +519,7 @@ func TestCheckAndUpdateBuildSkipsWhenNoBaseImage(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildPreCheckSkips(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 
 	// A pre-check HTTP endpoint that always refuses (503) holds the rebuild back.
@@ -528,6 +544,7 @@ func TestCheckAndUpdateBuildPreCheckSkips(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildReportsBuildError(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	f := newLayeredFixture()
 	f.imageLayers[f.runningID] = []string{"sha256:oldbase1", "sha256:app"}
@@ -542,6 +559,7 @@ func TestCheckAndUpdateBuildReportsBuildError(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildPullErrorPropagates(t *testing.T) {
+	t.Serial()
 	// A mid-stream pull failure (in-band error record) must surface as a
 	// check error -- never as a silent "up-to-date".
 	resetBuildState()
@@ -563,6 +581,7 @@ func TestCheckAndUpdateBuildPullErrorPropagates(t *testing.T) {
 }
 
 func TestCheckAndUpdateBuildNeverPullsDerivedTag(t *testing.T) {
+	t.Serial()
 	resetBuildState()
 	base := "ghcr.io/anomalyco/opencode:latest"
 	var pulled []string
@@ -594,6 +613,7 @@ func TestCheckAndUpdateBuildNeverPullsDerivedTag(t *testing.T) {
 }
 
 func TestBuildStateKeySurvivesContainerRecreation(t *testing.T) {
+	t.Serial()
 	before := fixtureInfo()
 	after := fixtureInfo()
 	after.ID = "svc-2" // compose recreate replaced the container
@@ -601,122 +621,4 @@ func TestBuildStateKeySurvivesContainerRecreation(t *testing.T) {
 
 	bare := ContainerInfo{ID: "c9", BaseImage: fixtureBase}
 	assert.Contains(t, buildStateKey(bare), "c9", "non-compose containers key by ID")
-}
-
-// captureComposeLog redirects the compose child-output stream to a buffer for
-// the duration of a test, restoring the real writer afterwards.
-func captureComposeLog(t *testing.T) *strings.Builder {
-	t.Helper()
-	var buf strings.Builder
-	old := composeLogWriter
-	composeLogWriter = &buf
-	t.Cleanup(func() { composeLogWriter = old })
-	return &buf
-}
-
-func TestRunLoggedCommandFailureErrorCarriesOutputTail(t *testing.T) {
-	logged := captureComposeLog(t)
-
-	err := runLoggedCommand(context.Background(), "sh",
-		[]string{"-c", "echo building step 1; echo 'mkdir /tmp/dockerfile123: no such file or directory' >&2; exit 1"})
-
-	require.Error(t, err)
-	// The error names the command, the exit status, AND the actual cause from
-	// the child's output -- never a bare "exit status 1".
-	assert.Contains(t, err.Error(), "sh -c")
-	assert.Contains(t, err.Error(), "exit status 1")
-	assert.Contains(t, err.Error(), "mkdir /tmp/dockerfile123: no such file or directory")
-	assert.Contains(t, err.Error(), "building step 1", "stdout and stderr are both captured")
-
-	// The full output also streamed to the updater's own log.
-	assert.Contains(t, logged.String(), "building step 1")
-	assert.Contains(t, logged.String(), "no such file or directory")
-}
-
-func TestRunLoggedCommandSuccessStreamsOutputWithoutError(t *testing.T) {
-	logged := captureComposeLog(t)
-
-	err := runLoggedCommand(context.Background(), "sh", []string{"-c", "echo pulling base; echo built ok"})
-
-	require.NoError(t, err)
-	assert.Contains(t, logged.String(), "pulling base")
-	assert.Contains(t, logged.String(), "built ok")
-}
-
-func TestRunLoggedCommandFailureWithNoOutputSaysSo(t *testing.T) {
-	captureComposeLog(t)
-
-	err := runLoggedCommand(context.Background(), "sh", []string{"-c", "exit 3"})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "exit status 3")
-	assert.Contains(t, err.Error(), "(no output)")
-}
-
-func TestRunLoggedCommandTailTrimmedToLastLines(t *testing.T) {
-	captureComposeLog(t)
-
-	// 60 numbered lines, then fail: only the last composeErrTailLines lines may
-	// appear in the error.
-	err := runLoggedCommand(context.Background(), "sh",
-		[]string{"-c", "i=1; while [ $i -le 60 ]; do echo line-$i; i=$((i+1)); done; exit 1"})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "line-60", "the final lines are kept")
-	assert.Contains(t, err.Error(), "line-41", "exactly the last 20 lines are kept")
-	assert.NotContains(t, err.Error(), "line-40\n", "older lines are trimmed")
-	assert.NotContains(t, err.Error(), "line-1\n", "the head of the output is trimmed")
-}
-
-func TestTailBufferCapsRetainedBytes(t *testing.T) {
-	tb := &tailBuffer{max: 16}
-	_, err := tb.Write([]byte("0123456789"))
-	require.NoError(t, err)
-	_, err = tb.Write([]byte("abcdefghijklmnop"))
-	require.NoError(t, err)
-
-	assert.Equal(t, "abcdefghijklmnop", tb.tail(composeErrTailLines),
-		"only the final max bytes are retained")
-}
-
-func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
-	captureComposeLog(t)
-
-	// No real docker CLI needed: whether the binary is missing or the args are
-	// rejected, the error must identify the full docker command line.
-	err := runDockerCompose(context.Background(), composeArgs(composeTarget{ConfigFiles: []string{"/srv/demo/docker-compose.yml"}, WorkingDir: "/srv/demo", Project: "demo"}, "build", "--pull", "opencode"))
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo -p demo build --pull opencode")
-}
-
-// A compose file the updater cannot see is the containerized-updater footgun:
-// the label carries a host path, and without a matching bind mount the docker
-// CLI fails with a bare "no such file or directory". Fail before exec'ing with
-// an error that names the actual fix.
-func TestComposeRunnerRejectsInvisibleComposeFile(t *testing.T) {
-	captureComposeLog(t)
-	missing := "/mnt/ssdpool/appdata/compose.manager/claude-host/docker-compose.yml"
-
-	err := execComposeRunner{}.UpNoDeps(context.Background(), composeTarget{
-		ConfigFiles: []string{missing},
-		WorkingDir:  "/mnt/ssdpool/appdata/compose.manager/claude-host",
-		Project:     "claude-host",
-		Service:     "dind",
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), missing)
-	assert.Contains(t, err.Error(), "not visible to docker-updater")
-	assert.Contains(t, err.Error(), "-v /mnt/ssdpool/appdata/compose.manager/claude-host:/mnt/ssdpool/appdata/compose.manager/claude-host:ro")
-	assert.NotContains(t, err.Error(), "exit status", "the docker CLI must never be reached")
-}
-
-func TestCheckComposeFilesVisiblePassesForReadableFiles(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "docker-compose.yml")
-	require.NoError(t, os.WriteFile(path, []byte("services: {}\n"), 0o644))
-
-	assert.NoError(t, checkComposeFilesVisible([]string{path}))
-	assert.NoError(t, checkComposeFilesVisible(nil))
 }

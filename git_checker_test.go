@@ -12,6 +12,7 @@ import (
 )
 
 func TestParseInfoRefs(t *testing.T) {
+	t.Serial()
 	response := strings.Join([]string{
 		"001e# service=git-upload-pack",
 		"0000",
@@ -26,6 +27,7 @@ func TestParseInfoRefs(t *testing.T) {
 }
 
 func TestParseInfoRefsDev(t *testing.T) {
+	t.Serial()
 	response := strings.Join([]string{
 		"001e# service=git-upload-pack",
 		"0000",
@@ -40,6 +42,7 @@ func TestParseInfoRefsDev(t *testing.T) {
 }
 
 func TestParseInfoRefsNotFound(t *testing.T) {
+	t.Serial()
 	response := strings.Join([]string{
 		"001e# service=git-upload-pack",
 		"0000",
@@ -52,11 +55,13 @@ func TestParseInfoRefsNotFound(t *testing.T) {
 }
 
 func TestParseInfoRefsEmpty(t *testing.T) {
+	t.Serial()
 	_, err := parseInfoRefs(strings.NewReader(""), "refs/heads/main")
 	require.NotNil(t, err)
 }
 
 func TestParseInfoRefsShortLines(t *testing.T) {
+	t.Serial()
 	// Lines too short to have valid pkt-line prefix.
 	response := "ab\ncd\n"
 	_, err := parseInfoRefs(strings.NewReader(response), "refs/heads/main")
@@ -64,6 +69,7 @@ func TestParseInfoRefsShortLines(t *testing.T) {
 }
 
 func TestParseInfoRefsInvalidHexPrefix(t *testing.T) {
+	t.Serial()
 	// Lines with non-hex prefix should be skipped.
 	response := "zzzz some content here\n0000\n"
 	_, err := parseInfoRefs(strings.NewReader(response), "refs/heads/main")
@@ -71,6 +77,7 @@ func TestParseInfoRefsInvalidHexPrefix(t *testing.T) {
 }
 
 func TestParseInfoRefsSingleFieldPayload(t *testing.T) {
+	t.Serial()
 	// Payload with only one field (no ref name) should be skipped.
 	response := "0020ab3def1234567890ab3def1234567890ab3def12\n0000\n"
 	_, err := parseInfoRefs(strings.NewReader(response), "refs/heads/main")
@@ -78,6 +85,7 @@ func TestParseInfoRefsSingleFieldPayload(t *testing.T) {
 }
 
 func TestParseInfoRefsShortSHA(t *testing.T) {
+	t.Serial()
 	// SHA too short (< 40 chars) should be skipped.
 	response := "001fshort refs/heads/main\n0000\n"
 	_, err := parseInfoRefs(strings.NewReader(response), "refs/heads/main")
@@ -85,6 +93,7 @@ func TestParseInfoRefsShortSHA(t *testing.T) {
 }
 
 func TestFetchRemoteRef(t *testing.T) {
+	t.Serial()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/info/refs" {
 			http.NotFound(w, r)
@@ -103,6 +112,7 @@ func TestFetchRemoteRef(t *testing.T) {
 }
 
 func TestFetchRemoteRefNotFound(t *testing.T) {
+	t.Serial()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -113,6 +123,7 @@ func TestFetchRemoteRefNotFound(t *testing.T) {
 }
 
 func TestCheckGitUpdateFirstRun(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -139,6 +150,7 @@ func TestCheckGitUpdateFirstRun(t *testing.T) {
 }
 
 func TestCheckGitUpdateWithServer(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -171,6 +183,7 @@ func TestCheckGitUpdateWithServer(t *testing.T) {
 }
 
 func TestCheckGitUpdateDetectsChange(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -209,6 +222,7 @@ func TestCheckGitUpdateDetectsChange(t *testing.T) {
 }
 
 func TestCheckGitUpdateNoRepo(t *testing.T) {
+	t.Serial()
 	info := ContainerInfo{
 		ID:   "no-repo",
 		Name: "no-repo",
@@ -220,6 +234,7 @@ func TestCheckGitUpdateNoRepo(t *testing.T) {
 }
 
 func TestShortID(t *testing.T) {
+	t.Serial()
 	tests := []struct {
 		input string
 		want  string

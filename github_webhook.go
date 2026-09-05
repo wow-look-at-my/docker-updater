@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/wow-look-at-my/go-containers/set"
 )
 
 // maxWebhookBody caps how much of a webhook request body we read. GitHub
@@ -34,14 +36,14 @@ type githubWebhookServer struct {
 	// "namespace/name"). When non-empty, only matching packages trigger a check
 	// -- the knob for an org-level webhook that fires for every package. Empty
 	// means any package event triggers.
-	allow   map[string]struct{}
+	allow   set.Set[string]
 	trigger chan<- struct{}
 }
 
 func newGitHubWebhookServer(addr, secret string, packages []string, trigger chan<- struct{}) *githubWebhookServer {
-	allow := make(map[string]struct{}, len(packages))
+	allow := set.New[string](len(packages))
 	for _, p := range packages {
-		allow[strings.ToLower(p)] = struct{}{}
+		allow.Add(strings.ToLower(p))
 	}
 	return &githubWebhookServer{
 		addr:    addr,
@@ -214,16 +216,14 @@ type packageFields struct {
 // name fails open: an authenticated delivery we can't classify still triggers,
 // since a missed trigger only delays the update to the next interval.
 func (s *githubWebhookServer) allowed(p packageInfo) bool {
-	if len(s.allow) == 0 || p.name == "" {
+	if s.allow.IsEmpty() || p.name == "" {
 		return true
 	}
-	if _, ok := s.allow[strings.ToLower(p.name)]; ok {
+	if s.allow.Contains(strings.ToLower(p.name)) {
 		return true
 	}
 	if full := p.fullName(); full != p.name {
-		if _, ok := s.allow[strings.ToLower(full)]; ok {
-			return true
-		}
+		return s.allow.Contains(strings.ToLower(full))
 	}
 	return false
 }

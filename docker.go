@@ -416,6 +416,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 	// Update the image in the config.
 	config := inspect.Config
 	config.Image = newImage
+	clearInheritedDefaultsFor(ctx, cli, config, oldImageID, info.Name)
 
 	hostConfig := inspect.HostConfig
 
@@ -529,6 +530,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 
 	config := inspect.Config
 	config.Image = newImage
+	clearInheritedDefaultsFor(ctx, cli, config, inspect.Image, info.Name)
 
 	hostConfig := inspect.HostConfig
 	hostConfig.PortBindings = nil

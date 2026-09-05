@@ -10,7 +10,7 @@ docker-updater keeps running containers on their newest build. It watches the co
 
 ## What a replacement does
 
-The updater creates the new container from the old one's configuration, with the new image. It first clears the values the old image supplied, so the new image supplies its own. A rolling update starts the replacement beside the old container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed, and the previous image comes back.
+The updater creates the new container from the old one's configuration, with the new image. It first clears the values the old image supplied, so the new image supplies its own. A rolling update starts the replacement beside the old container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed. The previous image comes back.
 
 ## Configuration
 

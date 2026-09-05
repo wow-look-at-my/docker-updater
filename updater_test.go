@@ -23,6 +23,7 @@ import (
 )
 
 func TestRunUpdateCheckNoContainers(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{}
 
 	cfg := Config{Label: "docker-updater.enable"}
@@ -31,6 +32,7 @@ func TestRunUpdateCheckNoContainers(t *testing.T) {
 }
 
 func TestRunUpdateCheckListError(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
 			return nil, errors.New("connection refused")
@@ -43,6 +45,7 @@ func TestRunUpdateCheckListError(t *testing.T) {
 }
 
 func TestRunUpdateCheckImageUpToDate(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
 			return []types.Container{
@@ -81,6 +84,7 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 }
 
 func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
+	t.Serial()
 	// When the pull fetches genuinely new content -- the tag resolves to a
 	// different local image after pulling -- result.Pulled must be true. Dry-run
 	// keeps the test on the pull/fetch path without the recreate handoff.
@@ -113,6 +117,7 @@ func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
 }
 
 func TestRunUpdateCheckImageDryRun(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
 			return []types.Container{
@@ -155,6 +160,7 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 }
 
 func TestCheckAndUpdateImageUpdate(t *testing.T) {
+	t.Serial()
 	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
@@ -206,6 +212,7 @@ func TestCheckAndUpdateImageUpdate(t *testing.T) {
 }
 
 func TestCheckAndUpdateGitFirstRun(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -248,6 +255,7 @@ func TestCheckAndUpdateGitFirstRun(t *testing.T) {
 }
 
 func TestCheckAndUpdateGitNoRepo(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -267,6 +275,7 @@ func TestCheckAndUpdateGitNoRepo(t *testing.T) {
 }
 
 func TestCheckAndUpdateGitDryRun(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -306,6 +315,7 @@ func TestCheckAndUpdateGitDryRun(t *testing.T) {
 }
 
 func TestRunUpdateCheckUnknownMode(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
 			return []types.Container{
@@ -333,6 +343,7 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 }
 
 func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
+	t.Serial()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -367,6 +378,7 @@ func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {
 }
 
 func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
+	t.Serial()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -425,6 +437,7 @@ func TestCheckAndUpdateImagePreCheckPasses(t *testing.T) {
 }
 
 func TestCheckAndUpdateGitPreCheckFails(t *testing.T) {
+	t.Serial()
 	gitRefStore.Lock()
 	gitRefStore.refs = make(map[string]string)
 	gitRefStore.Unlock()
@@ -475,6 +488,7 @@ func TestCheckAndUpdateGitPreCheckFails(t *testing.T) {
 }
 
 func TestRunLoop(t *testing.T) {
+	t.Serial()
 	cli := &mockDocker{}
 
 	cfg := Config{
@@ -516,6 +530,7 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 // TestRunLoopWebhookTrigger proves a webhook trigger runs a check immediately,
 // without waiting for the (here, deliberately huge) interval to elapse.
 func TestRunLoopWebhookTrigger(t *testing.T) {
+	t.Serial()
 	var checks atomic.Int64
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {

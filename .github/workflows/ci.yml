@@ -86,16 +86,20 @@ jobs:
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
         with:
           project: dats
-      - name: Pull the image that was just published
+      # Fetching is setup, not an assertion. The suite below is what STARTS the
+      # image: its first case runs the container, waits for the update loop to
+      # log, and asserts the container is running with no restarts.
+      - name: Fetch the published image
         env:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          image=ghcr.io/wow-look-at-my/docker-updater:latest
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull "$image"
-          echo "DU_IMAGE=$image" >> "$GITHUB_ENV"
-      - run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+          docker pull ghcr.io/wow-look-at-my/docker-updater:latest
+      - name: Start the published image and assert it reaches the update loop
+        env:
+          DU_IMAGE: ghcr.io/wow-look-at-my/docker-updater:latest
+        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
 
   publish-buildhost:
     needs: test

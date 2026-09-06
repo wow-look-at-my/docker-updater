@@ -17,10 +17,16 @@ FROM docker:28-cli AS dockercli
 RUN mkdir -p /skel/tmp /skel/root && chmod 1777 /skel/tmp && chmod 700 /skel/root
 
 # The APE trampoline is a shell script, and it shells out -- cksum, tr, mkdir,
-# cp so far. Installing every applet name against the one static busybox costs
-# a directory of symlinks and stops the next command it needs from being
-# another failed container start. The links are relative, because this
-# directory lands somewhere else in the final image.
+# cp so far. A symlink per applet stops the next command it needs from being
+# another failed container start. The links are relative, because this directory
+# lands somewhere else in the final image.
+#
+# The busybox MUST be static. The final image is scratch and has no /lib, so a
+# busybox that names an ELF interpreter cannot start, and docker reports that
+# ENOENT against the ENTRYPOINT path instead of against the shell. The official
+# busybox image is static-pie. Alpine's is a PIE against
+# /lib/ld-musl-x86_64.so.1, so the docker CLI image above cannot supply it.
+FROM busybox:stable-musl AS shell
 RUN mkdir -p /shell && cp /bin/busybox /shell/busybox \
     && for a in $(/shell/busybox --list); do ln -sf busybox "/shell/$a"; done
 
@@ -44,8 +50,8 @@ COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/l
 # An APE starts through its own shell trampoline: the file is a polyglot whose
 # header is a shell script, and the kernel cannot exec it without either a
 # binfmt handler or a shell to interpret that header. scratch ships neither, so
-# the image carries the busybox the skeleton stage already pulls.
-COPY --from=dockercli /shell /bin
+# the image carries the busybox of the shell stage above.
+COPY --from=shell /shell /bin
 # The APE sits under /usr/local/lib and a shebang launcher takes its place at
 # the entrypoint path. A launcher the kernel can exec keeps the shell an
 # implementation detail of this image: a container recreated from an older
@@ -61,6 +67,12 @@ COPY --chmod=755 scripts/image-launcher.sh /docker-updater
 ENV PATH=/usr/local/bin:/bin
 ENV HOME=/root
 ENV TMPDIR=/tmp
+
+# This command runs in the final rootfs, so it proves the shipped shell loads
+# with no /lib present, and that both halves of the entrypoint are executable.
+# A shell that cannot start makes every container start fail, and the build is
+# the last place that failure is cheap.
+RUN ["/bin/sh", "-c", "test -x /docker-updater && test -x /usr/local/lib/docker-updater/docker-updater"]
 
 # Web dashboard / JSON API (DOCKER_UPDATER_DASHBOARD_ADDR, default :8080).
 EXPOSE 8080

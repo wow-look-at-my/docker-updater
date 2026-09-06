@@ -40,8 +40,32 @@ jobs:
       # Runs against the compiled dashboard.js verified above, not source nobody ships.
       - run: npm test
 
-  publish-ghcr:
+  # Publishing waits on this. An image that cannot start is the one defect the
+  # unit tests structurally cannot see: they never build the image and never
+  # exec anything inside it.
+  image-e2e:
     needs: test
+    runs-on: ${{ vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+        with:
+          project: dats
+      # go-toolchain hands build/ over through the org cache, and the image
+      # copies the binary from there.
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: go-build-test.broot
+          path: build/
+      - run: chmod +x build/docker-updater
+      # Building the image is not an assertion. Every assertion is in the suite.
+      - run: docker build -t docker-updater:ci .
+      - env:
+          DU_IMAGE: docker-updater:ci
+        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+
+  publish-ghcr:
+    needs: [test, image-e2e]
     uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
 
   publish-buildhost:

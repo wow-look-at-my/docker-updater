@@ -66,6 +66,37 @@ jobs:
     needs: [test, image-e2e]
     uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
 
+  # image-e2e starts an image it built ITSELF and then throws away. publish-ghcr
+  # runs a second, independent build and pushes that one, so the image the fleet
+  # pulls is one no job has ever started. Every base here is a floating tag, and
+  # the outage this suite was written for was a busybox that stopped being
+  # static: the two builds pull it minutes apart, so image-e2e can pass on one
+  # busybox while the push ships another. This runs the same suite against the
+  # bytes that actually shipped.
+  published-image-e2e:
+    needs: publish-ghcr
+    if: github.ref == 'refs/heads/master'
+    # Same reason as image-e2e: a self-hosted runner carries an APE binfmt handler, which makes a bare exec succeed and hides the defect.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+        with:
+          project: dats
+      - name: Pull the image that was just published
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          image=ghcr.io/wow-look-at-my/docker-updater:latest
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$image"
+          echo "DU_IMAGE=$image" >> "$GITHUB_ENV"
+      - run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+
   publish-buildhost:
     needs: test
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}

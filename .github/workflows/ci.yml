@@ -43,7 +43,8 @@ jobs:
   # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:
     needs: test
-    runs-on: ${{ vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
+    # A self-hosted runner carries a registered APE binfmt handler, which makes the kernel run any APE through a shell and masks this defect.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master

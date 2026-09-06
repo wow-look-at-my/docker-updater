@@ -32,7 +32,21 @@ type ContainerStatus struct {
 	Skipped    bool   // the most recent update was skipped by a pre-check
 	SkipReason string
 	DryRun     bool
+
+	// StuckCycles counts the consecutive cycles that found an update and did
+	// not apply it. StuckSince is when that run began.
+	//
+	// One failed update is ordinary. The same one every cycle for weeks is a
+	// deployment frozen on the version it already runs, and the per-cycle log
+	// line reads the same on the first cycle as on the thousandth. Counting the
+	// run is what separates the two.
+	StuckCycles int
+	StuckSince  time.Time
 }
+
+// Stuck reports whether this container has failed to take an available update
+// for more than one cycle.
+func (s ContainerStatus) Stuck() bool { return s.StuckCycles > 1 }
 
 // Store holds the latest snapshot of the updater's per-container knowledge. It
 // is safe for concurrent use by the update loop (writer) and dashboard server
@@ -81,6 +95,21 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.UpdateAvailable = false
 		st.AvailableRef = ""
 		st.CurrentRef = shortRef(r.OldRef)
+
+		// An update that was found and not applied continues the run. Anything
+		// else ends it, including a cycle with nothing to apply: the version
+		// the container runs is then the one that was offered.
+		stuck := r.Error != nil || r.Skipped
+		switch {
+		case !stuck:
+			st.StuckCycles = 0
+			st.StuckSince = time.Time{}
+		case st.StuckCycles == 0:
+			st.StuckCycles = 1
+			st.StuckSince = r.CheckedAt
+		default:
+			st.StuckCycles++
+		}
 
 		switch {
 		case r.Error != nil:

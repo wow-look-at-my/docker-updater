@@ -290,7 +290,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 	runCheck := func() {
 		results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
 		store.Record(results, time.Now())
-		reportStuck(store.Snapshot(), time.Now())
+		reportStuck(store.Snapshot(), time.Now(), nil)
 		sendWebhookNotifications(cfg, results)
 	}
 

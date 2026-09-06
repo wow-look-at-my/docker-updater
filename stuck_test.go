@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"errors"
-	"log"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
@@ -96,12 +94,13 @@ func TestReportStuckNamesTheAgeAndTheReason(t *testing.T) {
 	s.Record([]UpdateResult{failedResult("buildhost", start)}, start)
 	s.Record([]UpdateResult{failedResult("buildhost", start)}, start)
 
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(log.Writer()) })
-	reportStuck(s.Snapshot(), start.Add(72*time.Hour))
+	var lines []string
+	reportStuck(s.Snapshot(), start.Add(72*time.Hour), func(format string, v ...any) {
+		lines = append(lines, fmt.Sprintf(format, v...))
+	})
 
-	line := buf.String()
+	require.Len(t, lines, 1)
+	line := lines[0]
 	assert.Contains(t, line, "buildhost is STUCK")
 	assert.Contains(t, line, "newnewnewnew")
 	assert.Contains(t, line, "72h0m0s")
@@ -119,10 +118,10 @@ func TestReportStuckSaysNothingWhenHealthy(t *testing.T) {
 		CheckedAt: now,
 	}}, now)
 
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	t.Cleanup(func() { log.SetOutput(log.Writer()) })
-	reportStuck(s.Snapshot(), now)
+	var lines []string
+	reportStuck(s.Snapshot(), now, func(format string, v ...any) {
+		lines = append(lines, fmt.Sprintf(format, v...))
+	})
 
-	assert.Empty(t, strings.TrimSpace(buf.String()))
+	assert.Empty(t, lines)
 }

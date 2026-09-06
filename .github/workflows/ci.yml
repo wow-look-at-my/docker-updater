@@ -40,9 +40,7 @@ jobs:
       # Runs against the compiled dashboard.js verified above, not source nobody ships.
       - run: npm test
 
-  # Publishing waits on this. An image that cannot start is the one defect the
-  # unit tests structurally cannot see: they never build the image and never
-  # exec anything inside it.
+  # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:
     needs: test
     runs-on: ${{ vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
@@ -51,8 +49,7 @@ jobs:
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
         with:
           project: dats
-      # go-toolchain hands build/ over through the org cache, and the image
-      # copies the binary from there.
+      # go-toolchain hands build/ over through the org cache, and the image copies the binary from there.
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
           name: go-build-test.broot

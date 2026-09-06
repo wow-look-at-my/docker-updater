@@ -110,3 +110,16 @@ tests:
 			- 'entrypoint=["/docker-updater"]'
 			- "docker-updater"
 			- "starting"
+
+	# The launcher must forward its arguments. A self-update spawns a detached
+	# helper as `/docker-updater finish-self-update ...`, and a launcher that
+	# dropped "$@" would start the update loop instead, so the updater could
+	# never replace its own container.
+	- desc: the launcher forwards arguments to the hidden self-update subcommand
+	  cmd: |
+		set -eu
+		. {shared.env}
+		docker run --rm "$IMAGE" finish-self-update 2>&1 | head -n 1
+	  outputs:
+		stdout:
+			- "finish-self-update: --target and --image are required"

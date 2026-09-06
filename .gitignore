@@ -2,3 +2,8 @@
 /build/
 /docker-updater
 /dashboard/node_modules/
+# tsc output from dashboard.ts. A committed copy is a second source of truth
+# that drifts, and nothing marks the moment it stops matching. dashboard.go
+# embeds it, so `npm --prefix dashboard ci && npm --prefix dashboard run build`
+# comes before any Go build.
+/dashboard/dashboard.js

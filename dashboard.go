@@ -16,6 +16,14 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
+// dashboard.js is tsc output from dashboard.ts, and it is gitignored: a
+// committed copy is a second source of truth that drifts, with nothing to mark
+// the moment it stops matching. The embed below needs it on disk, so generate
+// produces it and a build without generate fails to compile rather than
+// shipping whatever happened to be lying there.
+//go:generate npm --prefix dashboard ci
+//go:generate npm --prefix dashboard run build
+
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 

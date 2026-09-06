@@ -137,8 +137,14 @@ func newAuthResolver(cfg *dockerConfig) AuthResolver {
 }
 
 // listMonitoredContainers returns containers that have the opt-in label set to "true".
+//
+// All: true, because Docker lists only RUNNING containers by default and a
+// crash-looping container is the one that most needs a new image. Without it the
+// sweep cannot see such a container at all: it is never checked, never pulled
+// and never recreated, so a container broken by its own image stays broken until
+// a human notices. go-s3-server sat in that loop for 29 hours.
 func listMonitoredContainers(ctx context.Context, cli DockerClient, label string) ([]ContainerInfo, error) {
-	containers, err := cli.ContainerList(ctx, container.ListOptions{})
+	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil, fmt.Errorf("listing containers: %w", err)
 	}

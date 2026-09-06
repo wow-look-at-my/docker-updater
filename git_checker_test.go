@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// refAdvert writes the git smart-HTTP advertisement fetchRemoteRef parses: the
+// service line, a flush, one ref, and a final flush. It is one write, because a
+// run of them is a document spelled across statements nobody can read as one.
+func refAdvert(w io.Writer, sha string) {
+	fmt.Fprintf(w, "001e# service=git-upload-pack\n0000\n003f%s refs/heads/main\n0000\n", sha)
+}
+
+// testRefSHA is the ref every advertisement below carries unless the test is
+// about the ref moving.
+const testRefSHA = "ab3def1234567890ab3def1234567890ab3def12"
 
 func TestParseInfoRefs(t *testing.T) {
 	t.Serial()
@@ -99,16 +111,13 @@ func TestFetchRemoteRef(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprintf(w, "001e# service=git-upload-pack\n")
-		fmt.Fprintf(w, "0000\n")
-		fmt.Fprintf(w, "003fab3def1234567890ab3def1234567890ab3def12 refs/heads/main\n")
-		fmt.Fprintf(w, "0000\n")
+		refAdvert(w, testRefSHA)
 	}))
 	defer server.Close()
 
 	sha, err := fetchRemoteRef(server.URL, "refs/heads/main")
 	require.Nil(t, err)
-	assert.Equal(t, "ab3def1234567890ab3def1234567890ab3def12", sha)
+	assert.Equal(t, testRefSHA, sha)
 }
 
 func TestFetchRemoteRefNotFound(t *testing.T) {
@@ -156,10 +165,7 @@ func TestCheckGitUpdateWithServer(t *testing.T) {
 	gitRefStore.Unlock()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "001e# service=git-upload-pack\n")
-		fmt.Fprintf(w, "0000\n")
-		fmt.Fprintf(w, "003fab3def1234567890ab3def1234567890ab3def12 refs/heads/main\n")
-		fmt.Fprintf(w, "0000\n")
+		refAdvert(w, testRefSHA)
 	}))
 	defer server.Close()
 
@@ -191,14 +197,11 @@ func TestCheckGitUpdateDetectsChange(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		callCount++
-		sha := "ab3def1234567890ab3def1234567890ab3def12"
+		sha := testRefSHA
 		if callCount > 1 {
 			sha = "ff3def1234567890ff3def1234567890ff3def12"
 		}
-		fmt.Fprintf(w, "001e# service=git-upload-pack\n")
-		fmt.Fprintf(w, "0000\n")
-		fmt.Fprintf(w, "003f%s refs/heads/main\n", sha)
-		fmt.Fprintf(w, "0000\n")
+		refAdvert(w, sha)
 	}))
 	defer server.Close()
 

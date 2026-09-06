@@ -17,6 +17,18 @@ shared:
 			set -eu
 			WORK="$(dirname "$ENV_FILE")"
 			test -n "${DU_IMAGE:-}" || { echo "DU_IMAGE is not set" >&2; exit 1; }
+			# A registered APE binfmt handler makes the kernel run any APE
+			# through a shell, so a bare exec of one succeeds and these tests
+			# stop being able to fail. The handler is host-wide and containers
+			# inherit it, so refuse to report a green nobody earned.
+			for h in /proc/sys/fs/binfmt_misc/*; do
+				case "${h##*/}" in status|register|'*') continue ;; esac
+				if grep -qi '^magic 4d5a714670443d27$' "$h" 2>/dev/null &&
+					grep -q '^enabled$' "$h" 2>/dev/null; then
+					echo "an APE binfmt handler is registered at $h, so these tests would prove nothing; run this job without one" >&2
+					exit 1
+				fi
+			done
 			mkdir -p "$WORK/rootfs"
 			cid="$(docker create "$DU_IMAGE")"
 			docker export "$cid" | tar -x -C "$WORK/rootfs"

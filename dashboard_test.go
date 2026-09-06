@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -441,8 +442,21 @@ func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
 		"function expandedGroups",        // collapsed sections are part of that state
 		"function warningLines",          // per-container configuration warnings
 	} {
-		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `cd dashboard && npm run build` and commit the result", fn)
+		assert.True(t, strings.Contains(js, fn), "compiled dashboard.js is missing %q — run `npm --prefix dashboard run build`", fn)
 	}
+}
+
+// dashboard.js is tsc output. A committed copy is a second source of truth: it
+// drifts from dashboard.ts, and nothing marks the moment it stops matching. It
+// is gitignored, and this is what keeps it that way — a `git add -f` puts the
+// stale copy back and every surface still reports success.
+func TestDashboardJSIsNotCommitted(t *testing.T) {
+	out, err := exec.Command("git", "ls-files", "dashboard/dashboard.js").Output()
+	if err != nil {
+		t.Skipf("git is unavailable here, so this cannot be checked: %v", err)
+	}
+	assert.Empty(t, strings.TrimSpace(string(out)),
+		"dashboard/dashboard.js is tracked; it is tsc output. Run `git rm --cached dashboard/dashboard.js` and keep it gitignored")
 }
 
 // TestDashboardCopyButtonsWired pins the ids the copy buttons are wired by to

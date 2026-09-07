@@ -157,6 +157,72 @@ func TestClearInheritedDefaultsForReportsAnUninspectableImage(t *testing.T) {
 // The whole path, as the deployment runs it: a container whose entrypoint came
 // from the image it was created from must not carry that entrypoint onto the
 // replacement.
+// The clearing above only drops a value the PRECEDING image supplied. A value
+// inherited from an older ancestor matches no later image, so it is pinned for
+// good, and a replacement that cannot exec it dies every cycle forever. This is
+// how a buildhost container carrying a pre-launcher entrypoint sat on one image
+// for hours: the updater rebuilt it, watched it exit, and rebuilt it again.
+func TestRollingUpdateRetriesWithoutAStaleEntrypointThatCannotExec(t *testing.T) {
+	t.Serial()
+	var creates []*container.Config
+
+	inspectCount := 0
+	cli := &mockDocker{
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			inspectCount++
+			if inspectCount == 1 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						Image:      "sha256:olddigest",
+						HostConfig: &container.HostConfig{},
+					},
+					Config: &container.Config{
+						Image:      "buildhost:latest",
+						Entrypoint: []string{"buildhost"},
+					},
+					NetworkSettings: &types.NetworkSettings{
+						Networks: map[string]*network.EndpointSettings{},
+					},
+				}, nil
+			}
+			if len(creates) < 2 {
+				return types.ContainerJSON{
+					ContainerJSONBase: &types.ContainerJSONBase{
+						State: &types.ContainerState{ExitCode: exitNotExecutable},
+					},
+				}, nil
+			}
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{
+					State: &types.ContainerState{
+						Running: true,
+						Health:  &types.Health{Status: "healthy"},
+					},
+				},
+			}, nil
+		},
+		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
+			// The launcher spelling. The recorded entrypoint predates it, so the
+			// clearing finds no match and leaves the stale value in place.
+			return types.ImageInspect{Config: &container.Config{
+				Entrypoint: []string{"/usr/local/bin/buildhost"},
+			}}, nil, nil
+		},
+		containerCreateFn: func(_ context.Context, config *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+			seen := *config
+			creates = append(creates, &seen)
+			return container.CreateResponse{ID: "new123456789"}, nil
+		},
+	}
+
+	info := ContainerInfo{ID: "old123456789", Name: "buildhost", Image: "buildhost:latest", Rolling: true}
+	require.NoError(t, rollingUpdateContainer(context.Background(), cli, info, "buildhost:latest"))
+
+	require.Len(t, creates, 2, "the first attempt keeps the recorded entrypoint, the retry drops it")
+	assert.Equal(t, []string{"buildhost"}, []string(creates[0].Entrypoint))
+	assert.Nil(t, creates[1].Entrypoint, "the retry must take the new image's own entrypoint")
+}
+
 func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	var created *container.Config

@@ -557,20 +557,36 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	nextName := info.Name + "-next"
 	log.Printf("container %s: starting rolling update with image %s", info.Name, newImage)
 
-	created, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, nextName)
-	if err != nil {
-		return fmt.Errorf("creating next container %s: %w", nextName, err)
-	}
+	var created container.CreateResponse
+	for attempt := 0; ; attempt++ {
+		var err error
+		created, err = cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, nextName)
+		if err != nil {
+			return fmt.Errorf("creating next container %s: %w", nextName, err)
+		}
 
-	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
-		return fmt.Errorf("starting next container %s: %w", nextName, err)
-	}
+		if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+			cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+			return fmt.Errorf("starting next container %s: %w", nextName, err)
+		}
 
-	if err := waitPostUpdateHealthy(ctx, cli, created.ID, info); err != nil {
+		err = waitPostUpdateHealthy(ctx, cli, created.ID, info)
+		if err == nil {
+			break
+		}
 		log.Printf("container %s: post-update health check failed for next container (%s): %v", info.Name, shortID(created.ID), err)
+		// Read WHY it died before it goes, or the next cycle repeats blind.
+		code := lastExitCode(ctx, cli, created.ID)
 		cli.ContainerStop(ctx, created.ID, container.StopOptions{})
 		cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+
+		if attempt == 0 && code == exitNotExecutable && len(config.Entrypoint) > 0 {
+			log.Printf("ERROR container %s: the replacement exited %d, which the kernel reports when the entrypoint is not executable. Its config carries entrypoint %q, inherited from an ancestor container and matching no image since. Retrying once with the new image's own entrypoint. Recreate this container to stop inheriting the stale value.",
+				info.Name, code, config.Entrypoint)
+			config.Entrypoint = nil
+			config.Cmd = nil
+			continue
+		}
 		return fmt.Errorf("next container %s not healthy: %w", nextName, err)
 	}
 

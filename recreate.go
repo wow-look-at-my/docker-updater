@@ -386,6 +386,20 @@ func waitHealthy(ctx context.Context, cli DockerClient, containerID string) erro
 	}
 }
 
+// whyItDied returns the container's last meaningful log line, ready to append
+// to a failure message, or the empty string when there is nothing to say.
+func whyItDied(ctx context.Context, cli DockerClient, containerID string) string {
+	logs, err := containerLogTail(ctx, cli, containerID, logExcerptTail)
+	if err != nil {
+		return ""
+	}
+	line := logExcerpt(logs)
+	if line == "" {
+		return ""
+	}
+	return ": " + line
+}
+
 // waitStaysRunning is the health gate for containers with no healthcheck of
 // any kind: the container passes if it is still running, with no restarts, at
 // the end of the grace period. A nonzero restart count means the process
@@ -408,11 +422,16 @@ func waitStaysRunning(ctx context.Context, cli DockerClient, containerID string)
 			if err != nil {
 				return fmt.Errorf("inspecting container: %w", err)
 			}
+			// Carry the line it died on. A verdict with no evidence leaves the
+			// operator to go and read the logs of a container the rollback has
+			// already replaced, so in practice nobody reads them at all.
 			if inspect.State == nil || !inspect.State.Running {
-				return fmt.Errorf("container exited within %s of starting", noHealthcheckGracePeriod)
+				return fmt.Errorf("container exited within %s of starting%s",
+					noHealthcheckGracePeriod, whyItDied(ctx, cli, containerID))
 			}
 			if inspect.RestartCount > 0 {
-				return fmt.Errorf("container restarted within %s of starting", noHealthcheckGracePeriod)
+				return fmt.Errorf("container restarted within %s of starting%s",
+					noHealthcheckGracePeriod, whyItDied(ctx, cli, containerID))
 			}
 		}
 	}

@@ -43,6 +43,7 @@ func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardSe
 func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
+	mux.HandleFunc("/api/logs", s.handleAPILogs)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -211,6 +212,10 @@ type apiContainer struct {
 	// "watchtower", "both", or empty for a container nothing updates. It exists
 	// so watchtower's containers stop reading as neglected ones.
 	Updater string `json:"updater,omitempty"`
+	// LogExcerpt is the last line a failing container logged. A container in a
+	// restart loop says why in its own output, and "Restarting (126)" alone
+	// sends the reader to a host shell to find out.
+	LogExcerpt string `json:"log_excerpt,omitempty"`
 
 	LastChecked     *time.Time `json:"last_checked,omitempty"`
 	LastPulled      *time.Time `json:"last_pulled,omitempty"`
@@ -280,6 +285,15 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			Created:    c.Created,
 			AutoUpdate: c.Labels[s.cfg.Label] == "true",
 			Restarts:   restartCount(r.Context(), s.cli, c.ID),
+		}
+
+		// Only for a container that is failing: a healthy one's last log line is
+		// noise, and reading every container's logs on every poll would make
+		// the page cost a Docker API call per row.
+		if isFailing(c.State, c.Status) {
+			if logs, err := containerLogTail(r.Context(), s.cli, c.ID, logExcerptTail); err == nil {
+				ac.LogExcerpt = logExcerpt(logs)
+			}
 		}
 
 		ac.Updater = updaterOf(c.Labels, s.cfg.Label)

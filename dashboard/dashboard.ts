@@ -45,6 +45,9 @@ interface ApiContainer {
   // Configuration notes, not failures: no standard
   // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
   warnings?: string[];
+  // The last line a failing container logged. Served only for a container that
+  // is restarting or exited non-zero.
+  log_excerpt?: string;
 }
 
 // ApiResponse mirrors apiResponse in dashboard.go (the payload of /api/containers).
@@ -483,21 +486,69 @@ function updatedHighlight(c: ApiContainer, now: number): { background: string; t
   };
 }
 
+// openLogs shows a container's recent output in a modal.
+//
+// It fetches on open rather than with the poll: logs are what somebody asks for
+// about one container, and pulling every container's on a five-second refresh
+// would cost a Docker API call per row forever.
+async function openLogs(name: string): Promise<void> {
+  const dialog = document.getElementById("logs-dialog") as HTMLDialogElement | null;
+  const title = document.getElementById("logs-title");
+  const body = document.getElementById("logs-body");
+  if (!dialog || !title || !body) return;
+
+  title.textContent = name;
+  body.textContent = "loading…";
+  if (!dialog.open) dialog.showModal();
+
+  try {
+    const res = await fetch("api/logs?container=" + encodeURIComponent(name) + "&tail=500", { cache: "no-store" });
+    const text = await res.text();
+    // A failed read still says something: the status plus whatever the server
+    // wrote beats an empty panel that looks like the container printed nothing.
+    body.textContent = res.ok ? text : "could not read logs (HTTP " + res.status + "): " + text;
+  } catch (err) {
+    body.textContent = "could not read logs: " + String(err);
+  }
+  body.scrollTop = body.scrollHeight;
+}
+
 // warningLines renders a container's configuration warnings under its name:
 // amber, one line each, full text (they name the label or endpoint to fix).
 function warningLines(c: ApiContainer): HTMLElement[] {
   return (c.warnings || []).map((w) => el("div", { class: "warn", title: w }, "⚠ " + w));
 }
 
+// logsLink opens the container's own output. A container in a restart loop
+// explains itself there and nowhere else, and the row used to end at
+// "Restarting (126)" — a status that names the failure and hides the reason.
+function logsLink(c: ApiContainer): HTMLElement {
+  const a = el("button", { class: "logs-link", type: "button", title: "Show this container's recent output" }, "logs");
+  a.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void openLogs(c.name);
+  });
+  return a;
+}
+
+// reasonLine is the last line a failing container logged, under its name. It is
+// the line an operator would have run docker logs to read.
+function reasonLine(c: ApiContainer): HTMLElement[] {
+  if (!c.log_excerpt) return [];
+  return [el("div", { class: "log-excerpt", title: c.log_excerpt }, c.log_excerpt)];
+}
+
 function row(c: ApiContainer): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
+    logsLink(c),
     el("div", { class: "cmeta" },
       c.image || "—",
       c.image_id ? " · " : null,
       c.image_id ? el("span", { class: "cref" }, c.image_id) : null,
     ),
     ...warningLines(c),
+    ...reasonLine(c),
   );
 
   const uptime = uptimeText(c);

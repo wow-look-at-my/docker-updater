@@ -202,6 +202,39 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
    endpoints). Amber, not red: the update path still works. */
 .warn { color: var(--amber); font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
 
+/* The last line a failing container logged, under its name. Red because it is
+   the container's own account of why it is not running, not a config note. */
+.log-excerpt {
+  color: var(--red); font-size: 11px; margin-top: 2px; max-width: 420px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Sits inline after the name, quiet until hovered: every row carries one, and a
+   button per row competing with the name would be its own kind of noise. */
+.logs-link {
+  background: none; border: 0; padding: 0 0 0 6px; cursor: pointer;
+  color: var(--text-dim); font-size: 11px; font-family: inherit;
+}
+.logs-link:hover { color: var(--accent); text-decoration: underline; }
+
+#logs-dialog {
+  width: min(1100px, 92vw); max-height: 80vh; padding: 0; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg-elev); color: var(--text);
+}
+#logs-dialog::backdrop { background: rgba(0,0,0,0.6); }
+.logs-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600;
+}
+.logs-close { background: none; border: 0; color: var(--text-dim); font-size: 20px; cursor: pointer; line-height: 1; }
+.logs-close:hover { color: var(--text); }
+#logs-body {
+  margin: 0; padding: 12px 14px; overflow: auto; max-height: calc(80vh - 46px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-word;
+}
+
 .detail { color: var(--text-dim); font-size: 11px; margin-top: 2px; max-width: 320px; word-break: break-word; }
 
 /* Container groups (managed/unmanaged × online/offline). Each group is a

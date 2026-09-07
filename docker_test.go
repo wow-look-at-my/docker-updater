@@ -31,6 +31,7 @@ type mockDocker struct {
 	containerCreateFn      func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
 	containerStartFn       func(ctx context.Context, id string, options container.StartOptions) error
 	containerRenameFn      func(ctx context.Context, containerID string, newName string) error
+	containerLogsFn        func(ctx context.Context, containerID string, options container.LogsOptions) (io.ReadCloser, error)
 	containerExecCreateFn  func(ctx context.Context, containerID string, options container.ExecOptions) (types.IDResponse, error)
 	containerExecStartFn   func(ctx context.Context, execID string, config container.ExecStartOptions) error
 	containerExecInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
@@ -39,6 +40,13 @@ type mockDocker struct {
 	imageTagFn             func(ctx context.Context, source, target string) error
 	networkConnectFn       func(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error
 	networkDisconnectFn    func(ctx context.Context, networkID, containerID string, force bool) error
+}
+
+func (m *mockDocker) ContainerLogs(ctx context.Context, containerID string, options container.LogsOptions) (io.ReadCloser, error) {
+	if m.containerLogsFn != nil {
+		return m.containerLogsFn(ctx, containerID, options)
+	}
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func (m *mockDocker) NetworkConnect(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error {

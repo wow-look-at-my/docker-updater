@@ -43,6 +43,7 @@ func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardSe
 func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
+	mux.HandleFunc("/api/logs", s.handleAPILogs)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -207,6 +208,14 @@ type apiContainer struct {
 
 	AutoUpdate bool   `json:"auto_update"`
 	Mode       string `json:"mode,omitempty"`
+	// Updater names who keeps this container current: "docker-updater",
+	// "watchtower", "both", or empty for a container nothing updates. It exists
+	// so watchtower's containers stop reading as neglected ones.
+	Updater string `json:"updater,omitempty"`
+	// LogExcerpt is the last line a failing container logged. A container in a
+	// restart loop says why in its own output, and "Restarting (126)" alone
+	// sends the reader to a host shell to find out.
+	LogExcerpt string `json:"log_excerpt,omitempty"`
 
 	LastChecked     *time.Time `json:"last_checked,omitempty"`
 	LastPulled      *time.Time `json:"last_pulled,omitempty"`
@@ -278,6 +287,20 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			Restarts:   restartCount(r.Context(), s.cli, c.ID),
 		}
 
+		// Only for a container that is failing: a healthy one's last log line is
+		// noise, and reading every container's logs on every poll would make
+		// the page cost a Docker API call per row.
+		if isFailing(c.State, c.Status) {
+			if logs, err := containerLogTail(r.Context(), s.cli, c.ID, logExcerptTail); err == nil {
+				ac.LogExcerpt = logExcerpt(logs)
+			}
+		}
+
+		ac.Updater = updaterOf(c.Labels, s.cfg.Label)
+		if ac.Updater == updaterBoth {
+			ac.Warnings = append(ac.Warnings, bothUpdatersWarning)
+		}
+
 		if ac.AutoUpdate {
 			ac.Mode = c.Labels["docker-updater.mode"]
 			if ac.Mode == "" {
@@ -295,7 +318,10 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.LastChecked = nonZeroTime(st.LastChecked)
 			ac.LastPulled = nonZeroTime(st.LastPulled)
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)
-			ac.Warnings = st.Warnings
+			// Appended, not assigned: the both-updaters note above is about
+			// this container's labels, and the cycle's warnings are about its
+			// update checks. Neither replaces the other.
+			ac.Warnings = append(ac.Warnings, st.Warnings...)
 			if st.Stuck() {
 				ac.StuckCycles = st.StuckCycles
 				ac.StuckSince = nonZeroTime(st.StuckSince)
@@ -305,11 +331,13 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		resp.Containers = append(resp.Containers, ac)
 	}
 
-	// Stable, predictable ordering: monitored containers first, then by name.
+	// Stable, predictable ordering: ours first, then watchtower's, then the
+	// containers nothing updates, and by name inside each. A container an
+	// updater owns is the one an operator came here to look at.
 	sort.SliceStable(resp.Containers, func(i, j int) bool {
 		a, b := resp.Containers[i], resp.Containers[j]
-		if a.AutoUpdate != b.AutoUpdate {
-			return a.AutoUpdate
+		if ra, rb := updaterRank(a), updaterRank(b); ra != rb {
+			return ra < rb
 		}
 		return a.Name < b.Name
 	})

@@ -30,9 +30,14 @@ func clearInheritedImageDefaults(config, img *container.Config) {
 		return
 	}
 
-	if equalStrings(config.Entrypoint, img.Entrypoint) {
-		config.Entrypoint = nil
-	}
+	// The entrypoint always comes from the new image. An image owns the binary
+	// it starts, and that binary changes with the image: buildhost moved from a
+	// bare executable to a shell launcher, and every container still carrying
+	// the old spelling could not exec at all. Diffing against the previous image
+	// does not catch that, because a value inherited from an older ancestor
+	// matches no later image and is therefore pinned for good.
+	config.Entrypoint = nil
+
 	if equalStrings(config.Cmd, img.Cmd) {
 		config.Cmd = nil
 	}

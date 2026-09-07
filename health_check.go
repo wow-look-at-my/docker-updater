@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 )
 
@@ -47,6 +49,30 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 	return waitHealthy(ctx, cli, containerID)
 }
 
+// noEndpointError explains why a container has no address to dial.
+//
+// Docker gives an endpoint an IP only while the container RUNS, so a container
+// that crash-loops looks exactly like one on host networking. Reporting the
+// network mode alone sends the operator to a label that would change nothing,
+// which is how one entry sat stuck for hours behind advice that did not apply.
+// A container that is not running is reported as what it is, with the line it
+// died on.
+func noEndpointError(ctx context.Context, cli DockerClient, containerID string, inspect types.ContainerJSON) error {
+	id := shortID(containerID)
+	if st := inspect.State; st != nil && !st.Running {
+		msg := fmt.Sprintf("new container %s is %s, so it has no address to health check", id, st.Status)
+		if st.ExitCode != 0 {
+			msg += fmt.Sprintf(" (exit %d)", st.ExitCode)
+		}
+		if st.Error != "" {
+			msg += ": " + st.Error
+		}
+		return errors.New(msg + whyItDied(ctx, cli, containerID))
+	}
+	return fmt.Errorf("new container %s runs on host, none or container: networking, so it has no IP of "+
+		"its own to poll; give it an absolute docker-updater.health-check.url", id)
+}
+
 // rehostToNewContainer points a container-derived health URL at the container
 // the update just started. The URL was built from the address of the container
 // the update destroyed, and Docker both gives the replacement its own IP and
@@ -66,8 +92,7 @@ func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, ra
 	}
 	address, _ := containerEndpoint(inspect)
 	if address == "" {
-		return "", fmt.Errorf("new container %s has no IP of its own to poll the health check on; "+
-			"give it an absolute docker-updater.health-check.url", shortID(containerID))
+		return "", noEndpointError(ctx, cli, containerID, inspect)
 	}
 
 	u, err := url.Parse(rawURL)

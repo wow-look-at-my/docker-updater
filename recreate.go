@@ -4,12 +4,32 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 )
+
+// rollingNextSuffix names the container a rolling update starts before it stops
+// the one it replaces. The name is this updater's, and it lasts one update: the
+// replacement is renamed onto the real name once it is healthy.
+const rollingNextSuffix = "-next"
+
+func rollingNextName(name string) string { return name + rollingNextSuffix }
+
+// rollingBaseName returns the container a "-next" name belongs to. The caller
+// checks that the base is really present before treating the name as this
+// updater's scratch container, so an operator's own container that happens to
+// end in "-next" is left alone.
+func rollingBaseName(name string) (string, bool) {
+	base, found := strings.CutSuffix(name, rollingNextSuffix)
+	if !found || base == "" {
+		return "", false
+	}
+	return base, true
+}
 
 // recreateContainer stops the old container, creates a new one with the same
 // config but an updated image, and starts it. Once the old container has been
@@ -223,8 +243,29 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		networkingConfig.EndpointsConfig[netName] = &network.EndpointSettings{}
 	}
 
-	nextName := info.Name + "-next"
+	nextName := rollingNextName(info.Name)
 	log.Printf("container %s: starting rolling update with image %s", info.Name, newImage)
+
+	// discard removes a next container whatever state it is in. A plain remove
+	// refuses a container that is running, and one that failed to start is
+	// RESTARTING under the restart policy cloned from the container being
+	// replaced -- so the remove failed, the name stayed taken, and every later
+	// cycle died on "the container name is already in use" without ever
+	// reaching a create. One deployment sat there for 32 cycles.
+	// Force covers the kill, so there is no stop in front of it: a next
+	// container never carries traffic, and a graceful drain is for the OLD
+	// container at the cutover below.
+	discard := func(id string) {
+		if err := cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+			log.Printf("ERROR container %s: could not remove %s (%s), so the next cycle cannot create it: %v",
+				info.Name, nextName, shortID(id), err)
+		}
+	}
+
+	// A next container left by an earlier cycle owns the name this one needs.
+	// It is this updater's own scratch container and nothing else may be called
+	// that, so it goes before the create rather than after the conflict.
+	discard(nextName)
 
 	attempt := func() (string, error) {
 		created, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, nextName)
@@ -232,13 +273,12 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 			return "", fmt.Errorf("creating next container %s: %w", nextName, err)
 		}
 		if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
-			cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+			discard(created.ID)
 			return "", fmt.Errorf("starting next container %s: %w", nextName, err)
 		}
 		if err := waitPostUpdateHealthy(ctx, cli, created.ID, info); err != nil {
 			log.Printf("container %s: post-update health check failed for next container (%s): %v", info.Name, shortID(created.ID), err)
-			cli.ContainerStop(ctx, created.ID, container.StopOptions{})
-			cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+			discard(created.ID)
 			return "", fmt.Errorf("next container %s not healthy: %w", nextName, err)
 		}
 		return created.ID, nil
@@ -254,8 +294,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 
 	log.Printf("container %s: next container healthy, moving service aliases", info.Name)
 	if err := attachServiceAliases(ctx, cli, nextID, serviceAliases); err != nil {
-		cli.ContainerStop(ctx, nextID, container.StopOptions{})
-		cli.ContainerRemove(ctx, nextID, container.RemoveOptions{})
+		discard(nextID)
 		return fmt.Errorf("attaching service aliases to %s: %w", nextName, err)
 	}
 

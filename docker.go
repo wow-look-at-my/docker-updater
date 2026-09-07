@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/wow-look-at-my/go-containers/set"
 )
 
 // DockerClient defines the Docker API methods we use, allowing test mocks.
@@ -150,9 +151,24 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		return nil, fmt.Errorf("listing containers: %w", err)
 	}
 
+	present := set.New[string]()
+	for _, c := range containers {
+		present.Add(containerName(c.Names))
+	}
+
 	var monitored []ContainerInfo
 	for _, c := range containers {
 		if c.Labels[label] != "true" {
+			continue
+		}
+
+		// A rolling update's own scratch container is never a target. It is
+		// created from the config of the container being replaced, opt-in label
+		// and all, so the next sweep adopted it and began building a "-next-next"
+		// of its own. Only the transient is skipped: it is named for a container
+		// that is still here, and it disappears at the rename when the update
+		// lands.
+		if base, ok := rollingBaseName(containerName(c.Names)); ok && present.Contains(base) {
 			continue
 		}
 

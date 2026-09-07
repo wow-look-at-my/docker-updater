@@ -30,9 +30,14 @@ func clearInheritedImageDefaults(config, img *container.Config) {
 		return
 	}
 
-	if equalStrings(config.Entrypoint, img.Entrypoint) {
-		config.Entrypoint = nil
-	}
+	// The entrypoint always comes from the new image. An image owns the binary
+	// it starts, and that binary changes with the image: buildhost moved from a
+	// bare executable to a shell launcher, and every container still carrying
+	// the old spelling could not exec at all. Diffing against the previous image
+	// does not catch that, because a value inherited from an older ancestor
+	// matches no later image and is therefore pinned for good.
+	config.Entrypoint = nil
+
 	if equalStrings(config.Cmd, img.Cmd) {
 		config.Cmd = nil
 	}
@@ -84,22 +89,6 @@ func clearInheritedDefaultsFor(ctx context.Context, cli DockerClient, config *co
 		return
 	}
 	clearInheritedImageDefaults(config, img.Config)
-}
-
-// exitNotExecutable is what the kernel reports when it cannot exec the
-// entrypoint. A cosmopolitan binary reaches it whenever the entrypoint names the
-// binary rather than the shell launcher that starts it.
-const exitNotExecutable = 126
-
-// lastExitCode reports how a container died, or a negative value when that
-// cannot be read. The caller uses it to tell a dead entrypoint apart from an
-// application that started and failed its health check.
-func lastExitCode(ctx context.Context, cli DockerClient, id string) int {
-	inspect, err := cli.ContainerInspect(ctx, id)
-	if err != nil || inspect.State == nil {
-		return -1
-	}
-	return inspect.State.ExitCode
 }
 
 func equalStrings(a, b []string) bool {

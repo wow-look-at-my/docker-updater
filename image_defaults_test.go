@@ -84,7 +84,7 @@ func TestClearInheritedImageDefaultsKeepsAnOperatorsOwnOverride(t *testing.T) {
 
 	clearInheritedImageDefaults(config, img)
 
-	assert.Equal(t, []string{"/bin/sh", "-c", "sleep infinity"}, []string(config.Entrypoint))
+	assert.Nil(t, config.Entrypoint, "the entrypoint belongs to the image, so even one typed by hand gives way to the new image's")
 	assert.Equal(t, []string{"--debug"}, []string(config.Cmd))
 	assert.Equal(t, "1000:1000", config.User)
 	assert.Equal(t, "/work", config.WorkingDir)
@@ -154,17 +154,16 @@ func TestClearInheritedDefaultsForReportsAnUninspectableImage(t *testing.T) {
 	assert.Contains(t, logged, "myapp")
 }
 
-// The whole path, as the deployment runs it: a container whose entrypoint came
-// from the image it was created from must not carry that entrypoint onto the
-// replacement.
-// The clearing above only drops a value the PRECEDING image supplied. A value
-// inherited from an older ancestor matches no later image, so it is pinned for
-// good, and a replacement that cannot exec it dies every cycle forever. This is
-// how a buildhost container carrying a pre-launcher entrypoint sat on one image
-// for hours: the updater rebuilt it, watched it exit, and rebuilt it again.
-func TestRollingUpdateRetriesWithoutAStaleEntrypointThatCannotExec(t *testing.T) {
+// The incident, as the deployment ran it. A buildhost container recorded the
+// entrypoint ["buildhost"], inherited from an image several generations back.
+// The image it was created from already spells that entrypoint differently, so
+// a diff against the preceding image finds no match and keeps the stale value.
+// The replacement then could not exec at all, and the update rolled back on
+// every cycle. Taking the new image's entrypoint is the only reading that
+// survives an ancestor nobody can inspect any more.
+func TestRollingUpdateDropsAStaleEntrypointNoImageSupplied(t *testing.T) {
 	t.Serial()
-	var creates []*container.Config
+	var created *container.Config
 
 	inspectCount := 0
 	cli := &mockDocker{
@@ -185,13 +184,6 @@ func TestRollingUpdateRetriesWithoutAStaleEntrypointThatCannotExec(t *testing.T)
 					},
 				}, nil
 			}
-			if len(creates) < 2 {
-				return types.ContainerJSON{
-					ContainerJSONBase: &types.ContainerJSONBase{
-						State: &types.ContainerState{ExitCode: exitNotExecutable},
-					},
-				}, nil
-			}
 			return types.ContainerJSON{
 				ContainerJSONBase: &types.ContainerJSONBase{
 					State: &types.ContainerState{
@@ -202,15 +194,14 @@ func TestRollingUpdateRetriesWithoutAStaleEntrypointThatCannotExec(t *testing.T)
 			}, nil
 		},
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			// The launcher spelling. The recorded entrypoint predates it, so the
-			// clearing finds no match and leaves the stale value in place.
+			// The launcher spelling. The recorded entrypoint predates it, so a
+			// diff against this image matches nothing.
 			return types.ImageInspect{Config: &container.Config{
 				Entrypoint: []string{"/usr/local/bin/buildhost"},
 			}}, nil, nil
 		},
 		containerCreateFn: func(_ context.Context, config *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
-			seen := *config
-			creates = append(creates, &seen)
+			created = config
 			return container.CreateResponse{ID: "new123456789"}, nil
 		},
 	}
@@ -218,9 +209,8 @@ func TestRollingUpdateRetriesWithoutAStaleEntrypointThatCannotExec(t *testing.T)
 	info := ContainerInfo{ID: "old123456789", Name: "buildhost", Image: "buildhost:latest", Rolling: true}
 	require.NoError(t, rollingUpdateContainer(context.Background(), cli, info, "buildhost:latest"))
 
-	require.Len(t, creates, 2, "the first attempt keeps the recorded entrypoint, the retry drops it")
-	assert.Equal(t, []string{"buildhost"}, []string(creates[0].Entrypoint))
-	assert.Nil(t, creates[1].Entrypoint, "the retry must take the new image's own entrypoint")
+	require.NotNil(t, created)
+	assert.Nil(t, created.Entrypoint, "the replacement must start on the new image's own entrypoint, first try")
 }
 
 func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {

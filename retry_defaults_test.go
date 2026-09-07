@@ -38,10 +38,15 @@ func TestResetToImageDefaults(t *testing.T) {
 	assert.False(t, resetToImageDefaults(nil))
 }
 
-// wedgedInspect answers the first inspect with a container whose entrypoint an
+// wedgedInspect answers the first inspect with a container whose command an
 // operator set by hand, so clearInheritedImageDefaults cannot attribute it, and
 // answers every later inspect as healthy.
-func wedgedInspect(entrypoint []string) func(context.Context, string) (types.ContainerJSON, error) {
+//
+// The wedge is the COMMAND rather than the entrypoint. The entrypoint now comes
+// from the new image on every update, so it can never reach a start; the command
+// is still cleared only when it matches the old image's, which is what leaves a
+// value nothing can attribute in place.
+func wedgedInspect(cmd []string) func(context.Context, string) (types.ContainerJSON, error) {
 	n := 0
 	return func(_ context.Context, _ string) (types.ContainerJSON, error) {
 		n++
@@ -51,7 +56,7 @@ func wedgedInspect(entrypoint []string) func(context.Context, string) (types.Con
 					Image:      "sha256:olddigest",
 					HostConfig: &container.HostConfig{},
 				},
-				Config: &container.Config{Image: "myapp:latest", Entrypoint: entrypoint},
+				Config: &container.Config{Image: "myapp:latest", Cmd: cmd},
 				NetworkSettings: &types.NetworkSettings{
 					Networks: map[string]*network.EndpointSettings{
 						"internal": {Aliases: []string{"backend"}},
@@ -65,8 +70,8 @@ func wedgedInspect(entrypoint []string) func(context.Context, string) (types.Con
 	}
 }
 
-// The wedge this fixes: the container carries an entrypoint the new image does
-// not have, and it is not the old image's either, so clearing what the old image
+// The wedge this fixes: the container carries a command the new image does not
+// have, and it is not the old image's either, so clearing what the old image
 // supplied leaves it in place. The kernel cannot exec it. Without the retry the
 // updater rolls back on this cycle and every later one, and the deployment stays
 // on the version it already runs.
@@ -78,8 +83,8 @@ func TestRollingUpdateRetriesOnTheImagesOwnDefaults(t *testing.T) {
 	cli := &mockDocker{
 		containerInspectFn: wedgedInspect([]string{"/gone-from-this-image"}),
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			// The old image's entrypoint differs, so nothing is cleared.
-			return types.ImageInspect{Config: &container.Config{Entrypoint: []string{"/myapp"}}}, nil, nil
+			// The old image's command differs, so nothing is cleared.
+			return types.ImageInspect{Config: &container.Config{Cmd: []string{"serve"}}}, nil, nil
 		},
 		containerCreateFn: func(_ context.Context, config *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
 			configs = append(configs, *config)
@@ -98,9 +103,10 @@ func TestRollingUpdateRetriesOnTheImagesOwnDefaults(t *testing.T) {
 	require.NoError(t, rollingUpdateContainer(context.Background(), cli, info, "myapp:latest"))
 
 	require.Len(t, configs, 2, "the failed start is retried once")
-	assert.Equal(t, []string{"/gone-from-this-image"}, []string(configs[0].Entrypoint),
+	assert.Equal(t, []string{"/gone-from-this-image"}, []string(configs[0].Cmd),
 		"the first try carries what the container recorded")
-	assert.Nil(t, configs[1].Entrypoint, "the retry takes the image's own entrypoint")
+	assert.Nil(t, configs[1].Cmd, "the retry takes the image's own command")
+	assert.Nil(t, configs[0].Entrypoint, "the entrypoint never survives to a start")
 }
 
 // A retry that also fails reports the original cause. Inventing a second reason
@@ -110,7 +116,7 @@ func TestRollingUpdateReportsTheFirstCauseWhenTheRetryFails(t *testing.T) {
 	cli := &mockDocker{
 		containerInspectFn: wedgedInspect([]string{"/gone-from-this-image"}),
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			return types.ImageInspect{Config: &container.Config{Entrypoint: []string{"/myapp"}}}, nil, nil
+			return types.ImageInspect{Config: &container.Config{Cmd: []string{"serve"}}}, nil, nil
 		},
 		containerCreateFn: func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
 			return container.CreateResponse{ID: "new123456789"}, nil

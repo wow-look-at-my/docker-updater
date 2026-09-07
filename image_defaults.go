@@ -91,6 +91,36 @@ func clearInheritedDefaultsFor(ctx context.Context, cli DockerClient, config *co
 	clearInheritedImageDefaults(config, img.Config)
 }
 
+// resetToImageDefaults strips the process fields from config so the new image's
+// own apply, and reports whether it had anything to strip.
+//
+// clearInheritedImageDefaults is the first line and it is not always enough. It
+// clears a field only when the container's value EQUALS the old image's, so a
+// value it cannot attribute survives: the old image is gone from the daemon, or
+// an operator once typed the path by hand, or the container predates the image
+// pair entirely. A surviving path that the new image does not carry is an exec
+// failure on every start, and a rolling updater clones it onto the container
+// after this one, so the deployment never moves again. One buildhost deployment
+// spent three weeks on that loop.
+//
+// The retry that calls this gives up the operator's own overrides for the
+// image's. That is the lesser loss: a container that starts on the image's
+// defaults is running the version it was asked to run, and one that cannot exec
+// its entrypoint is running the previous version forever.
+func resetToImageDefaults(config *container.Config) bool {
+	if config == nil {
+		return false
+	}
+	changed := len(config.Entrypoint) > 0 || len(config.Cmd) > 0 ||
+		config.User != "" || config.WorkingDir != "" || config.Healthcheck != nil
+	config.Entrypoint = nil
+	config.Cmd = nil
+	config.User = ""
+	config.WorkingDir = ""
+	config.Healthcheck = nil
+	return changed
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

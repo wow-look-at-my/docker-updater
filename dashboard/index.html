@@ -115,6 +115,16 @@
     <p id="empty" class="empty hidden">No containers found.</p>
   </main>
 
+  <!-- A container in a restart loop says why in its own output. Without this the
+       reason lived only on the host, behind a shell an operator had to reach. -->
+  <dialog id="logs-dialog">
+    <header class="logs-head">
+      <span id="logs-title">&mdash;</span>
+      <form method="dialog"><button class="logs-close" type="submit" aria-label="Close">&times;</button></form>
+    </header>
+    <pre id="logs-body">loading&hellip;</pre>
+  </dialog>
+
   <footer>
     <span>Auto-refreshing every <span id="refresh-interval">5</span>s &middot; check interval <span id="cfg-interval">&mdash;</span> &middot; label <code id="cfg-label">&mdash;</code> &middot; build <code id="build-version">&mdash;</code></span>
   </footer>

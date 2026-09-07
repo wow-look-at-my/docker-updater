@@ -27,6 +27,9 @@ interface ApiContainer {
   restarts?: number | null;
   auto_update: boolean;
   mode?: string;
+  // Who keeps this container current: "docker-updater", "watchtower", "both",
+  // or absent when nothing updates it.
+  updater?: string;
   // Still served by /api/containers, but not rendered: every monitored
   // container is checked in the same cycle, so a per-row copy of the header's
   // "Last check <ago>" told the operator nothing.
@@ -42,6 +45,9 @@ interface ApiContainer {
   // Configuration notes, not failures: no standard
   // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
   warnings?: string[];
+  // The last line a failing container logged. Served only for a container that
+  // is restarting or exited non-zero.
+  log_excerpt?: string;
 }
 
 // ApiResponse mirrors apiResponse in dashboard.go (the payload of /api/containers).
@@ -157,17 +163,37 @@ function restartsCell(c: ApiContainer): HTMLElement {
   return el("td", { class: "restarts-warn", title }, text);
 }
 
-// monitoringText is the Auto-update column's badge text.
-function monitoringText(c: ApiContainer): string {
-  return c.auto_update ? "Auto · " + (c.mode || "image") : "Manual";
+// watchtowerOwns mirrors the Go predicate: watchtower keeps this container
+// current, whether or not docker-updater claims it as well.
+function watchtowerOwns(c: ApiContainer): boolean {
+  return c.updater === "watchtower" || c.updater === "both";
 }
 
+// monitoringText is the Auto-update column's badge text.
+function monitoringText(c: ApiContainer): string {
+  if (c.updater === "both") return "Both";
+  if (c.auto_update) return "Auto · " + (c.mode || "image");
+  if (watchtowerOwns(c)) return "Watchtower";
+  return "Manual";
+}
+
+// autoUpdateCell says who keeps the container current. Reporting watchtower's
+// containers as "Manual" was the defect: they ARE updated, so the empty columns
+// beside them read as neglect and send the operator after a missing label.
 function autoUpdateCell(c: ApiContainer): HTMLElement {
-  if (!c.auto_update) {
-    return el("td", null, el("span", { class: "badge badge-manual", title: "Not monitored by docker-updater" }, monitoringText(c)));
+  if (c.updater === "both") {
+    const title = "Claimed by docker-updater and watchtower at once: each will recreate what the other just made. Remove one of the two labels.";
+    return el("td", null, el("span", { class: "badge badge-conflict", title }, monitoringText(c)));
   }
-  const cls = c.mode === "git" ? "badge badge-git" : "badge badge-auto";
-  return el("td", null, el("span", { class: cls }, monitoringText(c)));
+  if (c.auto_update) {
+    const cls = c.mode === "git" ? "badge badge-git" : "badge badge-auto";
+    return el("td", null, el("span", { class: cls }, monitoringText(c)));
+  }
+  if (watchtowerOwns(c)) {
+    const title = "Updated by watchtower, not by docker-updater. The columns to the right are this updater's own checks, so they stay empty for it.";
+    return el("td", null, el("span", { class: "badge badge-watchtower", title }, monitoringText(c)));
+  }
+  return el("td", null, el("span", { class: "badge badge-manual", title: "No updater claims this container" }, monitoringText(c)));
 }
 
 // lastPulledText is the Last pulled column: how long ago a newer image was
@@ -196,6 +222,11 @@ interface UpstreamView {
 }
 
 function upstreamView(c: ApiContainer): UpstreamView {
+  // This updater never checks a watchtower container, so it has no verdict to
+  // give. Saying so beats an em dash that reads as "nothing is happening here".
+  if (!c.auto_update && watchtowerOwns(c)) {
+    return { cls: "up-na", status: "watchtower's", detail: "not checked here" };
+  }
   if (!c.auto_update) return { cls: "up-na", status: "—", detail: null };
   // An available update means one was detected but held back. Always surface it
   // as such — even when it also errored — so the row matches the "updates
@@ -385,8 +416,15 @@ function isOnline(c: ApiContainer): boolean {
   return c.state !== "exited" && c.state !== "dead" && c.state !== "created";
 }
 
+// isManaged asks whether ANY updater keeps this container current, which is the
+// question the Managed sections answer. Watchtower's containers belong there:
+// grouping them under Unmanaged said nothing updates them, and something does.
+function isManaged(c: ApiContainer): boolean {
+  return c.auto_update || watchtowerOwns(c);
+}
+
 // The four dashboard sections, in display order. Every container lands in
-// exactly one: managed (has the auto-update label) × online/offline. The ids
+// exactly one: managed (an updater keeps it current) × online/offline. The ids
 // match the <details> elements in index.html ("-summary" / "-rows" suffixes).
 interface Group {
   id: string;
@@ -395,10 +433,10 @@ interface Group {
 }
 
 const GROUPS: Group[] = [
-  { id: "group-managed-online", label: "Managed · online", match: (c) => c.auto_update && isOnline(c) },
-  { id: "group-managed-offline", label: "Managed · offline", match: (c) => c.auto_update && !isOnline(c) },
-  { id: "group-unmanaged-online", label: "Unmanaged · online", match: (c) => !c.auto_update && isOnline(c) },
-  { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !c.auto_update && !isOnline(c) },
+  { id: "group-managed-online", label: "Managed · online", match: (c) => isManaged(c) && isOnline(c) },
+  { id: "group-managed-offline", label: "Managed · offline", match: (c) => isManaged(c) && !isOnline(c) },
+  { id: "group-unmanaged-online", label: "Unmanaged · online", match: (c) => !isManaged(c) && isOnline(c) },
+  { id: "group-unmanaged-offline", label: "Unmanaged · offline", match: (c) => !isManaged(c) && !isOnline(c) },
 ];
 
 // searchBoxValue returns the filter box's text as typed. The state carries it
@@ -448,21 +486,69 @@ function updatedHighlight(c: ApiContainer, now: number): { background: string; t
   };
 }
 
+// openLogs shows a container's recent output in a modal.
+//
+// It fetches on open rather than with the poll: logs are what somebody asks for
+// about one container, and pulling every container's on a five-second refresh
+// would cost a Docker API call per row forever.
+async function openLogs(name: string): Promise<void> {
+  const dialog = document.getElementById("logs-dialog") as HTMLDialogElement | null;
+  const title = document.getElementById("logs-title");
+  const body = document.getElementById("logs-body");
+  if (!dialog || !title || !body) return;
+
+  title.textContent = name;
+  body.textContent = "loading…";
+  if (!dialog.open) dialog.showModal();
+
+  try {
+    const res = await fetch("api/logs?container=" + encodeURIComponent(name) + "&tail=500", { cache: "no-store" });
+    const text = await res.text();
+    // A failed read still says something: the status plus whatever the server
+    // wrote beats an empty panel that looks like the container printed nothing.
+    body.textContent = res.ok ? text : "could not read logs (HTTP " + res.status + "): " + text;
+  } catch (err) {
+    body.textContent = "could not read logs: " + String(err);
+  }
+  body.scrollTop = body.scrollHeight;
+}
+
 // warningLines renders a container's configuration warnings under its name:
 // amber, one line each, full text (they name the label or endpoint to fix).
 function warningLines(c: ApiContainer): HTMLElement[] {
   return (c.warnings || []).map((w) => el("div", { class: "warn", title: w }, "⚠ " + w));
 }
 
+// logsLink opens the container's own output. A container in a restart loop
+// explains itself there and nowhere else, and the row used to end at
+// "Restarting (126)" — a status that names the failure and hides the reason.
+function logsLink(c: ApiContainer): HTMLElement {
+  const a = el("button", { class: "logs-link", type: "button", title: "Show this container's recent output" }, "logs");
+  a.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void openLogs(c.name);
+  });
+  return a;
+}
+
+// reasonLine is the last line a failing container logged, under its name. It is
+// the line an operator would have run docker logs to read.
+function reasonLine(c: ApiContainer): HTMLElement[] {
+  if (!c.log_excerpt) return [];
+  return [el("div", { class: "log-excerpt", title: c.log_excerpt }, c.log_excerpt)];
+}
+
 function row(c: ApiContainer): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
+    logsLink(c),
     el("div", { class: "cmeta" },
       c.image || "—",
       c.image_id ? " · " : null,
       c.image_id ? el("span", { class: "cref" }, c.image_id) : null,
     ),
     ...warningLines(c),
+    ...reasonLine(c),
   );
 
   const uptime = uptimeText(c);
@@ -501,13 +587,16 @@ function render(state: DashboardState): void {
 
   // The summary cards are fleet totals: computed over every container, never
   // narrowed by the search filter.
-  const auto = containers.filter((c) => c.auto_update).length;
+  // "auto-updated" counts what any updater keeps current, and "manual" what
+  // nothing does. Counting only this updater's put watchtower's containers in
+  // the manual card, which is the same wrong answer the rows used to give.
+  const managed = containers.filter(isManaged).length;
   const updates = containers.filter(pending).length;
   const errors = errorCount(data);
 
   setText("stat-total", containers.length);
-  setText("stat-auto", auto);
-  setText("stat-manual", containers.length - auto);
+  setText("stat-auto", managed);
+  setText("stat-manual", containers.length - managed);
   setText("stat-updates", updates);
   setText("stat-errors", errors);
 

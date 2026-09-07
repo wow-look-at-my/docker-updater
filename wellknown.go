@@ -50,8 +50,13 @@ const (
 // belongs to -- the address docker-updater dials, and the network it has to
 // join to get there.
 //
-// Both are empty when the container has no IP of its own (host, none, or
-// container: network mode), and there is no substitute to fall back on:
+// Both are empty when the container has no IP of its own. That is host, none or
+// container: network mode -- and equally a container that is not RUNNING, since
+// Docker assigns an endpoint IP only while one is up, and every IPAddress in a
+// stopped container's inspect output is the empty string. A caller reporting the
+// emptiness must not name the first cause alone: a crash-looping container reads
+// as a network-mode problem and the real failure goes unlooked-at.
+// There is no substitute to fall back on:
 // 127.0.0.1 is docker-updater's OWN loopback, so probing it reports on the
 // wrong process entirely and can pass a post-update health gate against
 // docker-updater itself. Such a container needs an absolute
@@ -205,8 +210,10 @@ func fallbackPhrase(info ContainerInfo) string {
 // override, else the container's single exposed TCP port.
 func wellKnownBaseURL(info ContainerInfo) (string, error) {
 	if info.Address == "" {
-		return "", errors.New("container has no IP of its own (host, none, or container: network mode); " +
-			"give it an absolute docker-updater.health-check.url instead")
+		return "", errors.New("container has no IP of its own: it is not running, or it uses host, " +
+			"none, or container: network mode. Docker assigns an endpoint IP only while a container " +
+			"is up, so check its state first; a container that really shares another namespace needs " +
+			"an absolute docker-updater.health-check.url instead")
 	}
 	port, err := wellKnownPort(info)
 	if err != nil {

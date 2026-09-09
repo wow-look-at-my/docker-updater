@@ -96,8 +96,9 @@ jobs:
           DU_IMAGE: ghcr.io/wow-look-at-my/docker-updater:latest
         run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
 
+  # image-e2e is the only job that executes the APE these bytes are.
   publish-buildhost:
-    needs: test
+    needs: [test, image-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

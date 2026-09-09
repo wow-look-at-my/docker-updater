@@ -18,6 +18,8 @@ Put the label `docker-updater.enable=true` on each container to monitor. The ser
 
 The dashboard is read only. It lists every container on this host, its update state, and any error from the last cycle. Put it behind a reverse proxy with access control.
 
+A container can carry the label and still be impossible to check. It runs a bare image ID, or image mode finds an image that is in no registry. The dashboard gives the reason and counts the container as an error. Such a container is never up to date, because nothing looked.
+
 ## Update-check endpoints
 
 A container can answer `/.well-known/docker-updater/health` and `/.well-known/docker-updater/pre-update`. The updater finds the port from the image's own `EXPOSE`. Depth: `docs/well-known-endpoints.md`.

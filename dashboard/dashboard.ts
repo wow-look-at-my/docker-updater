@@ -42,6 +42,9 @@ interface ApiContainer {
   error?: string;
   skipped?: boolean;
   skip_reason?: string;
+  // Why a container carrying the enable label can never be checked as it
+  // stands. Terminal, unlike error: no cycle retries it.
+  unmonitorable?: string;
   // Configuration notes, not failures: no standard
   // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
   warnings?: string[];
@@ -129,7 +132,10 @@ function stateIndicator(c: ApiContainer): string {
   if (c.health === "unhealthy") return "red";
   if (c.health === "starting") return "amber";
   if (c.state === "running") return "green";
-  if (c.state === "exited" || c.state === "dead") return "red";
+  // Restarting is red for the same reason it is offline: the state persists
+  // for a whole crash loop, and grey put a container that never starts next to
+  // one that is merely idle.
+  if (c.state === "exited" || c.state === "dead" || c.state === "restarting") return "red";
   return "gray";
 }
 
@@ -228,6 +234,11 @@ function upstreamView(c: ApiContainer): UpstreamView {
     return { cls: "up-na", status: "watchtower's", detail: "not checked here" };
   }
   if (!c.auto_update) return { cls: "up-na", status: "—", detail: null };
+  // Terminal, so it precedes every check outcome: nothing polls this container
+  // and nothing will, and the row said "up to date" while that was the case.
+  if (c.unmonitorable) {
+    return { cls: "up-error", status: "cannot update", detail: c.unmonitorable };
+  }
   // An available update means one was detected but held back. Always surface it
   // as such — even when it also errored — so the row matches the "updates
   // pending" count instead of hiding behind a bare "error".
@@ -254,9 +265,11 @@ function upstreamCell(c: ApiContainer): HTMLElement {
 }
 
 // errored is the exact predicate behind the "errors" card: a monitored
-// container whose last check or update attempt failed.
+// container whose last check or update attempt failed, or one nothing can
+// check at all. The second case never clears on its own, so leaving it out of
+// the count reported a fleet with an unupdatable container as error-free.
 function errored(c: ApiContainer): boolean {
-  return Boolean(c.auto_update && c.error);
+  return Boolean(c.auto_update && (c.error || c.unmonitorable));
 }
 
 // errorReport renders every current error as plain text for pasting into an
@@ -278,7 +291,8 @@ function errorReport(data: ApiResponse): string {
       lines.push("  update available" + refs);
     }
     if (c.skipped) lines.push("  skipped: " + (c.skip_reason || "pre-check"));
-    lines.push("  error: " + (c.error || ""));
+    if (c.unmonitorable) lines.push("  cannot update: " + c.unmonitorable);
+    if (c.error) lines.push("  error: " + c.error);
     return lines.join("\n");
   });
   return [header, ...blocks].join("\n\n") + "\n";
@@ -409,11 +423,15 @@ function pending(c: ApiContainer): boolean {
   return Boolean(c.auto_update && c.update_available);
 }
 
-// isOnline splits containers into the online/offline group halves. Offline is
-// the not-up states: exited, dead, or created (never started); everything else
-// (running, restarting, paused, removing) counts as online.
+// isOnline splits containers into the online/offline group halves. Online is
+// a container that is up: running, paused, or removing. Offline is every other
+// state -- exited, dead, created (never started), and restarting.
+//
+// Restarting belongs here rather than beside the healthy rows. Docker reports
+// that state for the whole life of a crash loop, so a container that exits on
+// startup a thousand times reads as online for as long as it stays broken.
 function isOnline(c: ApiContainer): boolean {
-  return c.state !== "exited" && c.state !== "dead" && c.state !== "created";
+  return c.state === "running" || c.state === "paused" || c.state === "removing";
 }
 
 // isManaged asks whether ANY updater keeps this container current, which is the

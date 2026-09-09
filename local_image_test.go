@@ -15,8 +15,9 @@ import (
 
 // TestImageModeSkipsLocallyBuiltImage covers the container-mode skip-guard: an
 // image-mode container whose running image has no RepoDigests (locally built,
-// no registry origin, e.g. a compose `build:` tag like `opencode:local`) must
-// be detected and skipped -- never pulled -- with an actionable warning.
+// no registry origin, e.g. a compose `build:` tag like `opencode:local`) is
+// never pulled. It is reported as unmonitorable rather than dropped, because a
+// dropped container has no status and its dashboard row then reads "up to date".
 func TestImageModeSkipsLocallyBuiltImage(t *testing.T) {
 	pullCalled := false
 	cli := &mockDocker{
@@ -44,14 +45,17 @@ func TestImageModeSkipsLocallyBuiltImage(t *testing.T) {
 		},
 	}
 
-	// At listing time the locally-built container is filtered out (skipped).
 	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
 	require.Nil(t, err)
-	assert.Equal(t, 0, len(containers), "a locally-built image in image mode is skipped")
+	require.Equal(t, 1, len(containers))
+	assert.Contains(t, containers[0].Unmonitorable, "built locally")
+	assert.Contains(t, containers[0].Unmonitorable, "docker-updater.mode=build", "the reason names the fix")
 
-	// And a full cycle never attempts a registry pull for it.
+	// A full cycle reports the container and never attempts a registry pull.
 	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil))
-	assert.Equal(t, 0, len(results))
+	require.Equal(t, 1, len(results))
+	assert.Equal(t, containers[0].Unmonitorable, results[0].Container.Unmonitorable)
+	assert.Nil(t, results[0].Error, "there was no check to fail")
 	assert.False(t, pullCalled, "the locally-built local tag must never be pulled")
 }
 

@@ -33,6 +33,11 @@ type ContainerStatus struct {
 	SkipReason string
 	DryRun     bool
 
+	// Unmonitorable is why this container can never be checked as configured.
+	// It is not a cycle failure: no check ran and none can, so it ends no
+	// stuck run and offers no update.
+	Unmonitorable string
+
 	// StuckCycles counts the consecutive cycles that found an update and did
 	// not apply it. StuckSince is when that run began.
 	//
@@ -89,6 +94,7 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		}
 
 		// Reset per-cycle fields; historical timestamps above are preserved.
+		st.Unmonitorable = r.Container.Unmonitorable
 		st.LastError = ""
 		st.Skipped = false
 		st.SkipReason = ""

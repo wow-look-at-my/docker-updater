@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -30,6 +31,19 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 	var results []UpdateResult
 
 	for _, info := range containers {
+		// Discovery already decided this container cannot be checked. Record
+		// that verdict and probe nothing: dialing it or joining its network
+		// serves an update that never runs.
+		if info.Unmonitorable != "" {
+			log.Printf("container %s cannot be updated: %s", info.Name, info.Unmonitorable)
+			results = append(results, UpdateResult{
+				Container: info,
+				CheckedAt: time.Now(),
+				DryRun:    cfg.DryRun,
+			})
+			continue
+		}
+
 		var warnings []string
 		if w := attacher.ensure(ctx, info); w != "" {
 			warnings = append(warnings, w)
@@ -58,8 +72,8 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 		case UpdateModeBuild:
 			result = checkAndUpdateBuild(ctx, cli, defaultComposeRunner, info, cfg, result, resolveAuth)
 		default:
-			log.Printf("container %s: unknown mode %q, skipping", info.Name, info.Mode)
-			continue
+			result.Container.Unmonitorable = fmt.Sprintf("unknown update mode %q", info.Mode)
+			log.Printf("container %s cannot be updated: %s", info.Name, result.Container.Unmonitorable)
 		}
 
 		results = append(results, result)

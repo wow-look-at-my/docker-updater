@@ -339,7 +339,11 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
-	assert.Equal(t, 0, len(results))
+	// The result carries the verdict rather than vanishing: a container the
+	// cycle drops has no status, and its dashboard row reads "up to date".
+	require.Equal(t, 1, len(results))
+	assert.Equal(t, `unknown update mode "unknown"`, results[0].Container.Unmonitorable)
+	assert.False(t, results[0].Updated)
 }
 
 func TestCheckAndUpdateImagePreCheckFails(t *testing.T) {

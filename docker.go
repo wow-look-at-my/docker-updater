@@ -294,7 +294,8 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			repoDigests := runningRepoDigests(ctx, cli, inspect.Image)
 			ref, ok := resolveImageRef(configImage, repoDigests)
 			if !ok {
-				log.Printf("cannot resolve registry repository for container %s; skipping", name)
+				info.Unmonitorable = "no registry repository to poll: the container runs a bare image ID and its image carries no repo digest"
+				monitored = append(monitored, info)
 				continue
 			}
 
@@ -304,11 +305,12 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			// `opencode:local`). resolveImageRef still returns the local tag as
 			// pullable, so without this guard image mode would `docker pull
 			// <local-tag>` every cycle and fail with "repository does not
-			// exist". Detect it and skip with an actionable warning instead.
+			// exist". Detect it and report the reason instead.
 			// A digest-pinned reference (already canonical) is exempt -- it
 			// names a real registry manifest even with no RepoDigests recorded.
 			if len(repoDigests) == 0 && !isCanonicalRef(ref) {
-				log.Printf("image %s is locally built and not in a registry; use docker-updater.mode=build (skipping container %s)", ref, name)
+				info.Unmonitorable = "image " + ref + " is built locally and is in no registry; set docker-updater.mode=build"
+				monitored = append(monitored, info)
 				continue
 			}
 

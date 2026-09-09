@@ -226,6 +226,10 @@ type apiContainer struct {
 	Error           string     `json:"error,omitempty"`
 	Skipped         bool       `json:"skipped,omitempty"`
 	SkipReason      string     `json:"skip_reason,omitempty"`
+	// Unmonitorable is why a container that carries the enable label can never
+	// be checked as it stands. The row must say so: a container no check can
+	// reach is not an up-to-date one.
+	Unmonitorable string `json:"unmonitorable,omitempty"`
 	// StuckCycles counts the consecutive cycles that offered an update this
 	// container did not take, and StuckSince is when that run began. A single
 	// failure is ordinary; a long run is a deployment frozen where it stands.
@@ -315,6 +319,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.Error = st.LastError
 			ac.Skipped = st.Skipped
 			ac.SkipReason = st.SkipReason
+			ac.Unmonitorable = st.Unmonitorable
 			ac.LastChecked = nonZeroTime(st.LastChecked)
 			ac.LastPulled = nonZeroTime(st.LastPulled)
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)

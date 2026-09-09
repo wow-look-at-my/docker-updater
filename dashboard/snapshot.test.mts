@@ -20,7 +20,8 @@ const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 
 // A payload shaped like a real one: monitored and unmonitored containers,
 // online and offline, a configuration warning, a failed check, a held-back
-// update, and a container Docker could not inspect (null restarts).
+// update, a container Docker could not inspect (null restarts), a container in
+// a crash loop, and one nothing can check.
 const PAYLOAD = {
 	generated_at: "2026-08-08T19:09:05.713435114Z",
 	interval: "10m0s",
@@ -88,6 +89,34 @@ const PAYLOAD = {
 			warnings: [
 				"no standard update endpoints: container exposes no TCP port; set docker-updater.well-known.port",
 			],
+		},
+		{
+			name: "log-streamer-server",
+			image: "log-streamer-server:local",
+			image_id: "f4edd950028b",
+			state: "restarting",
+			status: "Restarting (255) 46 seconds ago",
+			health: "",
+			created: 1786874419,
+			restarts: 964,
+			auto_update: true,
+			mode: "build",
+			update_available: false,
+			log_excerpt: "exec /usr/local/bin/log-streamer-server: exec format error",
+		},
+		{
+			name: "s3",
+			image: "sha256:4a721d2e7ba5dd476b10c9b7f84b954ed9bf0bd455050332a7b1e73d202688da",
+			image_id: "4a721d2e7ba5",
+			state: "running",
+			status: "Up 16 hours",
+			health: "",
+			created: 1786723890,
+			restarts: 0,
+			auto_update: true,
+			mode: "image",
+			update_available: false,
+			unmonitorable: "no registry repository to poll: the container runs a bare image ID and its image carries no repo digest",
 		},
 		{
 			name: "goflow2",
@@ -289,6 +318,42 @@ test("no derived value is stored beside the fact it is derived from", async () =
 		for (const c of json.containers as Json[]) {
 			assert.ok(!("row" in c), `${String(c.name)} carries a rendered-row block`);
 		}
+	} finally {
+		page.close();
+	}
+});
+
+// A container Docker reports as "restarting" is in that state for the whole
+// life of a crash loop. Filing it under the online rows put a container that
+// has never once started beside the healthy ones.
+test("a crash-looping container is offline and red", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const online = page.doc.getElementById("group-managed-online-rows")!;
+		const offline = page.doc.getElementById("group-managed-offline-rows")!;
+		assert.ok(!online.textContent!.includes("log-streamer-server"), "a crash loop is not online");
+		assert.ok(offline.textContent!.includes("log-streamer-server"));
+		assert.ok(offline.innerHTML.includes("dot-red"), "the state dot reports a failure, not an idle container");
+		assert.equal(
+			page.doc.getElementById("group-managed-offline-summary")!.textContent,
+			"Managed · offline (1)",
+		);
+	} finally {
+		page.close();
+	}
+});
+
+// The container carries the enable label, reports no error and offers no
+// update, which is indistinguishable from an up-to-date one until the row says
+// otherwise.
+test("a container nothing can check says so and counts as an error", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const rows = page.doc.getElementById("group-managed-online-rows")!;
+		assert.ok(rows.textContent!.includes("cannot update"));
+		assert.ok(rows.textContent!.includes("no registry repository to poll"));
+		// buildhost's failed pull, plus s3, which no cycle will ever retry.
+		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "2");
 	} finally {
 		page.close();
 	}

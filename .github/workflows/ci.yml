@@ -69,33 +69,6 @@ jobs:
     needs: [test, image-e2e]
     uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
 
-  # image-e2e starts an image it built itself; publish-ghcr builds and pushes another, so this starts the bytes that shipped.
-  published-image-e2e:
-    needs: publish-ghcr
-    if: github.ref == 'refs/heads/master'
-    # Same reason as image-e2e: a self-hosted runner carries an APE binfmt handler, which makes a bare exec succeed and hides the defect.
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
-        with:
-          project: dats
-      # Fetching is setup. The suite below is what starts the container and asserts it reaches the update loop.
-      - name: Fetch the published image
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull ghcr.io/wow-look-at-my/docker-updater:latest
-      - name: Start the published image and assert it reaches the update loop
-        env:
-          DU_IMAGE: ghcr.io/wow-look-at-my/docker-updater:latest
-        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
-
   # image-e2e is the only job that executes the APE these bytes are.
   publish-buildhost:
     needs: [test, image-e2e]

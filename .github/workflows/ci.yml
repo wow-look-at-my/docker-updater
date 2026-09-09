@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # The go:generate directives in dashboard.go compile dashboard.js, which the embed needs and which is not committed.
@@ -27,7 +27,7 @@ jobs:
           generate: 86bbd283414e
 
   dashboard:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: dashboard
@@ -98,7 +98,7 @@ jobs:
 
   publish-buildhost:
     needs: test
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:

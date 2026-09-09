@@ -67,6 +67,14 @@ type ContainerInfo struct {
 	// container will ACTUALLY get instead of the one it might have had.
 	DockerHealthcheck bool
 
+	// Unmonitorable, when set, is why this container can never be checked as
+	// it stands: no registry repository to poll, a locally built image in
+	// image mode, or a mode nothing implements. Discovery keeps such a
+	// container instead of dropping it, so the dashboard reports the reason.
+	// A dropped container has no status at all, and the row then reads as up
+	// to date.
+	Unmonitorable string
+
 	// Rolling update: start new container before stopping old.
 	Rolling bool
 

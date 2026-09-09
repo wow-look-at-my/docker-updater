@@ -67,8 +67,8 @@ func TestListMonitoredContainersUntaggedRunningImage(t *testing.T) {
 
 func TestListMonitoredContainersUnresolvableSkipped(t *testing.T) {
 	// A locally-built image with no registry origin: Config.Image is a bare ID
-	// and there are no RepoDigests. It cannot be polled and must be skipped
-	// without erroring the whole loop.
+	// and there are no RepoDigests. It cannot be polled, so it is reported as
+	// unmonitorable rather than dropped, and it does not error the whole loop.
 	bareID := "sha256:" + strings.Repeat("4", 64)
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
@@ -94,7 +94,9 @@ func TestListMonitoredContainersUnresolvableSkipped(t *testing.T) {
 
 	containers, err := listMonitoredContainers(context.Background(), cli, "docker-updater.enable")
 	require.Nil(t, err)
-	assert.Equal(t, 0, len(containers))
+	require.Equal(t, 1, len(containers))
+	assert.Contains(t, containers[0].Unmonitorable, "no registry repository to poll")
+	assert.Empty(t, containers[0].ImageDigest, "nothing resolved a manifest to compare against")
 }
 
 func TestListMonitoredContainersConfigImageBareFallsBackToRepoDigest(t *testing.T) {

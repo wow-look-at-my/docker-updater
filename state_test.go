@@ -193,3 +193,45 @@ func TestStoreSnapshotEmpty(t *testing.T) {
 	assert.Empty(t, snap.Statuses)
 	assert.True(t, snap.LastCycle.IsZero())
 }
+
+// A container nothing can check is not a container that is up to date. The
+// status must carry the reason, and it must not read as a failed check: no
+// check ran, so there is no error and no stuck run.
+func TestStoreRecordUnmonitorable(t *testing.T) {
+	s := newStore()
+	now := time.Now()
+
+	s.Record([]UpdateResult{{
+		Container: ContainerInfo{
+			Name:          "s3",
+			Image:         "sha256:4a721d2e7ba5",
+			Mode:          UpdateModeImage,
+			Unmonitorable: "no registry repository to poll",
+		},
+		CheckedAt: now,
+	}}, now)
+
+	st := s.Snapshot().Statuses["s3"]
+	assert.Equal(t, "no registry repository to poll", st.Unmonitorable)
+	assert.Equal(t, now, st.LastChecked)
+	assert.Empty(t, st.LastError)
+	assert.False(t, st.UpdateAvailable)
+	assert.False(t, st.Skipped)
+	assert.Equal(t, 0, st.StuckCycles, "no update was offered, so no run is stuck")
+}
+
+// The reason clears when the container is reconfigured, like every other
+// per-cycle field.
+func TestStoreRecordUnmonitorableClears(t *testing.T) {
+	s := newStore()
+	now := time.Now()
+	info := ContainerInfo{Name: "s3", Mode: UpdateModeImage}
+
+	unfixed := info
+	unfixed.Unmonitorable = "no registry repository to poll"
+	s.Record([]UpdateResult{{Container: unfixed, CheckedAt: now}}, now)
+	require.NotEmpty(t, s.Snapshot().Statuses["s3"].Unmonitorable)
+
+	s.Record([]UpdateResult{{Container: info, OldRef: "sha256:abcdef012345", CheckedAt: now}}, now)
+	assert.Empty(t, s.Snapshot().Statuses["s3"].Unmonitorable)
+}

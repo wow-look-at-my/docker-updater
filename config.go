@@ -18,6 +18,11 @@ type Config struct {
 	ConfigPath    string
 	DashboardAddr string
 
+	// StatsURL is the base URL of a simple-stats-api instance. The dashboard
+	// polls it from the browser for host and per-container resource graphs.
+	// Empty means the dashboard says no stats source is configured.
+	StatsURL string
+
 	// SelfContainerID is the ID of docker-updater's own container. When set,
 	// an update that targets this container is performed via a detached helper
 	// (see self_update.go) instead of an inline recreate, which would kill the
@@ -90,6 +95,7 @@ func loadConfig() (Config, error) {
 	if v, ok := os.LookupEnv("DOCKER_UPDATER_DASHBOARD_ADDR"); ok {
 		c.DashboardAddr = v
 	}
+	c.StatsURL = os.Getenv("DOCKER_UPDATER_STATS_URL")
 
 	// Inbound GitHub webhook (opt-in: disabled unless an address is given).
 	// Because this listener is intended to be reachable from the public

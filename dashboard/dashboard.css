@@ -301,3 +301,29 @@ footer {
 footer code { background: var(--bg-elev); padding: 1px 5px; border-radius: 4px; }
 
 .hidden { display: none; }
+
+/* Resource graphs: <perf-graph> draws on its own canvas; these rules size the
+   strips and theme the element to the page palette. A strip dims while its
+   source is unreachable, and a gauge the source does not report keeps its
+   empty readout behind a tooltip. One stable hue per gauge. */
+.host-stats { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; overflow-x: auto; }
+.stat-strip { display: flex; gap: 4px; }
+.stat-strip perf-graph {
+  width: 120px;
+  flex: 0 0 auto;
+  --perf-graph-bg: var(--bg);
+  --perf-graph-grid: rgba(230, 237, 243, 0.06);
+  --perf-graph-text: var(--text-dim);
+  --perf-graph-value: var(--text);
+  --perf-graph-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.stat-strip perf-graph[label="cpu"]  { --perf-graph-line: var(--accent); --perf-graph-fill: rgba(59, 158, 255, 0.12); }
+.stat-strip perf-graph[label="ram"]  { --perf-graph-line: var(--purple); --perf-graph-fill: rgba(188, 140, 255, 0.12); }
+.stat-strip perf-graph[label="disk"] { --perf-graph-line: var(--amber); --perf-graph-fill: rgba(210, 153, 34, 0.12); }
+.stat-strip perf-graph[label="net"]  { --perf-graph-line: var(--green); --perf-graph-fill: rgba(63, 185, 80, 0.12); }
+.stat-strip perf-graph[label="gpu"]  { --perf-graph-line: var(--red); --perf-graph-fill: rgba(248, 81, 73, 0.12); }
+.stat-strip perf-graph.absent { opacity: 0.45; }
+.stat-strip.stale { opacity: 0.35; }
+.stats-row td { padding: 2px 8px 6px; border-top: none; }
+.badge-dim { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-error { background: rgba(248, 81, 73, 0.15); color: var(--red); }

@@ -257,6 +257,7 @@ type apiResponse struct {
 	Version     string         `json:"version,omitempty"`
 	LastCycle   *time.Time     `json:"last_cycle,omitempty"`
 	NextCycle   *time.Time     `json:"next_cycle,omitempty"`
+	StatsURL    string         `json:"stats_url,omitempty"`
 	Containers  []apiContainer `json:"containers"`
 }
 
@@ -275,6 +276,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		DryRun:      s.cfg.DryRun,
 		Label:       s.cfg.Label,
 		Version:     buildVersion(),
+		StatsURL:    s.cfg.StatsURL,
 	}
 	if !snap.LastCycle.IsZero() {
 		lc := snap.LastCycle

@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// reportStuck says, once per cycle, which containers have been offered an
-// update they did not take.
+// reportStuck says, once per cycle, which containers the updater could not
+// move: an update they did not take, a check that keeps failing, or no
+// possible check.
 //
 // The per-container failure line is already logged where the failure happens.
 // It is identical on every cycle, so a deployment frozen for weeks reads
@@ -32,8 +33,14 @@ func reportStuck(snap Snapshot, now time.Time, printf func(string, ...any)) {
 	sort.Strings(names)
 	for _, name := range names {
 		st := snap.Statuses[name]
-		printf("ERROR container %s is STUCK: %s has been available for %s over %d cycles and is still not running. Reason: %s",
-			name, availableDesc(st), now.Sub(st.StuckSince).Round(time.Minute), st.StuckCycles, stuckReason(st))
+		age := now.Sub(st.StuckSince).Round(time.Minute)
+		if st.UpdateAvailable {
+			printf("ERROR container %s is STUCK: %s has been available for %s over %d cycles and is still not running. Reason: %s",
+				name, availableDesc(st), age, st.StuckCycles, stuckReason(st))
+			continue
+		}
+		printf("ERROR container %s is STUCK: it could not be checked for %s over %d cycles. Reason: %s",
+			name, age, st.StuckCycles, stuckReason(st))
 	}
 }
 
@@ -46,6 +53,8 @@ func availableDesc(st ContainerStatus) string {
 
 func stuckReason(st ContainerStatus) string {
 	switch {
+	case st.Unmonitorable != "":
+		return st.Unmonitorable
 	case st.LastError != "":
 		return st.LastError
 	case st.SkipReason != "":

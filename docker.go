@@ -188,6 +188,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			Image:  c.Image,
 			Mode:   mode,
 			Labels: c.Labels,
+			State:  c.State,
 		}
 
 		if mode == UpdateModeGit {
@@ -299,21 +300,11 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 				continue
 			}
 
-			// Skip-guard for locally-built images. A container whose image has
-			// no RepoDigests has no registry origin (it was built locally and
-			// never pushed/pulled, e.g. a compose `build:` tag like
-			// `opencode:local`). resolveImageRef still returns the local tag as
-			// pullable, so without this guard image mode would `docker pull
-			// <local-tag>` every cycle and fail with "repository does not
-			// exist". Detect it and report the reason instead.
-			// A digest-pinned reference (already canonical) is exempt -- it
-			// names a real registry manifest even with no RepoDigests recorded.
-			if len(repoDigests) == 0 && !isCanonicalRef(ref) {
-				info.Unmonitorable = "image " + ref + " is built locally and is in no registry; set docker-updater.mode=build"
-				monitored = append(monitored, info)
-				continue
-			}
-
+			// Whether ref is pullable is the REGISTRY's answer, given by the
+			// pull itself. The running image's RepoDigests say nothing about
+			// it: a container started from a local CI build of a registry image
+			// has none, and it is exactly the drifted container an update must
+			// replace.
 			info.Image = ref
 			info.ImageDigest = imageIdentity(repoDigests, inspect.Image, repositoryOf(ref))
 		} else {

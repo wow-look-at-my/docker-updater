@@ -107,6 +107,60 @@ func TestReportStuckNamesTheAgeAndTheReason(t *testing.T) {
 	assert.Contains(t, line, "no such file or directory")
 }
 
+// The same "cannot be updated" reason every cycle is a frozen deployment too,
+// and it escalates the same way: the run's age and count on one ERROR line,
+// instead of one plain line repeated for three days.
+func TestRepeatedUnmonitorableReasonEscalatesToStuck(t *testing.T) {
+	s := newStore()
+	start := time.Now().Add(-3 * 24 * time.Hour)
+	unmonitorable := UpdateResult{
+		Container: ContainerInfo{
+			Name:          "s3",
+			Mode:          UpdateModeImage,
+			Unmonitorable: "no registry repository to poll: the container runs a bare image ID and its image carries no repo digest",
+		},
+		CheckedAt: start,
+	}
+	s.Record([]UpdateResult{unmonitorable}, start)
+	assert.False(t, s.Snapshot().Statuses["s3"].Stuck(), "one cycle is ordinary")
+	s.Record([]UpdateResult{unmonitorable}, start.Add(time.Minute))
+	require.True(t, s.Snapshot().Statuses["s3"].Stuck())
+
+	var lines []string
+	reportStuck(s.Snapshot(), start.Add(3*24*time.Hour), func(format string, v ...any) {
+		lines = append(lines, fmt.Sprintf(format, v...))
+	})
+
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "ERROR container s3 is STUCK")
+	assert.Contains(t, lines[0], "could not be checked for 72h0m0s over 2 cycles")
+	assert.Contains(t, lines[0], "no registry repository to poll")
+	assert.NotContains(t, lines[0], "has been available", "no update was offered")
+}
+
+// A check that fails before it finds anything is the same shape: the registry
+// error, repeated, is what the operator has to act on.
+func TestRepeatedCheckErrorEscalatesToStuck(t *testing.T) {
+	s := newStore()
+	now := time.Now()
+	failed := UpdateResult{
+		Container: ContainerInfo{Name: "s3", Mode: UpdateModeImage},
+		Error:     errors.New("image oci.pazer.build/go-s3-server:latest is not in its registry: manifest unknown"),
+		CheckedAt: now,
+	}
+	s.Record([]UpdateResult{failed}, now)
+	s.Record([]UpdateResult{failed}, now)
+
+	var lines []string
+	reportStuck(s.Snapshot(), now, func(format string, v ...any) {
+		lines = append(lines, fmt.Sprintf(format, v...))
+	})
+
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "could not be checked")
+	assert.Contains(t, lines[0], "manifest unknown")
+}
+
 // Nothing stuck says nothing: a line on every quiet cycle is what teaches an
 // operator to skim past the one that matters.
 func TestReportStuckSaysNothingWhenHealthy(t *testing.T) {

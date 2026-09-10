@@ -45,6 +45,10 @@ interface ApiContainer {
   // Why a container carrying the enable label can never be checked as it
   // stands. Terminal, unlike error: no cycle retries it.
   unmonitorable?: string;
+  // Present once the updater has failed to move this container for more than
+  // one consecutive cycle: how many, and since when.
+  stuck_cycles?: number;
+  stuck_since?: string | null;
   // Configuration notes, not failures: no standard
   // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
   warnings?: string[];
@@ -227,6 +231,15 @@ interface UpstreamView {
   detail: string | null;
 }
 
+// stuckPrefix opens the detail line of a container the updater has failed to
+// move for more than one cycle. The reason alone reads the same on the first
+// cycle and the thousandth; the run's age is what says a human is needed.
+function stuckPrefix(c: ApiContainer): string {
+  if (!c.stuck_cycles) return "";
+  const since = fmtRelative(c.stuck_since);
+  return "STUCK" + (since ? " " + since : "") + " (" + c.stuck_cycles + " cycles) · ";
+}
+
 function upstreamView(c: ApiContainer): UpstreamView {
   // This updater never checks a watchtower container, so it has no verdict to
   // give. Saying so beats an em dash that reads as "nothing is happening here".
@@ -237,7 +250,7 @@ function upstreamView(c: ApiContainer): UpstreamView {
   // Terminal, so it precedes every check outcome: nothing polls this container
   // and nothing will, and the row said "up to date" while that was the case.
   if (c.unmonitorable) {
-    return { cls: "up-error", status: "cannot update", detail: c.unmonitorable };
+    return { cls: "up-error", status: "cannot update", detail: stuckPrefix(c) + c.unmonitorable };
   }
   // An available update means one was detected but held back. Always surface it
   // as such — even when it also errored — so the row matches the "updates
@@ -248,10 +261,10 @@ function upstreamView(c: ApiContainer): UpstreamView {
       detail = (c.current_ref || "?") + " → " + (c.available_ref || "?");
     }
     const reason = heldBackReason(c);
-    return { cls: "up-available", status: "update available", detail: detail ? detail + " · " + reason : reason };
+    return { cls: "up-available", status: "update available", detail: stuckPrefix(c) + (detail ? detail + " · " + reason : reason) };
   }
   // Errored with no newer ref detected: a plain failure, not a pending update.
-  if (c.error) return { cls: "up-error", status: "error", detail: c.error };
+  if (c.error) return { cls: "up-error", status: "error", detail: stuckPrefix(c) + c.error };
   // Up to date.
   const updated = fmtRelative(c.last_updated);
   return { cls: "up-uptodate", status: "up to date", detail: updated ? "updated " + updated : null };
@@ -284,6 +297,7 @@ function errorReport(data: ApiResponse): string {
   const blocks = rows.map((c) => {
     const lines = [(c.name || "?") + "  [" + (c.image || "?") + "]"];
     lines.push("  state: " + (c.state || "unknown") + (c.health ? " (" + c.health + ")" : ""));
+    if (c.stuck_cycles) lines.push("  stuck: " + c.stuck_cycles + " cycles since " + (c.stuck_since || "?"));
     if (c.update_available) {
       const refs = c.current_ref || c.available_ref
         ? ": " + (c.current_ref || "?") + " -> " + (c.available_ref || "?")

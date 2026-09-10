@@ -50,12 +50,17 @@ const (
 // belongs to -- the address docker-updater dials, and the network it has to
 // join to get there.
 //
-// Both are empty when the container has no IP of its own. That is host, none or
-// container: network mode -- and equally a container that is not RUNNING, since
-// Docker assigns an endpoint IP only while one is up, and every IPAddress in a
-// stopped container's inspect output is the empty string. A caller reporting the
-// emptiness must not name the first cause alone: a crash-looping container reads
-// as a network-mode problem and the real failure goes unlooked-at.
+// The address is empty when the container has no IP of its own. That is host,
+// none or container: network mode -- and equally a container that is not
+// RUNNING, since Docker assigns an endpoint IP only while one is up, and every
+// IPAddress in a stopped container's inspect output is the empty string. A
+// caller reporting the emptiness must not name the first cause alone: a
+// crash-looping container reads as a network-mode problem and the real failure
+// goes unlooked-at.
+//
+// The network ID is still returned for a container that has one and no IP. A
+// pre-check URL that names the container by hostname resolves only from that
+// network, and the container gets its IP back the moment it is up.
 // There is no substitute to fall back on:
 // 127.0.0.1 is docker-updater's OWN loopback, so probing it reports on the
 // wrong process entirely and can pass a post-update health gate against
@@ -79,6 +84,11 @@ func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) 
 	for _, name := range names {
 		if net := inspect.NetworkSettings.Networks[name]; net.IPAddress != "" {
 			return net.IPAddress, net.NetworkID
+		}
+	}
+	for _, name := range names {
+		if net := inspect.NetworkSettings.Networks[name]; net.NetworkID != "" {
+			return "", net.NetworkID
 		}
 	}
 	return "", ""

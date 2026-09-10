@@ -199,9 +199,9 @@ type apiContainer struct {
 	Commit    string `json:"commit,omitempty"`
 	CommitURL string `json:"commit_url,omitempty"`
 	State     string `json:"state"`
-	Status  string `json:"status"`
-	Health  string `json:"health"`
-	Created int64  `json:"created"`
+	Status    string `json:"status"`
+	Health    string `json:"health"`
+	Created   int64  `json:"created"`
 
 	// Restarts is Docker's RestartCount: how many times the daemon's restart
 	// policy has restarted the container since it was created. docker-updater
@@ -231,8 +231,8 @@ type apiContainer struct {
 	AvailableCommit    string `json:"available_commit,omitempty"`
 	AvailableCommitURL string `json:"available_commit_url,omitempty"`
 	Error              string `json:"error,omitempty"`
-	Skipped         bool       `json:"skipped,omitempty"`
-	SkipReason      string     `json:"skip_reason,omitempty"`
+	Skipped            bool   `json:"skipped,omitempty"`
+	SkipReason         string `json:"skip_reason,omitempty"`
 	// Unmonitorable is why a container that carries the enable label can never
 	// be checked as it stands. The row must say so: a container no check can
 	// reach is not an up-to-date one.

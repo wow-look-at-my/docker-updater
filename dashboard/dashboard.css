@@ -324,6 +324,10 @@ footer code { background: var(--bg-elev); padding: 1px 5px; border-radius: 4px; 
 .stat-strip perf-graph[label="gpu"]  { --perf-graph-line: var(--red); --perf-graph-fill: rgba(248, 81, 73, 0.12); }
 .stat-strip perf-graph.absent { opacity: 0.45; }
 .stat-strip.stale { opacity: 0.35; }
-.stats-row td { padding: 2px 8px 6px; border-top: none; }
+/* The Resources column takes a third of a fixed-layout table; its five gauges
+   share that width evenly instead of holding the strip's 120px each. */
+.stats-th { width: 34%; }
+.stats-cell { vertical-align: top; padding-left: 8px; padding-right: 8px; }
+.stats-cell perf-graph { flex: 1 1 0; width: auto; min-width: 0; }
 .badge-dim { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); }
 .badge-error { background: rgba(248, 81, 73, 0.15); color: var(--red); }

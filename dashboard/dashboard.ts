@@ -622,6 +622,7 @@ function row(c: ApiContainer): HTMLElement {
     restartsCell(c),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),
+    statsCell(c),
   );
   // Inline style so the alpha can fade with age. It wins over .row-pending's
   // class background, which is acceptable: a just-updated container should not
@@ -710,7 +711,7 @@ function render(state: DashboardState): void {
   // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
-    document.getElementById(g.id + "-rows")!.replaceChildren(...members.flatMap((c) => [row(c), statsRow(c)].filter((n): n is HTMLElement => n !== null)));
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
     document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
     const section = document.getElementById(g.id) as HTMLDetailsElement;
     section.classList.toggle("hidden", members.length === 0);
@@ -1096,11 +1097,10 @@ function stripFor(name: string): StatStrip {
   return s;
 }
 
-// statsRow is the strip's own row under a container row: full width, so five
-// gauges get room the seven columns above cannot spare.
-function statsRow(c: ApiContainer): HTMLElement | null {
-  if (!statsBooted || !c.name) return null;
-  return el("tr", { class: "stats-row" }, el("td", { colspan: "7" }, stripFor(c.name).el));
+// statsCell is the row's Resources column. It stays empty until the graphs
+// component is loaded, so a page with no stats source draws a plain table.
+function statsCell(c: ApiContainer): HTMLElement {
+  return el("td", { class: "stats-cell" }, statsBooted && c.name ? stripFor(c.name).el : null);
 }
 
 function setStatsNote(text: string, cls: string): void {

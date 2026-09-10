@@ -73,6 +73,8 @@ interface ApiResponse {
   version?: string;
   last_cycle?: string | null;
   next_cycle?: string | null;
+  // Base URL of the simple-stats-api the resource graphs poll. Absent = none configured.
+  stats_url?: string;
   containers: ApiContainer[];
 }
 
@@ -620,6 +622,7 @@ function row(c: ApiContainer): HTMLElement {
     restartsCell(c),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
     upstreamCell(c),
+    statsCell(c),
   );
   // Inline style so the alpha can fade with age. It wins over .row-pending's
   // class background, which is acceptable: a just-updated container should not
@@ -664,6 +667,9 @@ function render(state: DashboardState): void {
   updateCopyButtons(state);
 
   document.getElementById("dry-run-badge")!.classList.toggle("hidden", !data.dry_run);
+  // Derived from the state so a page drawn from a copy shows the same note.
+  // With a source configured the poller owns this badge instead.
+  if (!data.stats_url) setStatsNote("no stats source (DOCKER_UPDATER_STATS_URL unset)", "badge-dim");
   setText("cfg-interval", data.interval || "—");
   setText("cfg-label", data.label || "—");
   setText("refresh-interval", ui.refresh_seconds);
@@ -779,6 +785,7 @@ async function refresh(): Promise<void> {
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
     latestData = (await resp.json()) as ApiResponse;
     pollFailure = null;
+    bootStats(latestData);
   } catch (err) {
     pollFailure = isNullElementError(err)
       ? OUT_OF_SYNC_HINT
@@ -899,4 +906,287 @@ if (missingIds.length > 0) {
   renderOutOfSyncBanner(missingIds);
 } else {
   initDashboard();
+}
+
+// -- Resource graphs ----------------------------------------------------------
+//
+// Host cpu/ram/disk/net/gpu in the top bar and one strip per container row,
+// every number from the simple-stats-api named by the payload's stats_url.
+// This page measures nothing: it polls that API on the API's own interval and
+// pushes values into <perf-graph> elements (js-snippets, loaded at runtime).
+// Strips are cached per container name and MOVED into each new row, so the
+// five-second re-render never drops a graph's history.
+//
+// Honesty: no stats_url says so in the top bar; an unreachable source dims the
+// strips and shows a badge; a metric the source does not report keeps its
+// gauge empty behind a tooltip. Nothing draws a flat zero.
+
+const PERF_GRAPH_URL = "https://sites.pazer.build/js-snippets/branch/library/ui/perf-graph.js";
+const STATS_SEED_HISTORY = 300;
+const STATS_RETRY_MS = 5000; // fixed cadence, never grows
+const STATS_MIN_POLL_MS = 1000;
+
+interface PerfGraphLike extends HTMLElement {
+  push(value: number): void;
+  clear(): void;
+}
+
+interface StatMetric {
+  value: number;
+  percent?: number | null;
+  history?: number[];
+}
+
+interface StatContainer {
+  cpu?: { percent?: StatMetric };
+  ram?: { used?: StatMetric };
+  network?: { rx_rate?: StatMetric; tx_rate?: StatMetric };
+  disk?: { io?: { read_rate?: StatMetric; write_rate?: StatMetric } };
+  gpu?: { utilization?: StatMetric };
+}
+
+interface StatsResponse {
+  sampling?: { intervalSeconds?: number };
+  metrics?: {
+    cpu?: { percent?: StatMetric };
+    ram?: { percent?: StatMetric };
+    disk?: { percent?: StatMetric };
+    network?: { rx_rate?: StatMetric; tx_rate?: StatMetric };
+    gpu?: Array<{ utilization?: StatMetric }>;
+    docker?: { containers?: StatMetric };
+    containers?: Record<string, StatContainer>;
+  };
+}
+
+interface StatGauge {
+  label: string;
+  unit: string;
+  min: number | null;
+  max: number | null;
+  series: (m: unknown) => number[] | null; // newest first, or null when unreported
+  absent: string;
+}
+
+function statSeries(m: StatMetric | undefined): number[] | null {
+  if (!m || typeof m.value !== "number") return null;
+  return [m.value, ...(m.history || [])];
+}
+
+// Share of the possible range, newest first (the API's percent is only the current value).
+function statPercentSeries(m: StatMetric | undefined): number[] | null {
+  if (!m || typeof m.value !== "number") return null;
+  const cur = typeof m.percent === "number" ? m.percent : m.value;
+  if (m.value === 0) return [cur, ...(m.history || []).map(() => 0)];
+  const scale = cur / m.value;
+  return [cur, ...(m.history || []).map((v) => v * scale)];
+}
+
+function statSumSeries(a: StatMetric | undefined, b: StatMetric | undefined, scale: number): number[] | null {
+  const sa = statSeries(a);
+  const sb = statSeries(b);
+  if (!sa && !sb) return null;
+  if (!sa) return sb!.map((v) => v * scale);
+  if (!sb) return sa.map((v) => v * scale);
+  const n = Math.min(sa.length, sb.length);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push((sa[i] + sb[i]) * scale);
+  return out;
+}
+
+const STAT_MB = 1 / 1e6;
+const STAT_MIB = 1 / 1048576;
+
+const HOST_STAT_GAUGES: StatGauge[] = [
+  { label: "cpu", unit: "%", min: 0, max: 100, absent: "no cpu figure from the stats source",
+    series: (m) => statPercentSeries((m as StatsResponse["metrics"])?.cpu?.percent) },
+  { label: "ram", unit: "%", min: 0, max: 100, absent: "no ram figure from the stats source",
+    series: (m) => statSeries((m as StatsResponse["metrics"])?.ram?.percent) },
+  { label: "disk", unit: "%", min: 0, max: 100, absent: "no disk figure from the stats source (Linux only)",
+    series: (m) => statSeries((m as StatsResponse["metrics"])?.disk?.percent) },
+  { label: "net", unit: "MB/s", min: 0, max: null, absent: "no network figure from the stats source",
+    series: (m) => { const n = (m as StatsResponse["metrics"])?.network; return statSumSeries(n?.rx_rate, n?.tx_rate, STAT_MB); } },
+  { label: "gpu", unit: "%", min: 0, max: 100, absent: "no GPU reported by the stats source",
+    series: (m) => statSeries((m as StatsResponse["metrics"])?.gpu?.[0]?.utilization) },
+];
+
+const CONTAINER_STAT_GAUGES: StatGauge[] = [
+  { label: "cpu", unit: "%", min: 0, max: 100, absent: "no cpu figure for this container",
+    series: (m) => statPercentSeries((m as StatContainer).cpu?.percent) },
+  { label: "ram", unit: "MiB", min: 0, max: null, absent: "no memory figure for this container",
+    series: (m) => { const s = statSeries((m as StatContainer).ram?.used); return s ? s.map((v) => v * STAT_MIB) : null; } },
+  { label: "disk", unit: "MB/s", min: 0, max: null, absent: "no block I/O figure for this container",
+    series: (m) => { const io = (m as StatContainer).disk?.io; return statSumSeries(io?.read_rate, io?.write_rate, STAT_MB); } },
+  { label: "net", unit: "MB/s", min: 0, max: null, absent: "no network figure for this container",
+    series: (m) => { const n = (m as StatContainer).network; return statSumSeries(n?.rx_rate, n?.tx_rate, STAT_MB); } },
+  { label: "gpu", unit: "%", min: 0, max: 100, absent: "no GPU work attributed to this container",
+    series: (m) => statSeries((m as StatContainer).gpu?.utilization) },
+];
+
+// A row of gauges bound to one metrics subtree.
+class StatStrip {
+  readonly el: HTMLElement;
+  private graphs: Array<{ gauge: StatGauge; el: PerfGraphLike; seeded: boolean; present: boolean }> = [];
+
+  constructor(gauges: StatGauge[]) {
+    this.el = el("div", { class: "stat-strip" });
+    for (const gauge of gauges) {
+      const g = document.createElement("perf-graph") as PerfGraphLike;
+      g.setAttribute("compact", "");
+      g.setAttribute("label", gauge.label);
+      g.setAttribute("unit", gauge.unit);
+      g.setAttribute("history", String(STATS_SEED_HISTORY));
+      if (gauge.min !== null) g.setAttribute("min", String(gauge.min));
+      if (gauge.max !== null) g.setAttribute("max", String(gauge.max));
+      this.el.appendChild(g);
+      this.graphs.push({ gauge, el: g, seeded: false, present: false });
+    }
+  }
+
+  // Feed one reading. A seed reading carries history and is replayed oldest-first.
+  update(m: unknown, seed: boolean): void {
+    for (const g of this.graphs) {
+      const s = g.gauge.series(m);
+      if (!s) {
+        if (g.present || !g.el.title) {
+          g.el.clear();
+          g.el.title = g.gauge.absent;
+          g.el.classList.add("absent");
+          g.present = false;
+        }
+        continue;
+      }
+      if (!g.present) {
+        g.el.title = "";
+        g.el.classList.remove("absent");
+        g.present = true;
+      }
+      if (seed || !g.seeded) {
+        g.el.clear();
+        for (let i = s.length - 1; i >= 0; i--) g.el.push(s[i]);
+        g.seeded = true;
+      } else {
+        g.el.push(s[0]);
+      }
+    }
+  }
+
+  setStale(stale: boolean, why: string): void {
+    this.el.classList.toggle("stale", stale);
+    if (stale) this.el.title = why;
+    else this.el.removeAttribute("title");
+  }
+}
+
+// Per-container strips outlive rows: row() asks for the strip by name and the
+// node moves into the new row. A container the source stops reporting keeps
+// its strip dimmed with the reason, until the container itself leaves the page.
+const containerStrips = new Map<string, StatStrip>();
+let hostStrip: StatStrip | null = null;
+let latestStats: StatsResponse | null = null;
+let statsBooted = false;
+
+function stripFor(name: string): StatStrip {
+  let s = containerStrips.get(name);
+  if (!s) {
+    s = new StatStrip(CONTAINER_STAT_GAUGES);
+    containerStrips.set(name, s);
+    const m = latestStats?.metrics?.containers?.[name];
+    if (m) s.update(m, true);
+    else s.setStale(true, "the stats source reports nothing for this container");
+  }
+  return s;
+}
+
+// statsCell is the row's Resources column. It stays empty until the graphs
+// component is loaded, so a page with no stats source draws a plain table.
+function statsCell(c: ApiContainer): HTMLElement {
+  return el("td", { class: "stats-cell" }, statsBooted && c.name ? stripFor(c.name).el : null);
+}
+
+function setStatsNote(text: string, cls: string): void {
+  const n = document.getElementById("stats-note");
+  if (!n) return;
+  n.textContent = text;
+  n.className = "badge " + cls;
+  n.classList.toggle("hidden", text === "");
+}
+
+function applyStats(r: StatsResponse, seed: boolean): void {
+  latestStats = r;
+  const m = r.metrics;
+  hostStrip?.update(m, seed);
+  const all = m?.containers || {};
+  for (const [name, strip] of containerStrips) {
+    const cm = all[name];
+    if (cm) {
+      strip.update(cm, seed);
+      strip.setStale(false, "");
+    } else {
+      strip.setStale(true, m?.docker ? "the stats source reports nothing for this container" : "the stats source reports no Docker containers (no daemon socket)");
+    }
+  }
+  // Drop strips for containers that left the page.
+  const onPage = new Set((latestData?.containers || []).map((c) => c.name));
+  for (const name of containerStrips.keys()) if (!onPage.has(name)) containerStrips.delete(name);
+}
+
+// tsc is configured with module "none", which rejects a dynamic import in
+// source; the browser supports it in a classic script, so it goes through Function.
+const importModule = new Function("u", "return import(u)") as (u: string) => Promise<unknown>;
+
+async function loadPerfGraphForever(): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await importModule(attempt === 0 ? PERF_GRAPH_URL : PERF_GRAPH_URL + "?retry=" + attempt);
+      return;
+    } catch (e) {
+      console.error("perf-graph: component load failed (retry in " + STATS_RETRY_MS + "ms):", e);
+      await new Promise((r) => setTimeout(r, STATS_RETRY_MS));
+    }
+  }
+}
+
+async function pollStatsForever(base: string): Promise<void> {
+  let seed = true;
+  let intervalMs = STATS_MIN_POLL_MS;
+  for (;;) {
+    try {
+      const res = await fetch(base + "/api/v1/stats.json?history=" + (seed ? STATS_SEED_HISTORY : 0), { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      applyStats((await res.json()) as StatsResponse, seed);
+      hostStrip?.setStale(false, "");
+      setStatsNote("", "");
+      const iv = (latestStats?.sampling?.intervalSeconds) ?? 0;
+      if (iv > 0) intervalMs = Math.max(STATS_MIN_POLL_MS, iv * 1000);
+      seed = false;
+    } catch (e) {
+      const why = "stats source unreachable: " + base + " (" + (e instanceof Error ? e.message : String(e)) + ")";
+      console.error(why);
+      hostStrip?.setStale(true, why);
+      for (const s of containerStrips.values()) s.setStale(true, why);
+      setStatsNote("stats unreachable", "badge-error");
+      seed = true;
+      await new Promise((r) => setTimeout(r, STATS_RETRY_MS));
+      continue;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+// bootStats runs once, on the first payload. Without a stats_url the top bar
+// says so and nothing else happens; the rows get no strip.
+function bootStats(data: ApiResponse): void {
+  if (statsBooted) return;
+  const mount = document.getElementById("host-stats");
+  if (!mount) return;
+  const base = (data.stats_url || "").replace(/\/$/, "");
+  if (base === "") return; // render() carries the note, derived from the state
+  statsBooted = true;
+  setStatsNote("stats loading…", "badge-dim");
+  void loadPerfGraphForever().then(() => {
+    hostStrip = new StatStrip(HOST_STAT_GAUGES);
+    mount.replaceChildren(hostStrip.el);
+    repaint(); // rows now get their strips
+    void pollStatsForever(base);
+  });
 }

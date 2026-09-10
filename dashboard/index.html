@@ -15,7 +15,12 @@
     </div>
     <input type="search" id="search" class="search" placeholder="filter containers" autocomplete="off"
            title="Filter by container name or image — press / to focus, Escape to clear">
+    <!-- Host resource graphs from the simple-stats-api named by the payload's
+         stats_url. The note beside them says when there is no source or the
+         source is unreachable: an empty strip must never read as idle. -->
+    <div id="host-stats" class="host-stats"></div>
     <div class="meta">
+      <span id="stats-note" class="badge badge-dim hidden"></span>
       <span id="dry-run-badge" class="badge badge-dry hidden">DRY RUN</span>
       <span id="last-cycle" class="meta-item" title="Last completed check cycle"></span>
       <span id="next-cycle" class="meta-item" title="Next scheduled check"></span>
@@ -52,6 +57,7 @@
             <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
             <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
             <th>Upstream</th>
+            <th class="stats-th">Resources</th>
           </tr>
         </thead>
         <tbody id="group-managed-online-rows"></tbody>
@@ -70,6 +76,7 @@
             <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
             <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
             <th>Upstream</th>
+            <th class="stats-th">Resources</th>
           </tr>
         </thead>
         <tbody id="group-managed-offline-rows"></tbody>
@@ -88,6 +95,7 @@
             <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
             <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
             <th>Upstream</th>
+            <th class="stats-th">Resources</th>
           </tr>
         </thead>
         <tbody id="group-unmanaged-online-rows"></tbody>
@@ -106,6 +114,7 @@
             <th title="Restarts by Docker's restart policy since the container was last (re)created — i.e. since the last pull for monitored containers">Restarts</th>
             <th title="When a newer image was last actually downloaded (not reset by up-to-date checks)">Last pulled</th>
             <th>Upstream</th>
+            <th class="stats-th">Resources</th>
           </tr>
         </thead>
         <tbody id="group-unmanaged-offline-rows"></tbody>

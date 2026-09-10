@@ -105,15 +105,11 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRu
 	result.NewRef = newDigest
 	log.Printf("container %s: image update available (%s -> %s)", info.Name, shortID(info.ImageDigest), shortID(newDigest))
 
-	if !info.Rolling {
-		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-			if err := runPreCheck(ctx, cli, info); err != nil {
-				result.Skipped = true
-				result.SkipReason = err.Error()
-				log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
-				return result
-			}
-		}
+	if reason := preCheckRefuses(ctx, cli, info); reason != "" {
+		result.Skipped = true
+		result.SkipReason = reason
+		log.Printf("container %s: pre-check failed, skipping update: %s", info.Name, reason)
+		return result
 	}
 
 	if cfg.DryRun {
@@ -148,15 +144,11 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, runner composeRunn
 	result.NewRef = newSHA
 	log.Printf("container %s: git update detected (new SHA: %s)", info.Name, shortID(newSHA))
 
-	if !info.Rolling {
-		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-			if err := runPreCheck(ctx, cli, info); err != nil {
-				result.Skipped = true
-				result.SkipReason = err.Error()
-				log.Printf("container %s: pre-check failed, skipping update: %v", info.Name, err)
-				return result
-			}
-		}
+	if reason := preCheckRefuses(ctx, cli, info); reason != "" {
+		result.Skipped = true
+		result.SkipReason = reason
+		log.Printf("container %s: pre-check failed, skipping update: %s", info.Name, reason)
+		return result
 	}
 
 	if cfg.DryRun {
@@ -219,15 +211,11 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 		log.Printf("container %s: base image update detected (%s -> %s)", info.Name, shortID(oldBase), shortID(newBase))
 	}
 
-	if !info.Rolling {
-		if info.PreCheckURL != "" || info.PreCheckCommand != "" {
-			if err := runPreCheck(ctx, cli, info); err != nil {
-				result.Skipped = true
-				result.SkipReason = err.Error()
-				log.Printf("container %s: pre-check failed, skipping rebuild: %v", info.Name, err)
-				return result
-			}
-		}
+	if reason := preCheckRefuses(ctx, cli, info); reason != "" {
+		result.Skipped = true
+		result.SkipReason = reason
+		log.Printf("container %s: pre-check failed, skipping rebuild: %s", info.Name, reason)
+		return result
 	}
 
 	if cfg.DryRun {
@@ -251,6 +239,25 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 	result.Updated = true
 	_ = changed
 	return result
+}
+
+// preCheckRefuses asks the container's pre-update gate and returns why the
+// update must wait, or "" to go ahead. A rolling update is never gated. A
+// container that is not running is never asked: the gate protects work in
+// flight, and a dead container has none. Asking it anyway held webhook-runner
+// on a broken image for hours, because the gate's own hostname could not answer.
+func preCheckRefuses(ctx context.Context, cli DockerClient, info ContainerInfo) string {
+	if info.Rolling || (info.PreCheckURL == "" && info.PreCheckCommand == "") {
+		return ""
+	}
+	if info.State != "" && info.State != "running" && info.State != "paused" {
+		log.Printf("container %s is %s: nothing is in flight, so the pre-check is not asked", info.Name, info.State)
+		return ""
+	}
+	if err := runPreCheck(ctx, cli, info); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config) error {

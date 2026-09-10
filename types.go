@@ -23,6 +23,10 @@ type ContainerInfo struct {
 	ImageDigest string
 	Mode        UpdateMode
 	Labels      map[string]string
+	// State is Docker's container state ("running", "restarting", "exited",
+	// ...). A container that is not running has no work in flight, so the
+	// pre-update gate is not asked for it.
+	State string
 
 	// Git-mode fields
 	GitRepo string

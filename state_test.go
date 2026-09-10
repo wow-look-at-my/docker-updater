@@ -196,7 +196,8 @@ func TestStoreSnapshotEmpty(t *testing.T) {
 
 // A container nothing can check is not a container that is up to date. The
 // status must carry the reason, and it must not read as a failed check: no
-// check ran, so there is no error and no stuck run.
+// check ran, so there is no error. It still starts the stuck run, because the
+// container is as frozen as one that refuses an update.
 func TestStoreRecordUnmonitorable(t *testing.T) {
 	s := newStore()
 	now := time.Now()
@@ -217,7 +218,7 @@ func TestStoreRecordUnmonitorable(t *testing.T) {
 	assert.Empty(t, st.LastError)
 	assert.False(t, st.UpdateAvailable)
 	assert.False(t, st.Skipped)
-	assert.Equal(t, 0, st.StuckCycles, "no update was offered, so no run is stuck")
+	assert.Equal(t, 1, st.StuckCycles, "a container nothing can check begins a stuck run")
 }
 
 // The reason clears when the container is reconfigured, like every other

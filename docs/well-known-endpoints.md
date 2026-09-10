@@ -18,6 +18,8 @@ Both answer `GET` and carry their meaning in the **status code**. Both must be c
 
 `pre-update` is the place to say "not right now". Reasons include a running migration, a long request in flight, and a draining queue. It must not block. Answer immediately with what is true at that moment.
 
+The gate is asked only of a running container. One that is restarting, exited, or dead has nothing in flight. The update is what brings it back. So it is applied without asking. This holds for the label-configured `docker-updater.pre-check.url` and `.command` too.
+
 Neither endpoint needs a body. Anything returned is ignored, so a one-line handler is a complete implementation.
 
 ## Discovery

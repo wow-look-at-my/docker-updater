@@ -34,23 +34,25 @@ type ContainerStatus struct {
 	DryRun     bool
 
 	// Unmonitorable is why this container can never be checked as configured.
-	// It is not a cycle failure: no check ran and none can, so it ends no
-	// stuck run and offers no update.
+	// No check ran, so it offers no update; it still continues the stuck run,
+	// because a container nothing can check is as frozen as one that refuses.
 	Unmonitorable string
 
-	// StuckCycles counts the consecutive cycles that found an update and did
-	// not apply it. StuckSince is when that run began.
+	// StuckCycles counts the consecutive cycles that left this container on
+	// the version it runs against the updater's will: an update it did not
+	// take, a check that failed, or no possible check. StuckSince is when
+	// that run began.
 	//
-	// One failed update is ordinary. The same one every cycle for weeks is a
-	// deployment frozen on the version it already runs, and the per-cycle log
-	// line reads the same on the first cycle as on the thousandth. Counting the
-	// run is what separates the two.
+	// One failure is ordinary. The same one every cycle for weeks is a
+	// deployment frozen where it stands, and the per-cycle log line reads the
+	// same on the first cycle as on the thousandth. Counting the run is what
+	// separates the two.
 	StuckCycles int
 	StuckSince  time.Time
 }
 
-// Stuck reports whether this container has failed to take an available update
-// for more than one cycle.
+// Stuck reports whether this container has been unable to move for more than
+// one cycle.
 func (s ContainerStatus) Stuck() bool { return s.StuckCycles > 1 }
 
 // Store holds the latest snapshot of the updater's per-container knowledge. It
@@ -102,10 +104,10 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.AvailableRef = ""
 		st.CurrentRef = shortRef(r.OldRef)
 
-		// An update that was found and not applied continues the run. Anything
-		// else ends it, including a cycle with nothing to apply: the version
-		// the container runs is then the one that was offered.
-		stuck := r.Error != nil || r.Skipped
+		// A cycle that could not move the container continues the run. A clean
+		// cycle ends it, including one with nothing to apply: the version the
+		// container runs is then the one that was offered.
+		stuck := r.Error != nil || r.Skipped || r.Container.Unmonitorable != ""
 		switch {
 		case !stuck:
 			st.StuckCycles = 0

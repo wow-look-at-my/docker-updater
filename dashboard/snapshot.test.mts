@@ -117,6 +117,8 @@ const PAYLOAD = {
 			mode: "image",
 			update_available: false,
 			unmonitorable: "no registry repository to poll: the container runs a bare image ID and its image carries no repo digest",
+			stuck_cycles: 800,
+			stuck_since: "2026-08-05T19:00:00Z",
 		},
 		{
 			name: "goflow2",

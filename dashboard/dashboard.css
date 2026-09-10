@@ -162,6 +162,8 @@ tr.row-flash td { animation: row-flash 1.4s ease-out; }
    the top-aligned cells to its right rather than wrapping into a tall stack. */
 .cmeta { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; white-space: nowrap; }
 .cref { font-size: 11px; }
+a.commit { color: inherit; text-decoration: underline dotted; }
+a.commit:hover { color: var(--accent); text-decoration: underline; }
 
 .badge {
   display: inline-block;

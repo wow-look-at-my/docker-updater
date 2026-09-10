@@ -20,6 +20,10 @@ interface ApiContainer {
   name: string;
   image: string;
   image_id: string;
+  // The commit the running image was built from, and its page, when the
+  // image's OCI labels name one.
+  commit?: string;
+  commit_url?: string;
   state: string;
   status: string;
   health: string;
@@ -39,6 +43,9 @@ interface ApiContainer {
   update_available: boolean;
   current_ref?: string;
   available_ref?: string;
+  // The commit the available image was built from, and its page.
+  available_commit?: string;
+  available_commit_url?: string;
   error?: string;
   skipped?: boolean;
   skip_reason?: string;
@@ -270,10 +277,26 @@ function upstreamView(c: ApiContainer): UpstreamView {
   return { cls: "up-uptodate", status: "up to date", detail: updated ? "updated " + updated : null };
 }
 
+// commitLink is a short commit id that opens the commit's page. Without a
+// page (an image whose labels name no source) it is plain text.
+function commitLink(sha: string, url?: string): HTMLElement {
+  const short = sha.slice(0, 12);
+  if (!url) return el("span", { class: "cref" }, short);
+  return el("a", { class: "cref commit", href: url, target: "_blank", rel: "noopener", title: sha }, short);
+}
+
 function upstreamCell(c: ApiContainer): HTMLElement {
   const view = upstreamView(c);
   const td = el("td", null, el("span", { class: view.cls }, view.status));
   if (view.detail) td.appendChild(el("div", { class: "detail" }, view.detail));
+  // The digests above say an update exists. The commits say what is in it.
+  if (c.update_available && c.available_commit) {
+    td.appendChild(el("div", { class: "detail" },
+      c.commit ? commitLink(c.commit, c.commit_url) : "?",
+      " → ",
+      commitLink(c.available_commit, c.available_commit_url),
+    ));
+  }
   return td;
 }
 
@@ -578,6 +601,8 @@ function row(c: ApiContainer): HTMLElement {
       c.image || "—",
       c.image_id ? " · " : null,
       c.image_id ? el("span", { class: "cref" }, c.image_id) : null,
+      c.commit ? " · " : null,
+      c.commit ? commitLink(c.commit, c.commit_url) : null,
     ),
     ...warningLines(c),
     ...reasonLine(c),

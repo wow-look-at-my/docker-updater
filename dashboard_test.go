@@ -48,7 +48,11 @@ func mockContainers() []types.Container {
 			State:   "running",
 			Status:  "Up 2 hours (healthy)",
 			Created: time.Now().Add(-2 * time.Hour).Unix(),
-			Labels:  map[string]string{"docker-updater.enable": "true"},
+			Labels: map[string]string{
+				"docker-updater.enable": "true",
+				labelImageRevision:      "3d93f61589ca1c34e673d08be7fc189f851156c3",
+				labelImageSource:        "https://github.com/wow-look-at-my/web",
+			},
 		},
 		{
 			Names:   []string{"/api"},
@@ -151,6 +155,9 @@ func TestHandleAPIContainers(t *testing.T) {
 	assert.False(t, web.UpdateAvailable)
 	require.NotNil(t, web.LastChecked)
 	require.NotNil(t, web.LastPulled)
+	// The image labels name the commit it was built from; the row links it.
+	assert.Equal(t, "3d93f61589ca1c34e673d08be7fc189f851156c3", web.Commit)
+	assert.Equal(t, "https://github.com/wow-look-at-my/web/commit/3d93f61589ca1c34e673d08be7fc189f851156c3", web.CommitURL)
 
 	api := byName["api"]
 	assert.True(t, api.AutoUpdate)

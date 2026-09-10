@@ -23,6 +23,10 @@ type ContainerStatus struct {
 	UpdateAvailable bool
 	CurrentRef      string // current digest or commit (short form)
 	AvailableRef    string // newer digest or commit (short form), if available
+	// The commit the available image was built from, and its page. Empty when
+	// the image carries no commit.
+	AvailableCommit    string
+	AvailableCommitURL string
 
 	// Warnings about how the container is configured for update checks
 	// (missing standard endpoints, nonstandard label overrides).
@@ -102,6 +106,7 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.SkipReason = ""
 		st.UpdateAvailable = false
 		st.AvailableRef = ""
+		st.AvailableCommit, st.AvailableCommitURL = "", ""
 		st.CurrentRef = shortRef(r.OldRef)
 
 		// A cycle that could not move the container continues the run. A clean
@@ -125,16 +130,19 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 			if r.NewRef != "" {
 				st.UpdateAvailable = true
 				st.AvailableRef = shortRef(r.NewRef)
+				st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 			}
 		case r.Skipped:
 			st.Skipped = true
 			st.SkipReason = r.SkipReason
 			st.UpdateAvailable = true
 			st.AvailableRef = shortRef(r.NewRef)
+			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated && r.DryRun:
 			// Dry-run: an update is available but was deliberately not applied.
 			st.UpdateAvailable = true
 			st.AvailableRef = shortRef(r.NewRef)
+			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated:
 			// Update applied: the new ref is now the running version.
 			st.LastUpdated = r.CheckedAt

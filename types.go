@@ -99,16 +99,20 @@ type ContainerInfo struct {
 
 // UpdateResult records the outcome of an update check/action.
 type UpdateResult struct {
-	Container  ContainerInfo
-	Updated    bool
-	OldRef     string // old digest or commit SHA
-	NewRef     string // new digest or commit SHA
-	Error      error
-	CheckedAt  time.Time
-	DryRun     bool
-	Skipped    bool
-	SkipReason string
-	Pulled     bool // a registry pull was performed during this check
+	Container ContainerInfo
+	Updated   bool
+	OldRef    string // old digest or commit SHA
+	NewRef    string // new digest or commit SHA
+	// The commit the new image was built from, and its page, when its labels
+	// name one. Image mode only.
+	NewCommit    string
+	NewCommitURL string
+	Error        error
+	CheckedAt    time.Time
+	DryRun       bool
+	Skipped      bool
+	SkipReason   string
+	Pulled       bool // a registry pull was performed during this check
 	// Warnings are operator-actionable notes about how this container is
 	// configured (no standard endpoints, nonstandard label overrides). They
 	// describe configuration, not the outcome of this cycle.

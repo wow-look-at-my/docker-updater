@@ -66,6 +66,10 @@ const PAYLOAD = {
 			update_available: true,
 			current_ref: "8ff850b581c2",
 			available_ref: "aa11bb22cc33",
+			commit: "3d93f61589ca1c34e673d08be7fc189f851156c3",
+			commit_url: "https://github.com/wow-look-at-my/webhook-runner/commit/3d93f61589ca1c34e673d08be7fc189f851156c3",
+			available_commit: "aa11bb22cc33dd44ee55ff6600112233445566778",
+			available_commit_url: "https://github.com/wow-look-at-my/webhook-runner/commit/aa11bb22cc33dd44ee55ff6600112233445566778",
 			skipped: true,
 			skip_reason: "pre-update endpoint answered 503",
 			warnings: [

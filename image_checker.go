@@ -23,6 +23,18 @@ func checkImageUpdate(ctx context.Context, cli DockerClient, info ContainerInfo,
 	return "", fetched, nil
 }
 
+// pulledCommit reads the commit the image now under imageName was built from.
+// It runs after a pull, so the name resolves to the fetched image. An image
+// with no such labels, or one the daemon cannot inspect, yields nothing: the
+// digest still names the update.
+func pulledCommit(ctx context.Context, cli DockerClient, imageName string) (sha, url string) {
+	inspect, _, err := cli.ImageInspectWithRaw(ctx, imageName)
+	if err != nil || inspect.Config == nil {
+		return "", ""
+	}
+	return commitOf(inspect.Config.Labels)
+}
+
 // pullFailure reports a failed pull with the daemon's own reason. Only when the
 // registry says the repository or manifest does not exist is build mode a
 // remedy: a local compose `build:` tag is not in any registry. Every other

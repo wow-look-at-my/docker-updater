@@ -103,6 +103,10 @@ type UpdateResult struct {
 	Updated    bool
 	OldRef     string // old digest or commit SHA
 	NewRef     string // new digest or commit SHA
+	// The commit the new image was built from, and its page, when its labels
+	// name one. Image mode only.
+	NewCommit    string
+	NewCommitURL string
 	Error      error
 	CheckedAt  time.Time
 	DryRun     bool

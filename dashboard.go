@@ -194,7 +194,11 @@ type apiContainer struct {
 	Name    string `json:"name"`
 	Image   string `json:"image"`
 	ImageID string `json:"image_id"`
-	State   string `json:"state"`
+	// The commit the running image was built from, and its page. From the
+	// image's OCI labels; absent when the image carries none.
+	Commit    string `json:"commit,omitempty"`
+	CommitURL string `json:"commit_url,omitempty"`
+	State     string `json:"state"`
 	Status  string `json:"status"`
 	Health  string `json:"health"`
 	Created int64  `json:"created"`
@@ -223,7 +227,10 @@ type apiContainer struct {
 	UpdateAvailable bool       `json:"update_available"`
 	CurrentRef      string     `json:"current_ref,omitempty"`
 	AvailableRef    string     `json:"available_ref,omitempty"`
-	Error           string     `json:"error,omitempty"`
+	// The commit the available image was built from, and its page.
+	AvailableCommit    string `json:"available_commit,omitempty"`
+	AvailableCommitURL string `json:"available_commit_url,omitempty"`
+	Error              string `json:"error,omitempty"`
 	Skipped         bool       `json:"skipped,omitempty"`
 	SkipReason      string     `json:"skip_reason,omitempty"`
 	// Unmonitorable is why a container that carries the enable label can never
@@ -290,6 +297,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			AutoUpdate: c.Labels[s.cfg.Label] == "true",
 			Restarts:   restartCount(r.Context(), s.cli, c.ID),
 		}
+		ac.Commit, ac.CommitURL = commitOf(c.Labels)
 
 		// Only for a container that is failing: a healthy one's last log line is
 		// noise, and reading every container's logs on every poll would make
@@ -316,6 +324,8 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.UpdateAvailable = st.UpdateAvailable
 			ac.CurrentRef = st.CurrentRef
 			ac.AvailableRef = st.AvailableRef
+			ac.AvailableCommit = st.AvailableCommit
+			ac.AvailableCommitURL = st.AvailableCommitURL
 			ac.Error = st.LastError
 			ac.Skipped = st.Skipped
 			ac.SkipReason = st.SkipReason

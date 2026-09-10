@@ -103,6 +103,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRu
 	}
 
 	result.NewRef = newDigest
+	result.NewCommit, result.NewCommitURL = pulledCommit(ctx, cli, info.Image)
 	log.Printf("container %s: image update available (%s -> %s)", info.Name, shortID(info.ImageDigest), shortID(newDigest))
 
 	if reason := preCheckRefuses(ctx, cli, info); reason != "" {

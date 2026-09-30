@@ -68,6 +68,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 	clearInheritedDefaultsFor(ctx, cli, config, oldImageID, info.Name)
 
 	hostConfig := inspect.HostConfig
+	newHostConfig := withImageSecurityOpts(ctx, cli, inspect, newImage, info.Name)
 
 	// Rebuild networking config from current state.
 	networkingConfig := &network.NetworkingConfig{
@@ -129,7 +130,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 	var failedID string
 	attempt := func() (string, error) {
 		failedID = ""
-		created, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, info.Name)
+		created, err := cli.ContainerCreate(ctx, config, newHostConfig, networkingConfig, nil, info.Name)
 		if err != nil {
 			return "", fmt.Errorf("creating container %s: %w", info.Name, err)
 		}
@@ -221,7 +222,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	config.Image = newImage
 	clearInheritedDefaultsFor(ctx, cli, config, inspect.Image, info.Name)
 
-	hostConfig := inspect.HostConfig
+	hostConfig := withImageSecurityOpts(ctx, cli, inspect, newImage, info.Name)
 	hostConfig.PortBindings = nil
 
 	// Network aliases are how a reverse proxy finds "the service", so they are

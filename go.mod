@@ -1,4 +1,4 @@
-module github.com/wow-look-at-my/docker-updater
+module github.com/wow-look-at-my/docker-updater // go-toolchain:generate=86bbd283414e
 
 go 1.26
 
@@ -8,7 +8,7 @@ require (
 	github.com/docker/go-connections v0.6.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.11.1
-	github.com/wow-look-at-my/go-containers v0.0.0-20260826161058-40a3d1ef3d41 // go-toolchain:auto-branch
+	github.com/wow-look-at-my/go-containers v0.0.0 // go-toolchain:auto-branch
 )
 
 require (

@@ -226,15 +226,11 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	hostConfig.PortBindings = nil
 
 	// Network aliases are how a reverse proxy finds "the service", so they are
-	// deliberately withheld until the new container is healthy. Copying them at
-	// CREATE time puts two versions behind one alias for the whole health wait:
-	// Docker's embedded DNS returns every IP an alias resolves to and rotates
-	// them, so a proxy resolving that alias sends about half of all new
-	// requests to the OLD image until it is stopped. With a container whose
-	// HEALTHCHECK runs on a 30s interval that is tens of seconds of answering
-	// from the version being replaced -- long enough for a client to get a
-	// response shaped by the previous build, which is how a buildhost publish
-	// came back missing a field its own release had added.
+	// deliberately withheld until the new container is healthy. With a
+	// container whose HEALTHCHECK runs on a 30s interval that is tens of
+	// seconds of answering from the version being replaced -- long enough for a
+	// client to get a response shaped by the previous build, which is how a
+	// buildhost publish came back missing a field its own release had added.
 	serviceAliases := map[string][]string{}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{},
@@ -252,10 +248,9 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	// RESTARTING under the restart policy cloned from the container being
 	// replaced -- so the remove failed, the name stayed taken, and every later
 	// cycle died on "the container name is already in use" without ever
-	// reaching a create. One deployment sat there for 32 cycles.
-	// Force covers the kill, so there is no stop in front of it: a next
-	// container never carries traffic, and a graceful drain is for the OLD
-	// container at the cutover below.
+	// reaching a create. Force covers the kill, so there is no stop in front
+	// of it: a next container never carries traffic, and a graceful drain is
+	// for the OLD container at the cutover below.
 	discard := func(id string) {
 		if err := cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
 			log.Printf("ERROR container %s: could not remove %s (%s), so the next cycle cannot create it: %v",
@@ -440,7 +435,7 @@ func waitStaysRunning(ctx context.Context, cli DockerClient, containerID string)
 
 // healthCheckTimeout returns the maximum time to wait for a container to become
 // healthy, derived from its HEALTHCHECK config: start-period + retries*interval
-// + one probe timeout as buffer. Falls back to 5 minutes if not configured.
+// + one probe timeout as buffer.
 func healthCheckTimeout(inspect types.ContainerJSON) time.Duration {
 	const fallback = 5 * time.Minute
 	if inspect.Config == nil || inspect.Config.Healthcheck == nil {

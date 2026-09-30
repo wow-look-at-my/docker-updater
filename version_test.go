@@ -7,6 +7,7 @@ import (
 )
 
 func TestBuildVersionLdflagsOverrideWins(t *testing.T) {
+	t.Serial()
 	old := version
 	t.Cleanup(func() { version = old })
 
@@ -15,6 +16,7 @@ func TestBuildVersionLdflagsOverrideWins(t *testing.T) {
 }
 
 func TestBuildVersionAlwaysNonEmpty(t *testing.T) {
+	t.Serial()
 	old := version
 	t.Cleanup(func() { version = old })
 

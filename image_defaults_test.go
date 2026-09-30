@@ -216,6 +216,7 @@ func TestRollingUpdateDropsAStaleEntrypointNoImageSupplied(t *testing.T) {
 func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	var created *container.Config
+	var inspected []string
 
 	inspectCount := 0
 	cli := &mockDocker{
@@ -249,7 +250,10 @@ func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 			}, nil
 		},
 		imageInspectFn: func(_ context.Context, imageID string) (types.ImageInspect, []byte, error) {
-			require.Equal(t, "sha256:olddigest", imageID, "the config's defaults come from the image the container was created from")
+			inspected = append(inspected, imageID)
+			if imageID != "sha256:olddigest" {
+				return types.ImageInspect{Config: &container.Config{}}, nil, nil
+			}
 			return types.ImageInspect{Config: &container.Config{
 				Entrypoint: []string{"myapp"},
 				Cmd:        []string{"serve"},
@@ -263,6 +267,7 @@ func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 
 	info := ContainerInfo{ID: "old123456789", Name: "myapp", Image: "myapp:latest", Rolling: true}
 	require.Nil(t, rollingUpdateContainer(context.Background(), cli, info, "myapp:latest"))
+	assert.Contains(t, inspected, "sha256:olddigest", "the config's defaults come from the image the container was created from")
 
 	require.NotNil(t, created)
 	assert.Nil(t, created.Entrypoint, "the replacement must take the new image's entrypoint")

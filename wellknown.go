@@ -18,8 +18,8 @@ import (
 )
 
 // The standardized update-liveness contract a monitored container serves on its
-// own HTTP port. Both endpoints answer GET and carry meaning in the status code
-// alone; see docs/well-known-endpoints.md for the full contract.
+// own HTTP port. Both endpoints answer GET and carry meaning in the status code.
+// A health body may add `started`; see docs/well-known-endpoints.md.
 const (
 	wellKnownPrefix    = "/.well-known/docker-updater/"
 	wellKnownHealth    = wellKnownPrefix + "health"
@@ -60,12 +60,8 @@ const (
 //
 // The network ID is still returned for a container that has one and no IP. A
 // pre-check URL that names the container by hostname resolves only from that
-// network, and the container gets its IP back the moment it is up.
-// There is no substitute to fall back on:
-// 127.0.0.1 is docker-updater's OWN loopback, so probing it reports on the
-// wrong process entirely and can pass a post-update health gate against
-// docker-updater itself. Such a container needs an absolute
-// docker-updater.health-check.url instead.
+// network, and the container gets its IP back the moment it is up. Such a
+// container needs an absolute docker-updater.health-check.url instead.
 //
 // Networks are considered in name order because Go randomizes map iteration: a
 // multi-network container must resolve to the SAME endpoint every cycle, or the
@@ -193,10 +189,7 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 				". Implement the endpoint, or set " + wellKnownEnableLabel + "=false to silence this",
 		}}
 	}
-	// A container answering /health is assumed to speak the contract. The
-	// pre-update endpoint is optional and never probed separately: gating
-	// treats a 404 there as "not implemented, go ahead", so a second discovery
-	// request would buy nothing.
+	// A container answering /health is assumed to speak the contract.
 	return wellKnownState{HealthURL: base + wellKnownHealth, PreUpdateURL: base + wellKnownPreUpdate}
 }
 
@@ -260,10 +253,7 @@ func joinPorts(ports []int) string {
 }
 
 // probeWellKnown reports whether the endpoint exists, and separately whether
-// the container answered at all. Any HTTP answer other than 404/501 counts as
-// implemented: a container that is merely unhealthy right now still speaks the
-// contract, and reporting it as unconfigured would send the operator to fix the
-// wrong thing.
+// the container answered at all.
 //
 // A returned error means no answer arrived — refused, timed out, unroutable.
 // That is a different fault with a different fix, and collapsing it into "not

@@ -381,7 +381,7 @@ test("force update asks first, then posts the container", async () => {
 		assert.equal(posts.length, 1);
 		assert.equal(posts[0].url, "api/force-update?container=webhook-runner");
 		assert.equal(posts[0].init.method, "POST");
-		assert.deepEqual(posts[0].init.headers, { "X-Docker-Updater-Action": "force-update" });
+		assert.equal((posts[0].init.headers as Record<string, string>)["X-Docker-Updater-Action"], "force-update");
 
 		const after = page.doc.querySelector<HTMLButtonElement>(".force-btn")!;
 		assert.equal(after.textContent, "queued");

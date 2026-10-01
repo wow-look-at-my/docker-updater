@@ -219,10 +219,10 @@ function lastPulledText(c: ApiContainer): string {
   return c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 }
 
-// heldBackReason explains why a detected update has not been applied. The three
-// cases mirror the backend's mutually-exclusive branches (see state.go Record):
-// an error while applying, a pre-check that skipped it, or dry-run mode — which
-// is the only remaining way an update can be available without error or skip.
+// heldBackReason explains why a detected update has not been applied. The cases
+// mirror the backend's mutually-exclusive branches (see state.go Record): an
+// error while applying, a pre-check that skipped it, or dry-run mode — which is
+// the only remaining way an update can be available without error or skip.
 function heldBackReason(c: ApiContainer): string {
   if (c.error) return "error: " + c.error;
   if (c.skipped) return "skipped: " + (c.skip_reason || "pre-check");
@@ -285,7 +285,56 @@ function commitLink(sha: string, url?: string): HTMLElement {
   return el("a", { class: "cref commit", href: url, target: "_blank", rel: "noopener", title: sha }, short);
 }
 
-function upstreamCell(c: ApiContainer): HTMLElement {
+// forceConfirmText is the question the force-update button asks first. It
+// names the gate the update skips, because that gate is the reason it waits.
+function forceConfirmText(c: ApiContainer): string {
+  const refs = c.current_ref || c.available_ref
+    ? "\n" + (c.current_ref || "?") + " → " + (c.available_ref || "?")
+    : "";
+  return "Force-update " + c.name + " now?" + refs +
+    "\n\nHeld back by: " + heldBackReason(c) +
+    "\n\nThe update skips the pre-update check and dry-run mode, and recreates the container.";
+}
+
+// onForceUpdate asks for confirmation, then queues the update. The outcome of
+// the update itself shows on a later poll, in the Upstream column.
+async function onForceUpdate(c: ApiContainer): Promise<void> {
+  if (!window.confirm(forceConfirmText(c))) return;
+  forceRequests[c.name] = "queuing…";
+  repaint();
+  try {
+    const res = await fetch("api/force-update?container=" + encodeURIComponent(c.name), {
+      method: "POST",
+      headers: { "X-Docker-Updater-Action": "force-update" },
+    });
+    forceRequests[c.name] = res.ok ? "queued" : "failed: HTTP " + res.status + ": " + (await res.text()).trim();
+  } catch (err) {
+    forceRequests[c.name] = "failed: " + String(err);
+  }
+  repaint();
+}
+
+// forceButton applies a held-back update now. While a request is in flight or
+// queued, the button shows that state and does nothing.
+function forceButton(c: ApiContainer, ui: UiState): HTMLElement {
+  const status = ui.force_requests[c.name];
+  const busy = status === "queuing…" || status === "queued";
+  const btn = el("button", {
+    class: "copy-btn force-btn",
+    type: "button",
+    title: "Apply this update now, past the pre-update check and dry-run mode. Asks first.",
+    disabled: busy ? "" : null,
+  }, busy ? status : "force update");
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void onForceUpdate(c);
+  });
+  const out: HTMLElement[] = [btn];
+  if (status && !busy) out.push(el("div", { class: "detail up-error" }, status));
+  return el("div", { class: "force" }, ...out);
+}
+
+function upstreamCell(c: ApiContainer, ui: UiState): HTMLElement {
   const view = upstreamView(c);
   const td = el("td", null, el("span", { class: view.cls }, view.status));
   if (view.detail) td.appendChild(el("div", { class: "detail" }, view.detail));
@@ -297,6 +346,7 @@ function upstreamCell(c: ApiContainer): HTMLElement {
       commitLink(c.available_commit, c.available_commit_url),
     ));
   }
+  if (pending(c)) td.appendChild(forceButton(c, ui));
   return td;
 }
 
@@ -335,8 +385,6 @@ function errorReport(data: ApiResponse): string {
   return [header, ...blocks].join("\n\n") + "\n";
 }
 
-// ---------------------------------------------------------------------------
-// The state the page is drawn from
 //
 // One object: the served /api/containers payload, plus the state the server
 // cannot know — what the operator typed into the filter, which sections they
@@ -346,7 +394,7 @@ function errorReport(data: ApiResponse): string {
 //
 // Deliberately NOT in here: the summary counts, the group headings, uptime
 // strings, the Upstream verdict. Every one is arithmetic over the payload, and
-// keeping a second copy of a fact beside the fact is how the two drift apart.
+// keeping a second copy of a fact beside the fact is how both drift apart.
 // render() computes them on the way to the DOM, every time.
 // ---------------------------------------------------------------------------
 
@@ -362,6 +410,8 @@ interface UiState {
   // on the page that no payload can carry, because it exists exactly when none
   // did.
   error_banner: string | null;
+  // The state of each force-update request this page sent, by container name: in flight, queued, or the failure.
+  force_requests: Record<string, string>;
 }
 
 type DashboardState = ApiResponse & { ui: UiState };
@@ -464,9 +514,7 @@ function pending(c: ApiContainer): boolean {
 // a container that is up: running, paused, or removing. Offline is every other
 // state -- exited, dead, created (never started), and restarting.
 //
-// Restarting belongs here rather than beside the healthy rows. Docker reports
-// that state for the whole life of a crash loop, so a container that exits on
-// startup a thousand times reads as online for as long as it stays broken.
+// Restarting belongs here rather than beside the healthy rows.
 function isOnline(c: ApiContainer): boolean {
   return c.state === "running" || c.state === "paused" || c.state === "removing";
 }
@@ -478,9 +526,9 @@ function isManaged(c: ApiContainer): boolean {
   return c.auto_update || watchtowerOwns(c);
 }
 
-// The four dashboard sections, in display order. Every container lands in
-// exactly one: managed (an updater keeps it current) × online/offline. The ids
-// match the <details> elements in index.html ("-summary" / "-rows" suffixes).
+// Those dashboard sections, in display order. Every container lands in exactly
+// one: managed (an updater keeps it current) × online/offline. The ids match
+// the <details> elements in index.html ("-summary" / "-rows" suffixes).
 interface Group {
   id: string;
   label: string;
@@ -542,10 +590,6 @@ function updatedHighlight(c: ApiContainer, now: number): { background: string; t
 }
 
 // openLogs shows a container's recent output in a modal.
-//
-// It fetches on open rather than with the poll: logs are what somebody asks for
-// about one container, and pulling every container's on a five-second refresh
-// would cost a Docker API call per row forever.
 async function openLogs(name: string): Promise<void> {
   const dialog = document.getElementById("logs-dialog") as HTMLDialogElement | null;
   const title = document.getElementById("logs-title");
@@ -593,7 +637,7 @@ function reasonLine(c: ApiContainer): HTMLElement[] {
   return [el("div", { class: "log-excerpt", title: c.log_excerpt }, c.log_excerpt)];
 }
 
-function row(c: ApiContainer): HTMLElement {
+function row(c: ApiContainer, ui: UiState): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
     logsLink(c),
@@ -619,7 +663,7 @@ function row(c: ApiContainer): HTMLElement {
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
     restartsCell(c),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
-    upstreamCell(c),
+    upstreamCell(c, ui),
   );
   // Inline style so the alpha can fade with age. It wins over .row-pending's
   // class background, which is acceptable: a just-updated container should not
@@ -705,7 +749,7 @@ function render(state: DashboardState): void {
   // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
-    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map((c) => row(c, ui)));
     document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
     const section = document.getElementById(g.id) as HTMLDetailsElement;
     section.classList.toggle("hidden", members.length === 0);
@@ -722,11 +766,12 @@ function render(state: DashboardState): void {
   empty.classList.toggle("hidden", visible.length > 0);
 }
 
-// The two inputs the state is assembled from: the last payload that arrived
-// (kept so the filter can re-render without refetching), and the failure of the
-// most recent poll, if it failed.
+// Both inputs the state is assembled from: the last payload that arrived (kept
+// so the filter can re-render without refetching), and the failure of the most
+// recent poll, if it failed.
 let latestData: ApiResponse | null = null;
 let pollFailure: string | null = null;
+let forceRequests: Record<string, string> = {};
 
 // currentState is the object the page was last drawn from, and the one the copy
 // button serializes. Null until the first payload arrives.
@@ -751,6 +796,7 @@ function repaint(): void {
       query: searchBoxValue(),
       expanded: expandedGroups(),
       error_banner: pollFailure,
+      force_requests: { ...forceRequests },
     },
     ...latestData,
   };
@@ -758,8 +804,8 @@ function repaint(): void {
 }
 
 // OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
-// an index.html from one build paired with a dashboard.js/css from another
-// (a cache or proxy in front of the server, or two docker-updater containers
+// an index.html from one build paired with a dashboard.js/css from another (a
+// cache or proxy in front of the server, or docker-updater containers
 // answering the same host).
 const OUT_OF_SYNC_HINT =
   "Dashboard assets are out of sync (a cache or proxy served mismatched files). " +
@@ -779,6 +825,8 @@ async function refresh(): Promise<void> {
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
     latestData = (await resp.json()) as ApiResponse;
     pollFailure = null;
+    const stillPending = new Set((latestData.containers || []).filter(pending).map((c) => c.name));
+    forceRequests = Object.fromEntries(Object.entries(forceRequests).filter(([name]) => stillPending.has(name)));
   } catch (err) {
     pollFailure = isNullElementError(err)
       ? OUT_OF_SYNC_HINT
@@ -809,7 +857,7 @@ function onUiChange(): void {
 }
 
 // REQUIRED_IDS is the startup contract between this script and index.html:
-// every element id the code above dereferences unconditionally (the four group
+// every element id the code above dereferences unconditionally (those group
 // sections with their -rows/-summary children, the search box, the empty-state
 // line, the error banner, the dry-run badge, and the summary stat cards). The
 // group entries are derived from GROUPS so the list can't drift from render()'s

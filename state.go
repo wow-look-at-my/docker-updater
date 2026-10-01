@@ -50,7 +50,7 @@ type ContainerStatus struct {
 	// One failure is ordinary. The same one every cycle for weeks is a
 	// deployment frozen where it stands, and the per-cycle log line reads the
 	// same on the first cycle as on the thousandth. Counting the run is what
-	// separates the two.
+	// separates both.
 	StuckCycles int
 	StuckSince  time.Time
 }
@@ -84,7 +84,19 @@ func newStore() *Store {
 func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.record(results)
+	s.lastCycle = cycleEnd
+}
 
+// RecordContainers folds results that are not a full cycle, such as a forced
+// update of one container. The last-cycle time stays where it is.
+func (s *Store) RecordContainers(results []UpdateResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.record(results)
+}
+
+func (s *Store) record(results []UpdateResult) {
 	for _, r := range results {
 		name := r.Container.Name
 		st := s.statuses[name] // existing entry, or zero value for a new one
@@ -153,8 +165,6 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 
 		s.statuses[name] = st
 	}
-
-	s.lastCycle = cycleEnd
 }
 
 // Snapshot returns a deep copy of the current state for safe concurrent reads.

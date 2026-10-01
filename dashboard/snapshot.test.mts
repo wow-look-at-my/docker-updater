@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
-// Frozen so the two renders in a round trip resolve "9m ago" identically.
+// Frozen so both renders in a round trip resolve "9m ago" identically.
 const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 
 // A payload shaped like a real one: monitored and unmonitored containers,
@@ -202,7 +202,7 @@ async function load(payload: unknown): Promise<Harness> {
 	};
 }
 
-// bodyWithoutScript drops the injected <script> so two pages are compared on
+// bodyWithoutScript drops the injected <script> so pages are compared on
 // what they render, not on how the test loaded them.
 function bodyWithoutScript(markup: string): string {
 	return markup.replace(/<script>[\s\S]*<\/script>/, "").trim();
@@ -344,6 +344,56 @@ test("a crash-looping container is offline and red", async () => {
 			page.doc.getElementById("group-managed-offline-summary")!.textContent,
 			"Managed · offline (1)",
 		);
+	} finally {
+		page.close();
+	}
+});
+
+// The button applies an update past its gates, so it must ask first, and a
+// "no" must send nothing.
+test("force update asks first, then posts the container", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const buttons = [...page.doc.querySelectorAll<HTMLButtonElement>(".force-btn")];
+		assert.equal(buttons.length, 1, "only the held-back container gets the button");
+		assert.ok(buttons[0].closest("tr")!.textContent!.includes("webhook-runner"));
+
+		const posts: { url: string; init: RequestInit }[] = [];
+		page.win.fetch = (async (url: string, init: RequestInit) => {
+			posts.push({ url, init });
+			return { ok: true, status: 202, text: async () => "queued" };
+		}) as unknown as typeof fetch;
+
+		let asked = "";
+		page.win.confirm = (msg?: string) => {
+			asked = String(msg);
+			return false;
+		};
+		buttons[0].click();
+		await new Promise((r) => setTimeout(r, 0));
+		assert.match(asked, /Force-update webhook-runner/);
+		assert.match(asked, /pre-update endpoint answered 503/, "the question names what holds the update back");
+		assert.equal(posts.length, 0, "a declined confirmation sends nothing");
+
+		page.win.confirm = () => true;
+		buttons[0].click();
+		await new Promise((r) => setTimeout(r, 0));
+		assert.equal(posts.length, 1);
+		assert.equal(posts[0].url, "api/force-update?container=webhook-runner");
+		assert.equal(posts[0].init.method, "POST");
+		assert.equal((posts[0].init.headers as Record<string, string>)["X-Docker-Updater-Action"], "force-update");
+
+		const after = page.doc.querySelector<HTMLButtonElement>(".force-btn")!;
+		assert.equal(after.textContent, "queued");
+		assert.ok(after.disabled, "a queued request cannot be sent twice");
+
+		const before = bodyWithoutScript(page.html());
+		const replay = await roundTrip(page.copy().json);
+		try {
+			assert.equal(replay.markup, before, "the queued button replays too");
+		} finally {
+			replay.close();
+		}
 	} finally {
 		page.close();
 	}

@@ -504,7 +504,7 @@ func TestRunLoop(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), nil)
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), nil, nil)
 		close(done)
 	}()
 
@@ -553,7 +553,7 @@ func TestRunLoopWebhookTrigger(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), trigger)
+		runLoop(context.Background(), cli, cfg, sigCh, newAuthResolver(nil), newStore(), trigger, nil)
 		close(done)
 	}()
 

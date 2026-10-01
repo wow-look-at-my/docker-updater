@@ -27,11 +27,13 @@ import (
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
-// dashboardServer serves the read-only status dashboard and JSON API.
+// dashboardServer serves the status dashboard and its JSON API.
 type dashboardServer struct {
 	cli   DockerClient
 	cfg   Config
 	store *Store
+	// force queues force-update requests for the update loop. nil disables the force-update endpoint.
+	force chan<- string
 }
 
 func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardServer {
@@ -44,6 +46,7 @@ func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
 	mux.HandleFunc("/api/logs", s.handleAPILogs)
+	mux.HandleFunc("/api/force-update", s.handleAPIForceUpdate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -57,19 +60,11 @@ type staticAsset struct {
 }
 
 // assetVersionLen is how many hex chars of an asset's SHA-256 go into the
-// ?v= stamp index.html references it by. 12 (48 bits) is far beyond any
-// realistic collision between deploys while keeping URLs readable.
+// ?v= stamp index.html references it by.
 const assetVersionLen = 12
 
-// staticAssetHandler serves the embedded dashboard files with a strong
-// SHA-256 ETag and Cache-Control: no-cache. Embedded files carry a zero
-// modtime, so the old http.FileServer emitted no validators at all — browsers
-// and intermediary caches fell back to heuristic caching and could keep
-// serving an old dashboard.js/dashboard.css against a freshly deployed
-// index.html, which then crashes on the previous markup's element ids.
-// no-cache means every load revalidates (any cache in the path included) and
-// gets a cheap 304 while the binary is unchanged; a deploy changes the hashes
-// and all assets flip atomically. Hashes are computed once here, not per
+// staticAssetHandler serves the embedded dashboard files with a strong SHA-256
+// ETag and Cache-Control: no-cache. Hashes are computed once here, not per
 // request. Last-Modified is deliberately never sent (a zero modtime is
 // meaningless), leaving the ETag as the only — and sufficient — validator.
 //
@@ -80,14 +75,13 @@ const assetVersionLen = 12
 // cache key includes the query string — then stores every asset version under
 // a distinct key, so a given index.html can only ever resolve to the exact js
 // and css bytes it shipped with; an old-script/new-page pairing is impossible
-// by construction. The query string is a cache key only: serving ignores it
-// (lookup is by r.URL.Path), so any ?v= returns the same 200 + ETag.
+// by construction.
 func staticAssetHandler() http.HandlerFunc {
 	read := func(name string) []byte {
 		body, err := dashboardAssets.ReadFile("dashboard/" + name)
 		if err != nil {
 			// The embed paths are compile-time constants; this cannot fail at
-			// runtime. Log and serve 404 for the file rather than crashing.
+			// runtime.
 			log.Printf("dashboard: failed to load embedded asset %s: %v", name, err)
 			return nil
 		}
@@ -155,8 +149,6 @@ func staticAssetHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", a.contentType)
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("ETag", a.etag)
-		// ServeContent answers a matching If-None-Match with a bodyless 304
-		// and, given the zero modtime, never emits Last-Modified.
 		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(a.body))
 	}
 }

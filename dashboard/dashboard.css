@@ -115,6 +115,9 @@ body {
 /* In a summary card the button sits under the count and takes the card's colour. */
 .card .copy-btn { margin-top: 6px; align-self: flex-start; }
 .card-error .copy-btn:hover:not(:disabled) { border-color: var(--red); }
+/* The force-update button sits under a held-back update's detail lines. */
+.force { margin-top: 6px; }
+.force-btn:hover:not(:disabled) { border-color: var(--amber); }
 
 main { padding: 0 24px 24px; }
 

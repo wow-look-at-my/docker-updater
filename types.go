@@ -53,9 +53,7 @@ type ContainerInfo struct {
 	PreCheckCommand string
 	PreCheckTimeout time.Duration
 	// PreCheckStandard marks PreCheckURL as the discovered standard endpoint
-	// rather than an operator-configured one. The standard pre-update endpoint
-	// is optional, so a 404 (or an unreachable container) means "no opinion,
-	// go ahead" instead of holding the update back.
+	// rather than an operator-configured one.
 	PreCheckStandard bool
 
 	// Discovery inputs for the standard /.well-known/docker-updater/
@@ -81,6 +79,9 @@ type ContainerInfo struct {
 
 	// Rolling update: start new container before stopping old.
 	Rolling bool
+
+	// Force is set when an operator asked for this update from the dashboard.
+	Force bool
 
 	// Post-update health check fields.
 	// If HealthCheckURL is set, HTTP GET is polled until 2xx.

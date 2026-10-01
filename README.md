@@ -12,6 +12,8 @@ docker-updater keeps running containers on their newest build. It watches the co
 
 The updater creates the new container from the old one's configuration, with the new image. It first clears the values the old image supplied, so the new image supplies its own. A rolling update starts the replacement beside the old container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed. The previous image comes back.
 
+An image can ask for `--security-opt` values with the label `docker-updater.security-opt` (space-separated). The replacement gets the missing ones, and they persist. Only a container that binds the Docker socket gets them: it is already root on the host.
+
 ## Configuration
 
 Put the label `docker-updater.enable=true` on each container to monitor. The server reads the rest of its configuration from environment variables. Run the binary with no arguments to start the update loop and the dashboard.

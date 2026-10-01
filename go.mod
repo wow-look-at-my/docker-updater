@@ -1,4 +1,4 @@
-module github.com/wow-look-at-my/docker-updater
+module github.com/wow-look-at-my/docker-updater // go-toolchain:generate=86bbd283414e
 
 go 1.26
 

@@ -63,6 +63,25 @@ func TestImageSecurityOptsNoLabelLeavesHostConfig(t *testing.T) {
 	assert.Same(t, inspect.HostConfig, got)
 }
 
+// Compose owns a compose-managed container, so a label it cannot apply must be
+// reported, naming the file to edit.
+func TestComposeSecurityOptGapNamesTheComposeFile(t *testing.T) {
+	cli := imageWithLabels(map[string]string{securityOptLabel: "seccomp=unconfined systempaths=unconfined"})
+	inspect := inspectWith(nil, []string{"seccomp=unconfined"})
+	inspect.Image = "sha256:new"
+	inspect.Config = &container.Config{}
+	info := ContainerInfo{Name: "webhook-runner", ComposeService: "webhook-runner", ComposeConfigFiles: "/srv/compose.yml"}
+
+	msg := composeSecurityOptGap(context.Background(), cli, inspect, info)
+	assert.Contains(t, msg, "ERROR container webhook-runner")
+	assert.Contains(t, msg, "--security-opt systempaths=unconfined")
+	assert.NotContains(t, msg, "seccomp=unconfined systempaths", "an option the container already has is not reported")
+	assert.Contains(t, msg, "service webhook-runner in /srv/compose.yml")
+
+	inspect.HostConfig.SecurityOpt = []string{"seccomp=unconfined", "systempaths=unconfined"}
+	assert.Empty(t, composeSecurityOptGap(context.Background(), cli, inspect, info), "nothing missing, nothing reported")
+}
+
 func TestImageSecurityOptsInspectFailureLeavesHostConfig(t *testing.T) {
 	cli := &mockDocker{
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {

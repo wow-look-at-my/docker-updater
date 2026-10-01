@@ -53,3 +53,29 @@ func withImageSecurityOpts(ctx context.Context, cli DockerClient, inspect types.
 	log.Printf("container %s: adding --security-opt %s, from the %s label of %s", name, strings.Join(missing, " "), securityOptLabel, newImage)
 	return &updated
 }
+
+// composeSecurityOptGap returns the error line for a compose-managed container
+// that lacks options its image asks for, or "" when none are missing. Compose
+// owns the container definition, so docker-updater cannot add them; the
+// compose file must.
+func composeSecurityOptGap(ctx context.Context, cli DockerClient, inspect types.ContainerJSON, info ContainerInfo) string {
+	if inspect.HostConfig == nil || inspect.Config == nil {
+		return ""
+	}
+	img, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image)
+	if err != nil || img.Config == nil {
+		return ""
+	}
+	var missing []string
+	for _, opt := range strings.Fields(img.Config.Labels[securityOptLabel]) {
+		if !slices.Contains(inspect.HostConfig.SecurityOpt, opt) {
+			missing = append(missing, opt)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return "ERROR container " + info.Name + ": image asks for --security-opt " + strings.Join(missing, " ") +
+		" through its " + securityOptLabel + " label, but compose manages this container, so the label cannot apply. Add them under security_opt for service " +
+		info.ComposeService + " in " + info.ComposeConfigFiles
+}

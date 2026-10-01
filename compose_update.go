@@ -98,6 +98,11 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	}
 
 	log.Printf("container %s updated and healthy via compose (%s)", info.Name, shortID(newID))
+	if newInspect, err := cli.ContainerInspect(ctx, newID); err == nil {
+		if msg := composeSecurityOptGap(ctx, cli, newInspect, info); msg != "" {
+			log.Print(msg)
+		}
+	}
 	return nil
 }
 

@@ -20,7 +20,9 @@ Both answer `GET` and carry their meaning in the **status code**. Both must be c
 
 The gate is asked only of a running container. One that is restarting, exited, or dead has nothing in flight. The update is what brings it back. So it is applied without asking. This holds for the label-configured `docker-updater.pre-check.url` and `.command` too.
 
-Neither endpoint needs a body. Anything returned is ignored, so a one-line handler is a complete implementation.
+Neither endpoint needs a body, so a one-line handler is a complete implementation.
+
+`health` may answer with a JSON body that carries `started`, the RFC 3339 time its process started. After an update, docker-updater then accepts a 2xx only when `started` is no earlier than the new container's own start. A 200 from a process that was already running cannot pass the gate. A `started` value that does not parse fails the same way. The timeout names the cause. A body without `started` is ignored.
 
 ## Discovery
 

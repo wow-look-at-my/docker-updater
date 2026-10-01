@@ -219,10 +219,10 @@ function lastPulledText(c: ApiContainer): string {
   return c.auto_update ? (fmtRelative(c.last_pulled) || "—") : "—";
 }
 
-// heldBackReason explains why a detected update has not been applied. The three
-// cases mirror the backend's mutually-exclusive branches (see state.go Record):
-// an error while applying, a pre-check that skipped it, or dry-run mode — which
-// is the only remaining way an update can be available without error or skip.
+// heldBackReason explains why a detected update has not been applied. The cases
+// mirror the backend's mutually-exclusive branches (see state.go Record): an
+// error while applying, a pre-check that skipped it, or dry-run mode — which is
+// the only remaining way an update can be available without error or skip.
 function heldBackReason(c: ApiContainer): string {
   if (c.error) return "error: " + c.error;
   if (c.skipped) return "skipped: " + (c.skip_reason || "pre-check");
@@ -385,8 +385,6 @@ function errorReport(data: ApiResponse): string {
   return [header, ...blocks].join("\n\n") + "\n";
 }
 
-// ---------------------------------------------------------------------------
-// The state the page is drawn from
 //
 // One object: the served /api/containers payload, plus the state the server
 // cannot know — what the operator typed into the filter, which sections they
@@ -396,7 +394,7 @@ function errorReport(data: ApiResponse): string {
 //
 // Deliberately NOT in here: the summary counts, the group headings, uptime
 // strings, the Upstream verdict. Every one is arithmetic over the payload, and
-// keeping a second copy of a fact beside the fact is how the two drift apart.
+// keeping a second copy of a fact beside the fact is how both drift apart.
 // render() computes them on the way to the DOM, every time.
 // ---------------------------------------------------------------------------
 
@@ -516,9 +514,7 @@ function pending(c: ApiContainer): boolean {
 // a container that is up: running, paused, or removing. Offline is every other
 // state -- exited, dead, created (never started), and restarting.
 //
-// Restarting belongs here rather than beside the healthy rows. Docker reports
-// that state for the whole life of a crash loop, so a container that exits on
-// startup a thousand times reads as online for as long as it stays broken.
+// Restarting belongs here rather than beside the healthy rows.
 function isOnline(c: ApiContainer): boolean {
   return c.state === "running" || c.state === "paused" || c.state === "removing";
 }
@@ -530,9 +526,9 @@ function isManaged(c: ApiContainer): boolean {
   return c.auto_update || watchtowerOwns(c);
 }
 
-// The four dashboard sections, in display order. Every container lands in
-// exactly one: managed (an updater keeps it current) × online/offline. The ids
-// match the <details> elements in index.html ("-summary" / "-rows" suffixes).
+// Those dashboard sections, in display order. Every container lands in exactly
+// one: managed (an updater keeps it current) × online/offline. The ids match
+// the <details> elements in index.html ("-summary" / "-rows" suffixes).
 interface Group {
   id: string;
   label: string;
@@ -594,10 +590,6 @@ function updatedHighlight(c: ApiContainer, now: number): { background: string; t
 }
 
 // openLogs shows a container's recent output in a modal.
-//
-// It fetches on open rather than with the poll: logs are what somebody asks for
-// about one container, and pulling every container's on a five-second refresh
-// would cost a Docker API call per row forever.
 async function openLogs(name: string): Promise<void> {
   const dialog = document.getElementById("logs-dialog") as HTMLDialogElement | null;
   const title = document.getElementById("logs-title");
@@ -774,9 +766,9 @@ function render(state: DashboardState): void {
   empty.classList.toggle("hidden", visible.length > 0);
 }
 
-// The two inputs the state is assembled from: the last payload that arrived
-// (kept so the filter can re-render without refetching), and the failure of the
-// most recent poll, if it failed.
+// Both inputs the state is assembled from: the last payload that arrived (kept
+// so the filter can re-render without refetching), and the failure of the most
+// recent poll, if it failed.
 let latestData: ApiResponse | null = null;
 let pollFailure: string | null = null;
 let forceRequests: Record<string, string> = {};
@@ -812,8 +804,8 @@ function repaint(): void {
 }
 
 // OUT_OF_SYNC_HINT is the human-readable diagnosis for mixed dashboard assets:
-// an index.html from one build paired with a dashboard.js/css from another
-// (a cache or proxy in front of the server, or two docker-updater containers
+// an index.html from one build paired with a dashboard.js/css from another (a
+// cache or proxy in front of the server, or docker-updater containers
 // answering the same host).
 const OUT_OF_SYNC_HINT =
   "Dashboard assets are out of sync (a cache or proxy served mismatched files). " +
@@ -865,7 +857,7 @@ function onUiChange(): void {
 }
 
 // REQUIRED_IDS is the startup contract between this script and index.html:
-// every element id the code above dereferences unconditionally (the four group
+// every element id the code above dereferences unconditionally (those group
 // sections with their -rows/-summary children, the search box, the empty-state
 // line, the error banner, the dry-run badge, and the summary stat cards). The
 // group entries are derived from GROUPS so the list can't drift from render()'s

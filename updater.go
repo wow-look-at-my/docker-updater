@@ -348,7 +348,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 	defer ticker.Stop()
 
 	// runCheck runs one full cycle and records/notifies. Shared by the first
-	// run, the interval tick, and the webhook trigger so all three behave
+	// run, the interval tick, and the webhook trigger so all of them behave
 	// identically.
 	runCheck := func() {
 		results := runUpdateCheck(ctx, cli, cfg, resolveAuth)

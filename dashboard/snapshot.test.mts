@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
-// Frozen so the two renders in a round trip resolve "9m ago" identically.
+// Frozen so both renders in a round trip resolve "9m ago" identically.
 const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 
 // A payload shaped like a real one: monitored and unmonitored containers,
@@ -202,7 +202,7 @@ async function load(payload: unknown): Promise<Harness> {
 	};
 }
 
-// bodyWithoutScript drops the injected <script> so two pages are compared on
+// bodyWithoutScript drops the injected <script> so pages are compared on
 // what they render, not on how the test loaded them.
 function bodyWithoutScript(markup: string): string {
 	return markup.replace(/<script>[\s\S]*<\/script>/, "").trim();

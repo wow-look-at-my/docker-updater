@@ -50,7 +50,7 @@ type ContainerStatus struct {
 	// One failure is ordinary. The same one every cycle for weeks is a
 	// deployment frozen where it stands, and the per-cycle log line reads the
 	// same on the first cycle as on the thousandth. Counting the run is what
-	// separates the two.
+	// separates both.
 	StuckCycles int
 	StuckSince  time.Time
 }

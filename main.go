@@ -42,7 +42,7 @@ func main() {
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
 
-	// Determine our own container ID. Two things need it: a self-update can't
+	// Determine our own container ID. Things need it: a self-update can't
 	// recreate its own container inline (that would kill this process
 	// mid-swap), so updateContainer routes it through a detached helper; and
 	// attaching to a monitored container's network means naming the container
@@ -73,9 +73,7 @@ func main() {
 	store := newStore()
 
 	// Inbound GitHub webhook (opt-in): a valid delivery requests an immediate
-	// check via this channel. Buffered with depth 1 and filled non-blockingly,
-	// so a burst of deliveries coalesces into at most one pending check. nil
-	// when disabled, in which case runLoop simply never selects on it.
+	// check via this channel.
 	var trigger chan struct{}
 	if cfg.GitHubWebhookAddr != "" {
 		trigger = make(chan struct{}, 1)

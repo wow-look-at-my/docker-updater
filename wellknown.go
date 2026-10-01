@@ -18,8 +18,8 @@ import (
 )
 
 // The standardized update-liveness contract a monitored container serves on its
-// own HTTP port. Both endpoints answer GET and carry meaning in the status code
-// alone; see docs/well-known-endpoints.md for the full contract.
+// own HTTP port. Both endpoints answer GET and carry meaning in the status code.
+// A health body may add `started`; see docs/well-known-endpoints.md.
 const (
 	wellKnownPrefix    = "/.well-known/docker-updater/"
 	wellKnownHealth    = wellKnownPrefix + "health"

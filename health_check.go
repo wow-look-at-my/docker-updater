@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -31,14 +33,15 @@ var execPollInterval = 100 * time.Millisecond
 func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID string, info ContainerInfo) error {
 	if info.HealthCheckURL != "" {
 		url := info.HealthCheckURL
+		var notBefore time.Time
 		if info.HealthCheckURLFromContainer {
 			var err error
-			if url, err = rehostToNewContainer(ctx, cli, containerID, url); err != nil {
+			if url, notBefore, err = rehostToNewContainer(ctx, cli, containerID, url); err != nil {
 				return err
 			}
 		}
 		log.Printf("container %s: waiting for HTTP health check at %s", info.Name, url)
-		return waitHTTPHealthy(ctx, url, info.HealthCheckTimeout)
+		return waitHTTPHealthy(ctx, url, info.HealthCheckTimeout, notBefore)
 	}
 	if info.HealthCheckCommand != "" {
 		log.Printf("container %s: waiting for exec health check: %s", info.Name, info.HealthCheckCommand)
@@ -74,51 +77,99 @@ func noEndpointError(ctx context.Context, cli DockerClient, containerID string, 
 }
 
 // rehostToNewContainer points a container-derived health URL at the container
-// the update just started. The URL was built from the address of the container
-// the update destroyed, and Docker both gives the replacement its own IP and
-// may hand the old one to an unrelated container. Only the host moves: a
-// recreated container keeps the port and path it served on.
+// the update started. The URL was built from the address of the container the
+// update destroyed, and Docker both gives the replacement its own IP and may
+// hand the one to an unrelated container. Only the host moves: a recreated
+// container keeps the port and path it served on.
 //
-// An address it cannot resolve is a failure, never a fall back to the old one:
-// polling a dead or recycled address either times out the gate or passes it on
-// somebody else's health.
-func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, rawURL string) (string, error) {
+// An address it cannot resolve is a failure, never a fall back to the one:
+// polling a dead or recycled address either times out the gate or passes it
+// on somebody else's health.
+//
+// It also returns the time the new container started, so the gate can reject
+// a health answer from a process that started before it.
+func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, rawURL string) (string, time.Time, error) {
 	if containerID == "" {
-		return "", fmt.Errorf("health check address: no container found after the update to resolve %s against", rawURL)
+		return "", time.Time{}, fmt.Errorf("health check address: no container found after the update to resolve %s against", rawURL)
 	}
 	inspect, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return "", fmt.Errorf("inspecting new container %s for health check address: %w", shortID(containerID), err)
+		return "", time.Time{}, fmt.Errorf("inspecting new container %s for health check address: %w", shortID(containerID), err)
 	}
 	address, _ := containerEndpoint(inspect)
 	if address == "" {
-		return "", noEndpointError(ctx, cli, containerID, inspect)
+		return "", time.Time{}, noEndpointError(ctx, cli, containerID, inspect)
 	}
 
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("parsing health check URL %q: %w", rawURL, err)
+		return "", time.Time{}, fmt.Errorf("parsing health check URL %q: %w", rawURL, err)
 	}
 	if port := u.Port(); port != "" {
 		u.Host = net.JoinHostPort(address, port)
 	} else {
 		u.Host = address
 	}
-	return u.String(), nil
+	return u.String(), containerStartedAt(inspect), nil
+}
+
+// containerStartedAt returns State.StartedAt, or the zero time when Docker does
+// not report one. The zero time turns the started check off.
+func containerStartedAt(inspect types.ContainerJSON) time.Time {
+	if inspect.ContainerJSONBase == nil || inspect.State == nil {
+		return time.Time{}
+	}
+	started, err := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return started
+}
+
+// healthBody is the optional JSON body of a health answer.
+type healthBody struct {
+	Started string `json:"started"`
+}
+
+// staleAnswer reports why a 2xx answer cannot count: the body names a process
+// start before notBefore, or a start time it cannot parse. A body without
+// `started` passes on the status code alone.
+func staleAnswer(body []byte, notBefore time.Time) string {
+	if notBefore.IsZero() {
+		return ""
+	}
+	var parsed healthBody
+	if json.Unmarshal(body, &parsed) != nil || parsed.Started == "" {
+		return ""
+	}
+	started, err := time.Parse(time.RFC3339Nano, parsed.Started)
+	if err != nil {
+		return fmt.Sprintf("the health answer names started=%q, which is not an RFC 3339 time", parsed.Started)
+	}
+	if started.Before(notBefore.Truncate(time.Second)) {
+		return fmt.Sprintf("the health answer came from a process started at %s, before the new container started at %s",
+			started.UTC().Format(time.RFC3339), notBefore.UTC().Format(time.RFC3339))
+	}
+	return ""
 }
 
 // waitHTTPHealthy polls url every 2s until it returns a 2xx response or timeout.
-func waitHTTPHealthy(ctx context.Context, url string, timeout time.Duration) error {
+// A non-zero notBefore also requires the answer's `started` to be no earlier.
+func waitHTTPHealthy(ctx context.Context, url string, timeout time.Duration, notBefore time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	ticker := time.NewTicker(healthCheckPollInterval)
 	defer ticker.Stop()
 
+	var stale string
 	for {
 		select {
 		case <-ctx.Done():
 			if ctx.Err() == context.DeadlineExceeded {
+				if stale != "" {
+					return fmt.Errorf("HTTP health check timed out after %s: %s", timeout, stale)
+				}
 				return fmt.Errorf("HTTP health check timed out after %s", timeout)
 			}
 			return ctx.Err()
@@ -133,8 +184,12 @@ func waitHTTPHealthy(ctx context.Context, url string, timeout time.Duration) err
 				// Not ready yet — keep polling.
 				continue
 			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 			resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				continue
+			}
+			if stale = staleAnswer(body, notBefore); stale == "" {
 				return nil
 			}
 		}

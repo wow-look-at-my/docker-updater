@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,6 +31,13 @@ func serveJSON(t *testing.T, addr, body string) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
+func healthJSON(t *testing.T, started string) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"status": "ok", "started": started})
+	require.NoError(t, err)
+	return string(body)
+}
+
 func inspectStartedAt(ip string, startedAt time.Time) types.ContainerJSON {
 	inspect := inspectWithIP(ip)
 	inspect.State = &types.ContainerState{Running: true, StartedAt: startedAt.Format(time.RFC3339Nano)}
@@ -48,7 +56,7 @@ func startedInfo(port int, timeout time.Duration) ContainerInfo {
 func TestWaitPostUpdateHealthyRejectsAnswerFromOlderProcess(t *testing.T) {
 	containerStart := time.Now().UTC()
 	stale := containerStart.Add(-time.Hour).Format(time.RFC3339)
-	port := serveJSON(t, "127.0.0.2", `{"status":"ok","started":"`+stale+`"}`)
+	port := serveJSON(t, "127.0.0.2", healthJSON(t, stale))
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return inspectStartedAt("127.0.0.2", containerStart), nil
@@ -63,7 +71,7 @@ func TestWaitPostUpdateHealthyRejectsAnswerFromOlderProcess(t *testing.T) {
 func TestWaitPostUpdateHealthyAcceptsAnswerFromNewProcess(t *testing.T) {
 	containerStart := time.Now().UTC().Add(-time.Minute)
 	fresh := containerStart.Add(time.Second).Format(time.RFC3339)
-	port := serveJSON(t, "127.0.0.2", `{"status":"ok","started":"`+fresh+`"}`)
+	port := serveJSON(t, "127.0.0.2", healthJSON(t, fresh))
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
 			return inspectStartedAt("127.0.0.2", containerStart), nil

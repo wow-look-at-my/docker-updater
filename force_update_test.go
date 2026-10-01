@@ -149,6 +149,15 @@ func TestCheckContainersForceSelectsOneContainer(t *testing.T) {
 				{ID: "b", Names: []string{"/two"}, Image: "sha256:abc", Labels: map[string]string{"docker-updater.enable": "true"}},
 			}, nil
 		},
+		// A bare image ID makes each container unmonitorable, so the check
+		// probes no network and pulls nothing.
+		containerInspectFn: func(_ context.Context, _ string) (types.ContainerJSON, error) {
+			return types.ContainerJSON{
+				ContainerJSONBase: &types.ContainerJSONBase{Image: "sha256:abc", HostConfig: &container.HostConfig{}},
+				Config:            &container.Config{Image: "sha256:abc"},
+				NetworkSettings:   &types.NetworkSettings{},
+			}, nil
+		},
 	}
 	results := runForceUpdate(context.Background(), cli, Config{Label: "docker-updater.enable"}, newAuthResolver(nil), "two")
 	require.Len(t, results, 1)

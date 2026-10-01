@@ -82,6 +82,9 @@ type ContainerInfo struct {
 	// Rolling update: start new container before stopping old.
 	Rolling bool
 
+	// Force is set when an operator asked for this update from the dashboard.
+	Force bool
+
 	// Post-update health check fields.
 	// If HealthCheckURL is set, HTTP GET is polled until 2xx.
 	// Otherwise if HealthCheckCommand is set, it is exec'd via sh -c.

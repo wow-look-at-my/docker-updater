@@ -27,11 +27,13 @@ import (
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
-// dashboardServer serves the read-only status dashboard and JSON API.
+// dashboardServer serves the status dashboard and its JSON API.
 type dashboardServer struct {
 	cli   DockerClient
 	cfg   Config
 	store *Store
+	// force queues force-update requests for the update loop. nil disables the force-update endpoint.
+	force chan<- string
 }
 
 func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardServer {
@@ -44,6 +46,7 @@ func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
 	mux.HandleFunc("/api/logs", s.handleAPILogs)
+	mux.HandleFunc("/api/force-update", s.handleAPIForceUpdate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux

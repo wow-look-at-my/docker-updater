@@ -10,10 +10,37 @@ import (
 
 // runUpdateCheck checks all monitored containers for updates and applies them.
 func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver) []UpdateResult {
+	return checkContainers(ctx, cli, cfg, resolveAuth, "")
+}
+
+// runForceUpdate checks the one named container and applies any update it
+// finds. It ignores the pre-update gate and dry-run mode for that container.
+func runForceUpdate(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, name string) []UpdateResult {
+	results := checkContainers(ctx, cli, cfg, resolveAuth, name)
+	if len(results) == 0 {
+		log.Printf("force update: no monitored container named %s", name)
+	}
+	return results
+}
+
+// checkContainers checks every monitored container, or only the one named by
+// force. A forced container skips the pre-update gate and dry-run mode.
+func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, force string) []UpdateResult {
 	containers, err := listMonitoredContainers(ctx, cli, cfg.Label)
 	if err != nil {
 		log.Printf("error listing containers: %v", err)
 		return nil
+	}
+
+	if force != "" {
+		var only []ContainerInfo
+		for _, info := range containers {
+			if info.Name == force {
+				info.Force = true
+				only = append(only, info)
+			}
+		}
+		containers = only
 	}
 
 	if len(containers) == 0 {
@@ -60,7 +87,7 @@ func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 		result := UpdateResult{
 			Container: info,
 			CheckedAt: time.Now(),
-			DryRun:    cfg.DryRun,
+			DryRun:    dryRun(cfg, info),
 			Warnings:  warnings,
 		}
 
@@ -113,7 +140,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	if cfg.DryRun {
+	if dryRun(cfg, info) {
 		log.Printf("container %s: dry-run mode, skipping update", info.Name)
 		result.Updated = true
 		return result
@@ -152,7 +179,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, runner composeRunn
 		return result
 	}
 
-	if cfg.DryRun {
+	if dryRun(cfg, info) {
 		log.Printf("container %s: dry-run mode, skipping update", info.Name)
 		result.Updated = true
 		return result
@@ -219,7 +246,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	if cfg.DryRun {
+	if dryRun(cfg, info) {
 		// Dry-run must mutate nothing: no compose build, no recreate, and the
 		// recorded "built-from" base must not advance, so the same update keeps
 		// showing as available until it is really applied.
@@ -251,6 +278,10 @@ func preCheckRefuses(ctx context.Context, cli DockerClient, info ContainerInfo) 
 	if info.Rolling || (info.PreCheckURL == "" && info.PreCheckCommand == "") {
 		return ""
 	}
+	if info.Force {
+		log.Printf("container %s: force update, the pre-check is not asked", info.Name)
+		return ""
+	}
 	if info.State != "" && info.State != "running" && info.State != "paused" {
 		log.Printf("container %s is %s: nothing is in flight, so the pre-check is not asked", info.Name, info.State)
 		return ""
@@ -259,6 +290,12 @@ func preCheckRefuses(ctx context.Context, cli DockerClient, info ContainerInfo) 
 		return err.Error()
 	}
 	return ""
+}
+
+// dryRun reports whether an update to this container must stop short of the
+// change. An operator's force update applies even in dry-run mode.
+func dryRun(cfg Config, info ContainerInfo) bool {
+	return cfg.DryRun && !info.Force
 }
 
 func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config) error {
@@ -300,7 +337,11 @@ func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner
 // trigger lets an external source (the GitHub webhook) request an immediate
 // check between ticks. It may be nil, in which case only the interval drives
 // checks.
-func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store, trigger <-chan struct{}) {
+//
+// force carries container names from the dashboard's force-update button. The
+// loop runs each one between cycles, so a forced update never races a cycle.
+// It may be nil.
+func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store, trigger <-chan struct{}, force <-chan string) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
 
 	ticker := time.NewTicker(cfg.Interval)
@@ -329,6 +370,11 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 			// Realign the interval so the next scheduled check is a full
 			// interval after this one, rather than firing right on its heels.
 			ticker.Reset(cfg.Interval)
+		case name := <-force:
+			log.Printf("force update requested for %s", name)
+			results := runForceUpdate(ctx, cli, cfg, resolveAuth, name)
+			store.RecordContainers(results)
+			sendWebhookNotifications(cfg, results)
 		case sig := <-sigCh:
 			log.Printf("received signal %v, shutting down", sig)
 			return

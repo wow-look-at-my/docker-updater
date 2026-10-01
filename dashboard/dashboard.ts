@@ -285,7 +285,56 @@ function commitLink(sha: string, url?: string): HTMLElement {
   return el("a", { class: "cref commit", href: url, target: "_blank", rel: "noopener", title: sha }, short);
 }
 
-function upstreamCell(c: ApiContainer): HTMLElement {
+// forceConfirmText is the question the force-update button asks first. It
+// names the gate the update skips, because that gate is the reason it waits.
+function forceConfirmText(c: ApiContainer): string {
+  const refs = c.current_ref || c.available_ref
+    ? "\n" + (c.current_ref || "?") + " → " + (c.available_ref || "?")
+    : "";
+  return "Force-update " + c.name + " now?" + refs +
+    "\n\nHeld back by: " + heldBackReason(c) +
+    "\n\nThe update skips the pre-update check and dry-run mode, and recreates the container.";
+}
+
+// onForceUpdate asks for confirmation, then queues the update. The outcome of
+// the update itself shows on a later poll, in the Upstream column.
+async function onForceUpdate(c: ApiContainer): Promise<void> {
+  if (!window.confirm(forceConfirmText(c))) return;
+  forceRequests[c.name] = "queuing…";
+  repaint();
+  try {
+    const res = await fetch("api/force-update?container=" + encodeURIComponent(c.name), {
+      method: "POST",
+      headers: { "X-Docker-Updater-Action": "force-update" },
+    });
+    forceRequests[c.name] = res.ok ? "queued" : "failed: HTTP " + res.status + ": " + (await res.text()).trim();
+  } catch (err) {
+    forceRequests[c.name] = "failed: " + String(err);
+  }
+  repaint();
+}
+
+// forceButton applies a held-back update now. While a request is in flight or
+// queued, the button shows that state and does nothing.
+function forceButton(c: ApiContainer, ui: UiState): HTMLElement {
+  const status = ui.force_requests[c.name];
+  const busy = status === "queuing…" || status === "queued";
+  const btn = el("button", {
+    class: "copy-btn force-btn",
+    type: "button",
+    title: "Apply this update now, past the pre-update check and dry-run mode. Asks first.",
+    disabled: busy ? "" : null,
+  }, busy ? status : "force update");
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void onForceUpdate(c);
+  });
+  const out: HTMLElement[] = [btn];
+  if (status && !busy) out.push(el("div", { class: "detail up-error" }, status));
+  return el("div", { class: "force" }, ...out);
+}
+
+function upstreamCell(c: ApiContainer, ui: UiState): HTMLElement {
   const view = upstreamView(c);
   const td = el("td", null, el("span", { class: view.cls }, view.status));
   if (view.detail) td.appendChild(el("div", { class: "detail" }, view.detail));
@@ -297,6 +346,7 @@ function upstreamCell(c: ApiContainer): HTMLElement {
       commitLink(c.available_commit, c.available_commit_url),
     ));
   }
+  if (pending(c)) td.appendChild(forceButton(c, ui));
   return td;
 }
 
@@ -362,6 +412,8 @@ interface UiState {
   // on the page that no payload can carry, because it exists exactly when none
   // did.
   error_banner: string | null;
+  // The state of each force-update request this page sent, by container name: in flight, queued, or the failure.
+  force_requests: Record<string, string>;
 }
 
 type DashboardState = ApiResponse & { ui: UiState };
@@ -593,7 +645,7 @@ function reasonLine(c: ApiContainer): HTMLElement[] {
   return [el("div", { class: "log-excerpt", title: c.log_excerpt }, c.log_excerpt)];
 }
 
-function row(c: ApiContainer): HTMLElement {
+function row(c: ApiContainer, ui: UiState): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
     logsLink(c),
@@ -619,7 +671,7 @@ function row(c: ApiContainer): HTMLElement {
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
     restartsCell(c),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
-    upstreamCell(c),
+    upstreamCell(c, ui),
   );
   // Inline style so the alpha can fade with age. It wins over .row-pending's
   // class background, which is acceptable: a just-updated container should not
@@ -705,7 +757,7 @@ function render(state: DashboardState): void {
   // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
-    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map(row));
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map((c) => row(c, ui)));
     document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
     const section = document.getElementById(g.id) as HTMLDetailsElement;
     section.classList.toggle("hidden", members.length === 0);
@@ -727,6 +779,7 @@ function render(state: DashboardState): void {
 // most recent poll, if it failed.
 let latestData: ApiResponse | null = null;
 let pollFailure: string | null = null;
+let forceRequests: Record<string, string> = {};
 
 // currentState is the object the page was last drawn from, and the one the copy
 // button serializes. Null until the first payload arrives.
@@ -751,6 +804,7 @@ function repaint(): void {
       query: searchBoxValue(),
       expanded: expandedGroups(),
       error_banner: pollFailure,
+      force_requests: { ...forceRequests },
     },
     ...latestData,
   };
@@ -779,6 +833,8 @@ async function refresh(): Promise<void> {
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
     latestData = (await resp.json()) as ApiResponse;
     pollFailure = null;
+    const stillPending = new Set((latestData.containers || []).filter(pending).map((c) => c.name));
+    forceRequests = Object.fromEntries(Object.entries(forceRequests).filter(([name]) => stillPending.has(name)));
   } catch (err) {
     pollFailure = isNullElementError(err)
       ? OUT_OF_SYNC_HINT

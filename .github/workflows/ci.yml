@@ -63,7 +63,7 @@ jobs:
       - run: docker build -t docker-updater:ci .
       - env:
           DU_IMAGE: docker-updater:ci
-        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+        run: sh "${{ runner.temp }}/dats" --no-sandbox -v test test/dats/image.dats
 
   publish-ghcr:
     needs: [test, image-e2e]

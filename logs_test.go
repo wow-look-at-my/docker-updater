@@ -20,7 +20,7 @@ import (
 )
 
 // frame wraps payload in Docker's 8-byte stream header, which is what a
-// container without a TTY actually sends.
+// container without a TTY sends.
 func frame(stream byte, payload string) []byte {
 	var b bytes.Buffer
 	b.Write([]byte{stream, 0, 0, 0})
@@ -33,14 +33,12 @@ func TestDemuxDockerStream(t *testing.T) {
 	multiplexed := append(frame(1, "starting\n"), frame(2, "exec /buildhost: no such file or directory\n")...)
 	assert.Equal(t, "starting\nexec /buildhost: no such file or directory\n", string(demuxDockerStream(multiplexed)))
 
-	// A TTY container sends no headers, and eating eight bytes of its first
-	// line would be worse than doing nothing.
+	// A TTY container sends no headers, and eating several bytes of its first line would be worse than doing nothing.
 	plain := []byte("plain line with no framing at all\n")
 	assert.Equal(t, plain, demuxDockerStream(plain))
 	assert.Empty(t, demuxDockerStream(nil))
 
-	// A truncated final frame yields what arrived rather than an error: the tail
-	// is cut by the read limit, and a partial last line still says something.
+	// A truncated final frame yields what arrived rather than an error.
 	cut := append(frame(1, "kept\n"), []byte{1, 0, 0, 0, 0, 0, 0, 40}...)
 	cut = append(cut, []byte("half a line")...)
 	assert.Equal(t, "kept\nhalf a line", string(demuxDockerStream(cut)))
@@ -62,8 +60,7 @@ func TestIsFailing(t *testing.T) {
 	assert.True(t, isFailing("restarting", "Restarting (126) 4 seconds ago"))
 	assert.True(t, isFailing("dead", "Dead"))
 	assert.True(t, isFailing("exited", "Exited (137) 13 days ago"))
-	// A job that finished is not a failure, and reading its logs every poll
-	// would be a Docker call for nothing.
+	// A job that finished is not a failure, and reading its logs every poll would be a Docker call for nothing.
 	assert.False(t, isFailing("exited", "Exited (0) 10 days ago"))
 	assert.False(t, isFailing("running", "Up 6 days (healthy)"))
 	assert.False(t, isFailing("created", "Created"))
@@ -117,8 +114,7 @@ func TestHandleAPILogsRejectsAndBounds(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "2000", gotTail)
 
-	// A container that logged nothing gets a sentence, not a blank panel that
-	// reads as the dashboard failing.
+	// A container that logged nothing gets a sentence, not a blank panel that reads as the dashboard failing.
 	assert.Contains(t, rec.Body.String(), "written nothing")
 }
 

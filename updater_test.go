@@ -85,9 +85,7 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 
 func TestCheckAndUpdateImagePulledWhenFetched(t *testing.T) {
 	t.Serial()
-	// When the pull fetches genuinely new content -- the tag resolves to a
-	// different local image after pulling -- result.Pulled must be true. Dry-run
-	// keeps the test on the pull/fetch path without the recreate handoff.
+	// When the pull fetches genuinely new content -- the tag resolves to a different local image after pulling.
 	var inspects int
 	cli := &mockDocker{
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
@@ -339,8 +337,7 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 
 	cfg := Config{Label: "docker-updater.enable"}
 	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
-	// The result carries the verdict rather than vanishing: a container the
-	// cycle drops has no status, and its dashboard row reads "up to date".
+	// The result carries the verdict rather than vanishing: a container the cycle drops has no status.
 	require.Equal(t, 1, len(results))
 	assert.Equal(t, `unknown update mode "unknown"`, results[0].Container.Unmonitorable)
 	assert.False(t, results[0].Updated)

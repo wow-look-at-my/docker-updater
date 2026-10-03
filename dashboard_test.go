@@ -126,8 +126,7 @@ func TestHandleAPIContainers(t *testing.T) {
 	assert.Equal(t, "5m0s", resp.Interval)
 	assert.Equal(t, "docker-updater.enable", resp.Label)
 	assert.False(t, resp.DryRun)
-	// The updater's own build identifier rides along so the dashboard can show
-	// which build is answering. Always present: buildVersion falls back to "dev".
+	// The updater's own build identifier rides along so the dashboard can show which build is answering.
 	assert.Equal(t, buildVersion(), resp.Version)
 	assert.NotEmpty(t, resp.Version)
 	require.NotNil(t, resp.LastCycle)
@@ -136,8 +135,7 @@ func TestHandleAPIContainers(t *testing.T) {
 
 	require.Len(t, resp.Containers, 4)
 
-	// Monitored containers sort first, then alphabetically: api, web, then
-	// the manual ones cache, old.
+	// Monitored containers sort first, then alphabetically: api, web, then the manual ones cache, old.
 	assert.Equal(t, "api", resp.Containers[0].Name)
 	assert.Equal(t, "web", resp.Containers[1].Name)
 	assert.Equal(t, "cache", resp.Containers[2].Name)
@@ -293,13 +291,9 @@ func TestDashboardServesStaticAssets(t *testing.T) {
 	assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
 }
 
-// TestDashboardAssetCaching locks in the validator contract for the embedded
-// assets: strong SHA-256 ETags computed from the embedded bytes, Cache-Control
-// no-cache so every load (browser or intermediary cache) revalidates, 304 on a
-// matching If-None-Match, and no Last-Modified (embedded files have a zero,
-// meaningless modtime). Without this a cache in front could keep serving an
-// old dashboard.js against a new index.html after a deploy — the compiled JS
-// then dereferences element ids the other version's markup doesn't have.
+// Without this a cache in front could keep serving an old dashboard.js against
+// a new index.html after a deploy — the compiled JS then dereferences
+// element ids the other version's markup doesn't have.
 func TestDashboardAssetCaching(t *testing.T) {
 	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, newStore())
 	ts := httptest.NewServer(s.handler())
@@ -322,8 +316,6 @@ func TestDashboardAssetCaching(t *testing.T) {
 		assert.Regexp(t, `^"[0-9a-f]{64}"$`, etag, "strong quoted hex SHA-256 ETag: %s", path)
 		etags[path] = etag
 
-		// A conditional GET with the matching validator revalidates to a
-		// bodyless 304 — the cheap steady-state path.
 		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 		require.Nil(t, err, path)
 		req.Header.Set("If-None-Match", etag)
@@ -348,12 +340,10 @@ func TestDashboardAssetCaching(t *testing.T) {
 
 	// "/" is index.html under another name.
 	assert.Equal(t, etags["/index.html"], etags["/"])
-	// Distinct files carry distinct validators, so each asset revalidates
-	// independently after a deploy.
+	// Distinct files carry distinct validators, so each asset revalidates independently after a deploy.
 	assert.NotEqual(t, etags["/dashboard.js"], etags["/dashboard.css"])
 	assert.NotEqual(t, etags["/dashboard.js"], etags["/index.html"])
 
-	// Unknown paths still 404 — the asset handler never falls back to index.html.
 	resp, err := http.Get(ts.URL + "/no-such-file.txt")
 	require.Nil(t, err)
 	resp.Body.Close()
@@ -392,14 +382,12 @@ func TestDashboardVersionStampedAssetURLs(t *testing.T) {
 		etag := resp.Header.Get("ETag")
 		require.Regexp(t, `^"[0-9a-f]{64}"$`, etag, asset)
 
-		// index.html references the asset stamped with a prefix of the very
-		// hash the asset itself is served under — never the bare name.
+		// index.html references the asset stamped with a prefix of the hash the asset itself is served.
 		stampedRef := attr + `="` + asset + `?v=` + strings.Trim(etag, `"`)[:assetVersionLen] + `"`
 		assert.Contains(t, page, stampedRef, "index.html must reference %s stamped with its content hash", asset)
 		assert.NotContains(t, page, attr+`="`+asset+`"`, "bare (unstamped) %s reference must be gone", asset)
 
-		// The stamped URL — any ?v=, in fact — resolves to the same bytes and
-		// validator as the bare path.
+		// The stamped URL — any ?v=, — resolves to the same bytes and validator as the bare path.
 		respV, stamped := get("/" + asset + "?v=anything")
 		assert.Equal(t, http.StatusOK, respV.StatusCode, asset)
 		assert.Equal(t, etag, respV.Header.Get("ETag"), asset)
@@ -430,16 +418,13 @@ func TestDashboardServerRunShutsDown(t *testing.T) {
 }
 
 func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
-	// Guard against accidentally dropping the embedded JS that powers the UI,
-	// or shipping a stale dashboard.js compiled before a feature landed in
-	// dashboard.ts. Each entry is a function declaration tsc preserves
-	// verbatim in the compiled artifact.
+	// Guard against accidentally dropping the embedded JS that powers the UI.
 	data, err := dashboardAssets.ReadFile("dashboard/dashboard.js")
 	require.Nil(t, err)
 	js := string(data)
 	for _, fn := range []string{
-		"function uptimeText",            // status-string helper (original canary)
-		"function isOnline",              // four-group split (managed/unmanaged × online/offline)
+		"function uptimeText", // status-string helper (original canary)
+		"function isOnline",
 		"function onUiChange",            // filter box + section expand/collapse handler
 		"function updatedHighlight",      // recently-updated green fade
 		"function renderOutOfSyncBanner", // mixed-asset startup guard
@@ -467,10 +452,10 @@ func TestDashboardJSIsNotCommitted(t *testing.T) {
 }
 
 // TestDashboardCopyButtonsWired pins the ids the copy buttons are wired by to
-// BOTH sides of the contract. The script looks each one up with
-// getElementById and silently does nothing when it is absent, so a renamed or
-// dropped button in index.html would leave a dead control on the page with no
-// error anywhere.
+// BOTH sides of the contract. The script looks each up with getElementById
+// and silently does nothing when it is absent, so a renamed or dropped button
+// in index.html would leave a dead control on the page with no error
+// anywhere.
 func TestDashboardCopyButtonsWired(t *testing.T) {
 	html, err := dashboardAssets.ReadFile("dashboard/index.html")
 	require.Nil(t, err)

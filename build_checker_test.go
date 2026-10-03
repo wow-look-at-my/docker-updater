@@ -25,8 +25,7 @@ type fakeComposeRunner struct {
 	upErr      error
 	onBuild    func() // hook to mutate fixture state between build and the image re-read
 
-	// Image-mode recreates go through UpNoDeps; recorded separately so tests
-	// can assert dependencies are never swept into a single-service update.
+	// Image-mode recreates go through UpNoDeps.
 	upNoDepsCalls    int
 	upNoDepsErr      error
 	upNoDepsServices []string
@@ -146,9 +145,7 @@ func TestIsLayerPrefix(t *testing.T) {
 }
 
 // layeredFixture is a mockDocker environment for build-mode tests where the
-// base image, the running container's image, and the derived tag all resolve
-// to distinct inspects with real RootFS layers. Tests mutate its fields to
-// simulate registry pushes, rebuilds, and recreates between cycles.
+// base image, the running container's image.
 type layeredFixture struct {
 	cli          *mockDocker
 	baseManifest string
@@ -238,15 +235,10 @@ func TestCheckBuildUpdateLayerPrefixVerifiedCurrent(t *testing.T) {
 
 func TestCheckBuildUpdateDetectsPreExistingStaleOnFirstCycle(t *testing.T) {
 	t.Serial()
-	// The opencode scenario: the updater (re)starts with empty in-memory
-	// state while the container's image was built from a months-old base.
-	// The old first-seen-digest baseline silently adopted the current
-	// registry digest and reported "up-to-date" forever; the layer check
-	// must flag the staleness on the very first cycle.
+	// The opencode scenario: the updater (re)starts with empty in-memory state while the container's image was built.
 	resetBuildState()
 	f := newLayeredFixture()
-	// The running image was built from an OLD base: its layers do not start
-	// with the current base's layers.
+	// The running image was built from an OLD base: its layers do not start with the current base's layers.
 	f.imageLayers[f.runningID] = []string{"sha256:oldbase1", "sha256:oldbase2", "sha256:app"}
 
 	old, newBase, verified, err := checkBuildUpdate(context.Background(), f.cli, fixtureInfo(), newAuthResolver(nil))
@@ -258,9 +250,7 @@ func TestCheckBuildUpdateDetectsPreExistingStaleOnFirstCycle(t *testing.T) {
 
 func TestCheckBuildUpdateFallbackFirstCycleSeedsNoRebuild(t *testing.T) {
 	t.Serial()
-	// Without layer information (image/container not inspectable), the
-	// digest fallback keeps the old semantics: first cycle adopts the
-	// current base as the baseline without rebuilding.
+	// Without layer information (image/container not inspectable), the digest fallback keeps the semantics.
 	resetBuildState()
 	base := "ghcr.io/anomalyco/opencode:latest"
 	manifest := "sha256:" + strings.Repeat("a", 64)
@@ -319,8 +309,7 @@ func TestRebuildAndRecreateOnlyRecreatesOnRealChange(t *testing.T) {
 	newID := "sha256:" + strings.Repeat("2", 64)
 	f.imageLayers[f.runningID] = []string{"sha256:oldbase1", "sha256:app"}
 	f.imageLayers[newID] = append(append([]string{}, f.baseLayers...), "sha256:app")
-	// The rebuild re-points the derived tag at a new image; the container
-	// keeps running the old one until `up -d`.
+	// The rebuild re-points the derived tag at a new image; the container keeps running the one until `up -d`.
 	runner := &fakeComposeRunner{onBuild: func() { f.builtID = newID }}
 
 	changed, err := rebuildAndRecreate(context.Background(), f.cli, runner, fixtureInfo(), "sha256:newbase", true)
@@ -334,8 +323,7 @@ func TestRebuildAndRecreateOnlyRecreatesOnRealChange(t *testing.T) {
 func TestRebuildAndRecreateNoChurnOnCacheHit(t *testing.T) {
 	t.Serial()
 	resetBuildState()
-	// The derived tag points at the identical image after the rebuild (cache
-	// hit): the service must NOT be recreated.
+	// The derived tag points at the identical image after the rebuild (cache hit): the service must NOT be recreated.
 	f := newLayeredFixture()
 	f.imageLayers[f.runningID] = append(append([]string{}, f.baseLayers...), "sha256:app")
 	runner := &fakeComposeRunner{}
@@ -352,8 +340,7 @@ func TestRebuildMarksPrefixIncapableWhenRebuiltImageStillNotFromBase(t *testing.
 	resetBuildState()
 	f := newLayeredFixture()
 	newID := "sha256:" + strings.Repeat("2", 64)
-	// Even the freshly rebuilt image does not start with the base's layers
-	// (e.g. FROM scratch + COPY --from=stage).
+	// Even the freshly rebuilt image does not start with the base's layers (e.g. FROM scratch + COPY --from=stage).
 	f.imageLayers[f.runningID] = []string{"sha256:artifact1"}
 	f.imageLayers[newID] = []string{"sha256:artifact2"}
 	runner := &fakeComposeRunner{onBuild: func() { f.builtID = newID }}
@@ -367,10 +354,7 @@ func TestRebuildMarksPrefixIncapableWhenRebuiltImageStillNotFromBase(t *testing.
 
 func TestBuildPrefixIncapableFallsBackWithoutRebuildLoop(t *testing.T) {
 	t.Serial()
-	// A build whose final stage never extends the base (FROM scratch + COPY
-	// --from) can never satisfy the layer check. The first rebuild proves
-	// that (cache hit, image unchanged), after which the service must fall
-	// back to digest tracking instead of rebuilding every cycle.
+	// A build whose final stage never extends the base (FROM scratch + COPY --from) can never satisfy the layer check.
 	resetBuildState()
 	f := newLayeredFixture()
 	f.imageLayers[f.runningID] = []string{"sha256:artifact"}
@@ -407,9 +391,7 @@ func TestBuildPrefixIncapableFallsBackWithoutRebuildLoop(t *testing.T) {
 
 func TestCheckAndUpdateBuildRescuesStaleContainerOnFirstCycle(t *testing.T) {
 	t.Serial()
-	// End-to-end opencode scenario: fresh updater process, container built
-	// from an old base, registry already many releases ahead. The first
-	// cycle must rebuild and recreate.
+	// End-to-end opencode scenario: fresh updater process, container built from an old base.
 	resetBuildState()
 	f := newLayeredFixture()
 	newID := "sha256:" + strings.Repeat("2", 64)
@@ -426,8 +408,7 @@ func TestCheckAndUpdateBuildRescuesStaleContainerOnFirstCycle(t *testing.T) {
 	assert.Equal(t, 1, runner.buildCalls, "pre-existing staleness rebuilds on the first cycle")
 	assert.Equal(t, 1, runner.upCalls)
 
-	// After the rebuild the running image extends the base: the next cycle
-	// verifies it as current without rebuilding.
+	// After the rebuild the running image extends the base: the next cycle verifies it as current without rebuilding.
 	f.runningID = newID
 	r = checkAndUpdateBuild(context.Background(), f.cli, runner, info, cfg, UpdateResult{Container: info}, newAuthResolver(nil))
 	require.NoError(t, r.Error)
@@ -473,8 +454,7 @@ func TestCheckAndUpdateBuildDryRunMutatesNothing(t *testing.T) {
 	assert.Equal(t, 0, runner.buildCalls, "dry-run must not build")
 	assert.Equal(t, 0, runner.upCalls, "dry-run must not recreate")
 
-	// Crucially, dry-run must not advance the baseline: the same update is still
-	// pending on the next cycle.
+	// Crucially, dry-run must not advance the baseline: the same update is still pending on the next cycle.
 	r = checkAndUpdateBuild(context.Background(), cli, runner, info, cfg, UpdateResult{Container: info, DryRun: true}, newAuthResolver(nil))
 	assert.True(t, r.Updated, "dry-run did not consume the update; it stays pending")
 	assert.Equal(t, 0, runner.buildCalls)
@@ -567,8 +547,7 @@ func TestCheckAndUpdateBuildReportsBuildError(t *testing.T) {
 
 func TestCheckAndUpdateBuildPullErrorPropagates(t *testing.T) {
 	t.Serial()
-	// A mid-stream pull failure (in-band error record) must surface as a
-	// check error -- never as a silent "up-to-date".
+	// A mid-stream pull failure (in-band error record) must surface as a check error -- never as a silent "up-to-date".
 	resetBuildState()
 	f := newLayeredFixture()
 	f.imageLayers[f.runningID] = append(append([]string{}, f.baseLayers...), "sha256:app")

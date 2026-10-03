@@ -13,40 +13,18 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// docker-updater cannot update its own container the way it updates any other
-// one: recreateContainer stops and removes the target before creating the
-// replacement, and stopping its *own* container kills this process mid-swap --
-// nothing is left to create and start the new container, so the updater would
-// vanish (and, with a restart policy, the removed container can't be revived
-// either). This is why a published fix never reaches a running updater.
-//
-// The fix is a hand-off: when the container to update is our own, we spawn a
-// short-lived, detached helper container from the freshly-pulled new image that
-// runs the hidden `finish-self-update` subcommand. The helper -- a separate
-// container with its own lifecycle -- recreates our container on the new image
-// and then exits. Because it reuses recreateContainer, the rollback and health
-// gate guarantees apply to the updater itself, so a broken new image rolls the
-// updater back instead of leaving it down.
+// docker-updater cannot update its own container the way it updates any other one.
 
-// finishSelfUpdateCommand is the hidden argv[1] the helper container runs to
-// complete a self-update. Invoked as `/docker-updater finish-self-update ...`.
 const finishSelfUpdateCommand = "finish-self-update"
 
-// selfUpdateHelperLabel marks the helper container so it is never itself picked
-// up as a monitored target (it carries no enable label anyway, but this makes
-// the intent explicit and greppable).
+// selfUpdateHelperLabel marks the helper container so it is never itself picked up as a monitored target.
 const selfUpdateHelperLabel = "docker-updater.self-update-helper"
 
 // containerIDRe matches a 64-hex Docker container ID embedded in a host path.
 var containerIDRe = regexp.MustCompile(`[0-9a-f]{64}`)
 
-// detectOwnContainerID returns the ID of the container this process runs in, or
-// "" if it cannot be determined (e.g. running outside Docker). It reads
-// /proc/self/mountinfo first: Docker bind-mounts /etc/hostname, /etc/hosts and
-// /etc/resolv.conf from /var/lib/docker/containers/<id>/, so the ID is present
-// there regardless of network mode -- unlike the hostname==short-ID convention,
-// which any container carrying an explicit or inherited hostname defeats. Falls
-// back to /proc/self/cgroup for cgroup v1 hosts.
+// detectOwnContainerID returns the ID of the container this process runs in,
+// or "" if it cannot be determined (e.g. running outside Docker).
 func detectOwnContainerID() string {
 	if id := containerIDFromMountinfo(readFileString("/proc/self/mountinfo")); id != "" {
 		return id
@@ -88,9 +66,7 @@ func containerIDFromCgroup(cgroup string) string {
 	return ""
 }
 
-// sameContainer reports whether a and b refer to the same container, tolerating
-// one being a short-ID prefix of the other (Docker's list/inspect return full
-// IDs, but env-supplied overrides may be short).
+// sameContainer reports whether a and b refer to the same container.
 func sameContainer(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -116,8 +92,7 @@ func selfUpdate(ctx context.Context, cli DockerClient, info ContainerInfo, newIm
 	}
 
 	helperName := info.Name + "-self-update"
-	// Clear any helper stranded by a previously aborted attempt so the create
-	// below cannot fail on a name conflict.
+	// Clear any helper stranded by a aborted attempt so the create below cannot fail on a name conflict.
 	_ = cli.ContainerRemove(ctx, helperName, container.RemoveOptions{Force: true})
 
 	helperCfg := &container.Config{
@@ -130,9 +105,7 @@ func selfUpdate(ctx context.Context, cli DockerClient, info ContainerInfo, newIm
 	}
 
 	// A fresh HostConfig (not the parent's): the helper only needs the Docker
-	// socket and the parent's network reachability to it. AutoRemove cleans the
-	// one-shot up on exit; an empty RestartPolicy means "no", so the helper is
-	// never revived after it finishes.
+	// socket and the parent's network reachability to it.
 	helperHost := &container.HostConfig{
 		Binds:      binds,
 		AutoRemove: true,
@@ -198,9 +171,9 @@ func dockerHostEnv(inspect types.ContainerJSON) string {
 }
 
 // finishSelfUpdate is the helper container's entrypoint. It recreates the
-// original docker-updater container (--target) on the new image (--image),
-// reusing recreateContainer so the same rollback and health-gate guarantees
-// apply. It runs to completion then exits; the helper container is --rm'd.
+// docker-updater container (--target) on the new image (--image), reusing
+// recreateContainer so the same rollback and health-gate guarantees apply. It
+// runs to completion then exits; the helper container is --rm'd.
 func finishSelfUpdate(args []string) {
 	fs := flag.NewFlagSet(finishSelfUpdateCommand, flag.ExitOnError)
 	target := fs.String("target", "", "ID of the docker-updater container to replace")

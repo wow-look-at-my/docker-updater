@@ -24,8 +24,7 @@ func TestUpdaterOf(t *testing.T) {
 		"a scope pins the container to a watchtower instance, whatever its value")
 	assert.Equal(t, updaterBoth, updaterOf(map[string]string{ours: "true", watchtowerEnableLabel: "true"}, ours))
 
-	// enable=false is watchtower's opt-OUT under its default all-containers
-	// mode. Reading it as ownership would claim every excluded container.
+	// enable=false is watchtower's opt-OUT under its default all-containers mode.
 	assert.Empty(t, updaterOf(map[string]string{watchtowerEnableLabel: "false"}, ours))
 	assert.Equal(t, updaterDockerUpdater, updaterOf(map[string]string{ours: "true", watchtowerEnableLabel: "false"}, ours))
 }
@@ -74,8 +73,7 @@ func TestAPIContainersReportsTheUpdater(t *testing.T) {
 	assert.Contains(t, byName["contested"].Warnings, bothUpdatersWarning)
 	assert.Empty(t, byName["ours"].Warnings, "one claim is not a conflict")
 
-	// A container claimed twice leads, then ours, then watchtower's, then the
-	// one nothing updates.
+	// A container claimed twice leads, then ours, then watchtower's, then the one nothing updates.
 	order := make([]string, 0, len(resp.Containers))
 	for _, c := range resp.Containers {
 		order = append(order, c.Name)

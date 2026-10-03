@@ -36,8 +36,7 @@ func TestListMonitoredSkipsTheRollingScratchContainer(t *testing.T) {
 			return []types.Container{
 				{ID: "a", Names: []string{"/buildhost"}, Image: "ghcr.io/acme/buildhost:latest", Labels: labels},
 				{ID: "b", Names: []string{"/buildhost-next"}, Image: "ghcr.io/acme/buildhost:latest", Labels: labels},
-				// An operator's own container that ends the same way, with no
-				// container of the base name behind it.
+				// An operator's own container that ends the same way, with no container of the base name behind it.
 				{ID: "c", Names: []string{"/queue-next"}, Image: "ghcr.io/acme/queue:latest", Labels: labels},
 			}, nil
 		},
@@ -105,7 +104,7 @@ func TestRollingUpdateClearsAStaleNextContainer(t *testing.T) {
 }
 
 // A next container that fails its health check is removed with force too, so
-// the name is free for the cycle after this one.
+// the name is free for the cycle after this.
 func TestRollingUpdateForceRemovesAFailedNextContainer(t *testing.T) {
 	t.Serial()
 	var forcedIDs []string

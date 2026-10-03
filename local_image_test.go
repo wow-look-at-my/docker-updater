@@ -17,7 +17,7 @@ import (
 // driftedContainer is a container configured with a registry image and started
 // from a local build of it: Config.Image names the registry, but the running
 // image carries no RepoDigests. This is the s3 container that sat unupdated for
-// three days while the registry answered every manifest request.
+// a few days while the registry answered every manifest request.
 func driftedContainer(pullErr error) (*mockDocker, *[]string) {
 	repo := "oci.pazer.build/go-s3-server"
 	localID := "sha256:" + strings.Repeat("4", 64)
@@ -206,7 +206,6 @@ func TestListMonitoredContainersBuildMode(t *testing.T) {
 	assert.Equal(t, "/srv/demo/docker-compose.yml", c.ComposeConfigFiles)
 	assert.Equal(t, "/srv/demo", c.ComposeWorkingDir)
 	assert.Equal(t, "ghcr.io/anomalyco/opencode:latest", c.BaseImage)
-	// Build mode never resolves the local derived tag to a registry ref; the
-	// running image content ID is the recorded digest.
+	// Build mode never resolves the local derived tag to a registry ref.
 	assert.Equal(t, "sha256:derived", c.ImageDigest)
 }

@@ -5,28 +5,21 @@ import (
 	"log"
 )
 
-// selfAttacher puts docker-updater on a network of every container it monitors.
-// The update-check endpoints are dialed at the container's own IP, which only
-// works from a network they share -- and the updater already holds the Docker
-// socket, so it arranges that itself rather than making an operator run
-// `docker network connect` per stack.
-//
-// It never disconnects: a network it joined for a container that has since gone
-// away costs an unused endpoint, while disconnecting a network something else
-// put it on would break reachability it did not create.
+// selfAttacher puts docker-updater on a network of every container it
+// monitors.
 type selfAttacher struct {
 	cli    DockerClient
 	selfID string
-	joined map[string]bool // network IDs docker-updater is on
+	joined map[string]bool
 }
 
-// newSelfAttacher reads the networks docker-updater is currently on. Built once
-// per check cycle, so a network joined (or lost) since the last cycle is
+// newSelfAttacher reads the networks docker-updater is on. Built once per
+// check cycle, so a network joined (or lost) since the last cycle is
 // reflected without any state to go stale.
 //
 // A nil attacher never attaches, and is what a docker-updater that cannot
-// identify its own container gets -- main says so at startup, since without an
-// ID there is nothing per-container to add.
+// identify its own container gets -- main says so at startup, since without
+// an ID there is nothing per-container to add.
 func newSelfAttacher(ctx context.Context, cli DockerClient, selfID string) *selfAttacher {
 	if selfID == "" {
 		return nil

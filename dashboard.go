@@ -16,11 +16,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// dashboard.js is tsc output from dashboard.ts, and it is gitignored: a
-// committed copy is a second source of truth that drifts, with nothing to mark
-// the moment it stops matching. The embed below needs it on disk, so generate
-// produces it and a build without generate fails to compile rather than
-// shipping whatever happened to be lying there.
 //go:generate npm --prefix dashboard ci
 //go:generate npm --prefix dashboard run build
 
@@ -59,8 +54,7 @@ type staticAsset struct {
 	etag        string // strong ETag: quoted hex SHA-256 of body
 }
 
-// assetVersionLen is how many hex chars of an asset's SHA-256 go into the
-// ?v= stamp index.html references it by.
+// assetVersionLen is how many hex chars of an asset's SHA-256 go into the ?v= stamp index.html references it by.
 const assetVersionLen = 12
 
 // staticAssetHandler serves the embedded dashboard files with a strong SHA-256
@@ -80,8 +74,7 @@ func staticAssetHandler() http.HandlerFunc {
 	read := func(name string) []byte {
 		body, err := dashboardAssets.ReadFile("dashboard/" + name)
 		if err != nil {
-			// The embed paths are compile-time constants; this cannot fail at
-			// runtime.
+			// The embed paths are compile-time constants; this cannot fail at runtime.
 			log.Printf("dashboard: failed to load embedded asset %s: %v", name, err)
 			return nil
 		}
@@ -186,8 +179,7 @@ type apiContainer struct {
 	Name    string `json:"name"`
 	Image   string `json:"image"`
 	ImageID string `json:"image_id"`
-	// The commit the running image was built from, and its page. From the
-	// image's OCI labels; absent when the image carries none.
+	// The commit the running image was built from, and its page.
 	Commit    string `json:"commit,omitempty"`
 	CommitURL string `json:"commit_url,omitempty"`
 	State     string `json:"state"`
@@ -195,22 +187,14 @@ type apiContainer struct {
 	Health    string `json:"health"`
 	Created   int64  `json:"created"`
 
-	// Restarts is Docker's RestartCount: how many times the daemon's restart
-	// policy has restarted the container since it was created. docker-updater
-	// creates a fresh container on every pull/update, so for monitored
-	// containers this is effectively "restarts since the last pull". nil when
-	// the container could not be inspected.
+	// Restarts is Docker's RestartCount: how many times the daemon's restart policy has restarted the container.
 	Restarts *int `json:"restarts,omitempty"`
 
 	AutoUpdate bool   `json:"auto_update"`
 	Mode       string `json:"mode,omitempty"`
-	// Updater names who keeps this container current: "docker-updater",
-	// "watchtower", "both", or empty for a container nothing updates. It exists
-	// so watchtower's containers stop reading as neglected ones.
+	// Updater names who keeps this container current: "docker-updater", "watchtower", "both".
 	Updater string `json:"updater,omitempty"`
-	// LogExcerpt is the last line a failing container logged. A container in a
-	// restart loop says why in its own output, and "Restarting (126)" alone
-	// sends the reader to a host shell to find out.
+	// LogExcerpt is the last line a failing container logged.
 	LogExcerpt string `json:"log_excerpt,omitempty"`
 
 	LastChecked     *time.Time `json:"last_checked,omitempty"`
@@ -225,18 +209,12 @@ type apiContainer struct {
 	Error              string `json:"error,omitempty"`
 	Skipped            bool   `json:"skipped,omitempty"`
 	SkipReason         string `json:"skip_reason,omitempty"`
-	// Unmonitorable is why a container that carries the enable label can never
-	// be checked as it stands. The row must say so: a container no check can
-	// reach is not an up-to-date one.
+	// Unmonitorable is why a container that carries the enable label can never be checked as it stands.
 	Unmonitorable string `json:"unmonitorable,omitempty"`
-	// StuckCycles counts the consecutive cycles that offered an update this
-	// container did not take, and StuckSince is when that run began. A single
-	// failure is ordinary; a long run is a deployment frozen where it stands.
+	// StuckCycles counts the consecutive cycles that offered an update this container did not take.
 	StuckCycles int        `json:"stuck_cycles,omitempty"`
 	StuckSince  *time.Time `json:"stuck_since,omitempty"`
-	// Warnings describe how the container is configured for update checks --
-	// no standard /.well-known/docker-updater/ endpoints, or nonstandard
-	// label overrides. Not errors: the update path still works.
+	// Warnings describe how the container is configured for update checks -- no standard /.well-known/docker-updater/ endpoints.
 	Warnings []string `json:"warnings,omitempty"`
 	// ComposeDrift is set when the running config no longer matches the compose file, or when nothing could compare them.
 	ComposeDrift *ComposeDrift `json:"compose_drift,omitempty"`
@@ -294,8 +272,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		ac.Commit, ac.CommitURL = commitOf(c.Labels)
 
 		// Only for a container that is failing: a healthy one's last log line is
-		// noise, and reading every container's logs on every poll would make
-		// the page cost a Docker API call per row.
+		// noise.
 		if isFailing(c.State, c.Status) {
 			if logs, err := containerLogTail(r.Context(), s.cli, c.ID, logExcerptTail); err == nil {
 				ac.LogExcerpt = logExcerpt(logs)
@@ -327,9 +304,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.LastChecked = nonZeroTime(st.LastChecked)
 			ac.LastPulled = nonZeroTime(st.LastPulled)
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)
-			// Appended, not assigned: the both-updaters note above is about
-			// this container's labels, and the cycle's warnings are about its
-			// update checks. Neither replaces the other.
+			// Appended, not assigned: the both-updaters note above is about this container's labels.
 			ac.Warnings = append(ac.Warnings, st.Warnings...)
 			ac.ComposeDrift = st.Drift
 			if st.Stuck() {

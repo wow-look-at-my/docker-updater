@@ -30,8 +30,7 @@ func TestPullImage(t *testing.T) {
 }
 
 func TestPullImageFetchedReportsNewContent(t *testing.T) {
-	// The reference resolves to one image before the pull and a different one
-	// after: the pull fetched new content, so fetched must be true.
+	// The reference resolves to one image before the pull and a different one after: the pull fetched new content.
 	var calls int
 	cli := &mockDocker{
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
@@ -77,11 +76,7 @@ func TestPullImageError(t *testing.T) {
 }
 
 func TestPullImageSurfacesMidStreamError(t *testing.T) {
-	// The daemon reports mid-pull failures (registry 429/5xx, dropped
-	// connections) as in-band error records in a cleanly terminated stream.
-	// They must fail the pull -- a blind drain would silently no-op, and the
-	// caller would compare against the stale local image and log
-	// "up-to-date" forever.
+	// The daemon reports mid-pull failures (registry 429/5xx, dropped connections) as in-band error records.
 	inspects := 0
 	cli := &mockDocker{
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {

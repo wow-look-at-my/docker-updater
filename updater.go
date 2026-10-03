@@ -79,12 +79,14 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 		warnings = append(warnings, wellKnownWarnings...)
 		logContainerWarnings(info.Name, warnings)
 
+		drift := checkComposeDrift(ctx, defaultComposeRunner, info, cfg)
+		info.ComposeDrifted = drift.applies()
 		result := UpdateResult{
 			Container: info,
 			CheckedAt: time.Now(),
 			DryRun:    dryRun(cfg, info),
 			Warnings:  warnings,
-			Drift:     checkComposeDrift(ctx, defaultComposeRunner, info, cfg),
+			Drift:     drift,
 		}
 
 		switch info.Mode {
@@ -98,6 +100,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			result.Container.Unmonitorable = fmt.Sprintf("unknown update mode %q", info.Mode)
 			log.Printf("container %s cannot be updated: %s", info.Name, result.Container.Unmonitorable)
 		}
+		result = applyComposeDrift(ctx, cli, defaultComposeRunner, info, cfg, result)
 
 		results = append(results, result)
 	}
@@ -293,6 +296,10 @@ func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner
 	// this process before the replacement is created.
 	if sameContainer(info.ID, cfg.SelfContainerID) {
 		return selfUpdate(ctx, cli, info, info.Image)
+	}
+	// A clone of the running config keeps the drift, so a drifted service goes through compose, even on a rolling or git-mode update.
+	if info.ComposeDrifted {
+		return recreateViaCompose(ctx, cli, runner, info)
 	}
 	if info.Rolling {
 		// Rolling updates start the replacement before draining the container, which compose cannot express.

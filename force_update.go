@@ -12,7 +12,8 @@ const forceQueueDepth = 8
 const forceUpdateHeader = "X-Docker-Updater-Action"
 
 // handleAPIForceUpdate queues an update of one container that has an update
-// pending. The update skips the pre-update gate and dry-run mode.
+// pending, or a recreate of one that drifted from its compose file. Either
+// skips the pre-update gate and dry-run mode.
 func (s *dashboardServer) handleAPIForceUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -33,8 +34,8 @@ func (s *dashboardServer) handleAPIForceUpdate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	st, ok := s.store.Snapshot().Statuses[name]
-	if !ok || !st.UpdateAvailable {
-		http.Error(w, "container "+name+" has no pending update", http.StatusConflict)
+	if !ok || !(st.UpdateAvailable || st.Drift.applies()) {
+		http.Error(w, "container "+name+" has no pending update and no compose drift to apply", http.StatusConflict)
 		return
 	}
 

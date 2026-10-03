@@ -18,12 +18,16 @@ import (
 )
 
 // forceServer is a dashboard server with a force queue, and a store in which
-// "held" has an update pending and "current" does not.
+// "held" has an update pending, "drifted" has a held recreate from its compose
+// file, "self" drifted where the updater cannot apply it, and "current" has
+// nothing to do.
 func forceServer(t *testing.T, depth int) (*dashboardServer, chan string) {
 	t.Helper()
 	store := newStore()
 	store.Record([]UpdateResult{
 		{Container: ContainerInfo{Name: "held"}, OldRef: "sha256:aaa", NewRef: "sha256:bbb", Skipped: true, SkipReason: "busy"},
+		{Container: ContainerInfo{Name: "drifted"}, OldRef: "sha256:aaa", Skipped: true, SkipReason: "busy", Resync: true, Drift: &ComposeDrift{State: driftFound}},
+		{Container: ContainerInfo{Name: "self"}, OldRef: "sha256:aaa", Drift: &ComposeDrift{State: driftFound, Blocked: selfDriftBlocked}},
 		{Container: ContainerInfo{Name: "current"}, OldRef: "sha256:aaa"},
 	}, time.Now())
 	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, store)
@@ -49,6 +53,15 @@ func TestForceUpdateQueuesPendingContainer(t *testing.T) {
 	assert.Equal(t, "held", <-force)
 }
 
+func TestForceUpdateQueuesDriftedContainer(t *testing.T) {
+	s, force := forceServer(t, 1)
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, forceRequest(http.MethodPost, "drifted", true))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Len(t, force, 1)
+	assert.Equal(t, "drifted", <-force)
+}
+
 func TestForceUpdateRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		desc   string
@@ -58,6 +71,7 @@ func TestForceUpdateRefusals(t *testing.T) {
 		{"GET is refused", forceRequest(http.MethodGet, "held", true), http.StatusMethodNotAllowed},
 		{"a request without the header is refused", forceRequest(http.MethodPost, "held", false), http.StatusForbidden},
 		{"a container with no pending update is refused", forceRequest(http.MethodPost, "current", true), http.StatusConflict},
+		{"a drift the updater cannot apply is refused", forceRequest(http.MethodPost, "self", true), http.StatusConflict},
 		{"an unknown container is refused", forceRequest(http.MethodPost, "nope", true), http.StatusConflict},
 		{"a missing name is refused", forceRequest(http.MethodPost, "", true), http.StatusBadRequest},
 	} {

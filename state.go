@@ -130,12 +130,12 @@ func (s *Store) record(results []UpdateResult) {
 		case r.Skipped:
 			st.Skipped = true
 			st.SkipReason = r.SkipReason
-			st.UpdateAvailable = true
+			st.UpdateAvailable = !r.Resync
 			st.AvailableRef = shortRef(r.NewRef)
 			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated && r.DryRun:
-			// Dry-run: an update is available but was deliberately not applied.
-			st.UpdateAvailable = true
+			// Dry-run: an update or a recreate from the compose file is due but was deliberately not applied. The held drift stays in st.Drift.
+			st.UpdateAvailable = !r.Resync
 			st.AvailableRef = shortRef(r.NewRef)
 			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated:

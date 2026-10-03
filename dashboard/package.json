@@ -3,11 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "description": "Build tooling for the docker-updater web dashboard: compiles dashboard.ts to the embedded dashboard.js.",
-  "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test snapshot.test.mts"
-  },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.2.0",

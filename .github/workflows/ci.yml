@@ -37,11 +37,12 @@ jobs:
         with:
           # 22 for native TypeScript type stripping: snapshot.test.mts runs as authored, with no build step.
           node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y just
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
+      - run: just typecheck
+      - run: just build
       # Runs against the compiled dashboard.js, not source nobody ships.
-      - run: npm test
+      - run: just test
 
   # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:

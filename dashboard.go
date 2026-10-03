@@ -17,7 +17,7 @@ import (
 )
 
 //go:generate npm --prefix dashboard ci
-//go:generate npm --prefix dashboard run build
+//go:generate dashboard/node_modules/.bin/tsc -p dashboard
 
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS

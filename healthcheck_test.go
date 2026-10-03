@@ -63,10 +63,7 @@ func TestRecreateContainerHealthTimeout(t *testing.T) {
 }
 
 func TestRecreateContainerNoHealthcheck(t *testing.T) {
-	// No HEALTHCHECK in the image and no health-check labels: the gate
-	// degrades to "stays running for the grace period". The update must
-	// succeed -- failing it would make the container permanently
-	// un-updatable (and, before the rollback fix, take it offline).
+	// No HEALTHCHECK in the image and no health-check labels: the gate degrades to "stays running for the grace period".
 	createCount := 0
 	inspectCount := 0
 	cli := &mockDocker{
@@ -109,8 +106,7 @@ func TestRecreateContainerNoHealthcheck(t *testing.T) {
 }
 
 func TestRecreateContainerNoHealthcheckExitRollsBack(t *testing.T) {
-	// No healthcheck and the new container dies during the grace period: the
-	// update must fail and roll back to the previous image.
+	// No healthcheck and the new container dies during the grace period: the update must fail and roll back to the image.
 	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
@@ -157,8 +153,7 @@ func TestRecreateContainerNoHealthcheckExitRollsBack(t *testing.T) {
 }
 
 func TestRecreateContainerNoHealthcheckRestartRollsBack(t *testing.T) {
-	// A restart policy can mask a crash loop: the container is "running" at
-	// poll time but its restart count betrays the crash. Must roll back.
+	// A restart policy can mask a crash loop.
 	inspectCount := 0
 	cli := &mockDocker{
 		containerInspectFn: func(_ context.Context, id string) (types.ContainerJSON, error) {
@@ -206,9 +201,7 @@ func TestRecreateContainerNoHealthcheckRestartRollsBack(t *testing.T) {
 }
 
 func TestRollingUpdateContainerNoHealthcheck(t *testing.T) {
-	// Rolling mode with no healthcheck anywhere: the next container is gated
-	// on staying running, then the old container is drained and the next one
-	// renamed into place.
+	// Rolling mode with no healthcheck anywhere: the next container is gated on staying running.
 	var renamedTo string
 	inspectCount := 0
 	cli := &mockDocker{
@@ -276,19 +269,15 @@ func TestHealthCheckTimeout(t *testing.T) {
 				},
 			},
 		}
-		// 2m + (3 * 10s) + 5s = 2m35s
 		assert.Equal(t, 2*time.Minute+35*time.Second, healthCheckTimeout(inspect))
 	})
 
 	t.Run("zero fields use defaults", func(t *testing.T) {
 		inspect := types.ContainerJSON{
 			Config: &container.Config{
-				Healthcheck: &container.HealthConfig{
-					// All zero — should use defaults: 30s interval, 3 retries, 30s timeout
-				},
+				Healthcheck: &container.HealthConfig{},
 			},
 		}
-		// 0 + (3 * 30s) + 30s = 2m
 		assert.Equal(t, 2*time.Minute, healthCheckTimeout(inspect))
 	})
 }
@@ -408,13 +397,11 @@ func TestRecreateContainerRollsBackOnUnhealthy(t *testing.T) {
 	assert.Equal(t, []string{"old123456789", "new123456789"}, stops)
 	assert.Equal(t, []string{"old123456789", "new123456789"}, removes)
 
-	// ...the previous image is re-tagged to the original reference so the
-	// restored container keeps resolving (and retrying) registry updates...
+	// ...the image is re-tagged to the reference so the restored container keeps resolving (and retrying).
 	assert.Equal(t, "sha256:olddigest", tagSource)
 	assert.Equal(t, "ghcr.io/org/app:latest", tagTarget)
 
-	// ...and a container on the previous image comes back up under the
-	// original name.
+	// ...and a container on the image comes back up under the name.
 	require.Equal(t, 2, len(creates))
 	assert.Equal(t, "ghcr.io/org/app:latest test-app", creates[1])
 	assert.Equal(t, []string{"new123456789", "restored90123"}, starts)

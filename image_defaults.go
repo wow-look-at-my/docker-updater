@@ -8,34 +8,24 @@ import (
 	"github.com/wow-look-at-my/go-containers/set"
 )
 
-// clearInheritedImageDefaults removes from a container's config every value the
-// image it was created from supplied.
+// clearInheritedImageDefaults removes from a container's config every value
+// the image it was created from supplied.
 //
 // ContainerInspect reports a container's RESOLVED config. The API records the
-// entrypoint, command, environment, labels, healthcheck, ports and volumes the
-// container runs with, and records nothing about where each one came from. An
+// entrypoint, command, environment, labels, healthcheck, ports and volumes
+// the container runs with, and records nothing about where each came from. An
 // operator's own --entrypoint and the image's ENTRYPOINT read identically.
 //
 // So handing that config back to ContainerCreate with only Image changed pins
-// the OLD image's defaults onto the NEW one, and a default the new image
-// changed never takes effect. A field cleared here is nil or empty, which is
-// how ContainerCreate is told to take the image's own value.
-//
-// The one thing this cannot preserve is an operator who typed a value that
-// happens to equal the old image's. That is indistinguishable from inheritance
-// through this API, and inheriting is the safer of the two readings: it tracks
-// the image the operator asked to run.
+// the image's defaults onto the NEW one, and a default the new image changed
+// never takes effect. A field cleared here is nil or empty, which is how
+// ContainerCreate is told to take the image's own value.
 func clearInheritedImageDefaults(config, img *container.Config) {
 	if config == nil || img == nil {
 		return
 	}
 
-	// The entrypoint always comes from the new image. An image owns the binary
-	// it starts, and that binary changes with the image: buildhost moved from a
-	// bare executable to a shell launcher, and every container still carrying
-	// the old spelling could not exec at all. Diffing against the previous image
-	// does not catch that, because a value inherited from an older ancestor
-	// matches no later image and is therefore pinned for good.
+	// The entrypoint always comes from the new image.
 	config.Entrypoint = nil
 
 	if equalStrings(config.Cmd, img.Cmd) {
@@ -54,9 +44,7 @@ func clearInheritedImageDefaults(config, img *container.Config) {
 		config.Healthcheck = nil
 	}
 
-	// The remaining fields are unions rather than replacements: the daemon adds
-	// the image's entries to the ones the operator gave. Each drops only the
-	// entries that match the old image, so an operator's own survive.
+	// The remaining fields are unions rather than replacements.
 	config.Env = dropMatching(config.Env, img.Env)
 	for k, v := range img.Labels {
 		if config.Labels[k] == v {
@@ -91,22 +79,8 @@ func clearInheritedDefaultsFor(ctx context.Context, cli DockerClient, config *co
 	clearInheritedImageDefaults(config, img.Config)
 }
 
-// resetToImageDefaults strips the process fields from config so the new image's
-// own apply, and reports whether it had anything to strip.
-//
-// clearInheritedImageDefaults is the first line and it is not always enough. It
-// clears a field only when the container's value EQUALS the old image's, so a
-// value it cannot attribute survives: the old image is gone from the daemon, or
-// an operator once typed the path by hand, or the container predates the image
-// pair entirely. A surviving path that the new image does not carry is an exec
-// failure on every start, and a rolling updater clones it onto the container
-// after this one, so the deployment never moves again. One buildhost deployment
-// spent three weeks on that loop.
-//
-// The retry that calls this gives up the operator's own overrides for the
-// image's. That is the lesser loss: a container that starts on the image's
-// defaults is running the version it was asked to run, and one that cannot exec
-// its entrypoint is running the previous version forever.
+// resetToImageDefaults strips the process fields from config so the new
+// image's own apply, and reports whether it had anything to strip.
 func resetToImageDefaults(config *container.Config) bool {
 	if config == nil {
 		return false

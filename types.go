@@ -8,10 +8,7 @@ type UpdateMode string
 const (
 	UpdateModeImage UpdateMode = "image"
 	UpdateModeGit   UpdateMode = "git"
-	// UpdateModeBuild watches the base image of a locally-built (compose
-	// build:) service. The local derived tag is never pulled; instead the base
-	// image is pulled and, when its digest changes, the service is rebuilt and
-	// recreated via docker compose.
+	// UpdateModeBuild watches the base image of a locally-built (compose build:) service.
 	UpdateModeBuild UpdateMode = "build"
 )
 
@@ -23,58 +20,37 @@ type ContainerInfo struct {
 	ImageDigest string
 	Mode        UpdateMode
 	Labels      map[string]string
-	// State is Docker's container state ("running", "restarting", "exited",
-	// ...). A container that is not running has no work in flight, so the
-	// pre-update gate is not asked for it.
+	// State is Docker's container state ("running", "restarting", "exited", ...).
 	State string
 
 	// Git-mode fields
 	GitRepo string
 	GitRef  string
 
-	// Compose fields. Populated for every mode from the container's compose
-	// labels; empty for containers not created by docker compose. Image mode
-	// recreates a compose-managed service through `docker compose up -d` so
-	// compose-file edits apply, and build mode additionally rebuilds it.
+	// Compose fields.
 	ComposeProject     string // com.docker.compose.project
 	ComposeService     string // com.docker.compose.service
 	ComposeConfigFiles string // com.docker.compose.project.config_files (comma-separated)
 	ComposeWorkingDir  string // com.docker.compose.project.working_dir
-	// BaseImage is the registry image whose digest changing triggers a
-	// rebuild. Taken from the docker-updater.base-image label if set, else
-	// parsed from the service's Dockerfile FROM. Empty means unresolved
-	// (the container is skipped).
+	// BaseImage is the registry image whose digest changing triggers a rebuild.
 	BaseImage string
 
-	// Pre-update check fields.
-	// If PreCheckURL is set, an HTTP GET is sent and 2xx means ready.
-	// Otherwise if PreCheckCommand is set, it is exec'd via sh -c.
+	// Pre-update check fields. If PreCheckURL is set, an HTTP GET is sent and 2xx means ready.
 	PreCheckURL     string
 	PreCheckCommand string
 	PreCheckTimeout time.Duration
-	// PreCheckStandard marks PreCheckURL as the discovered standard endpoint
-	// rather than an operator-configured one.
+	// PreCheckStandard marks PreCheckURL as the discovered standard endpoint rather than an operator-configured one.
 	PreCheckStandard bool
 
-	// Discovery inputs for the standard /.well-known/docker-updater/
-	// endpoints: where to reach the container, and which TCP ports it declares.
+	// Discovery inputs for the standard /.well-known/docker-updater/ endpoints: where to reach the container.
 	Address      string // the container's own IP; empty when it has none
 	ExposedPorts []int  // declared TCP ports, ascending
 	// AddressNetwork is the ID of the network Address belongs to.
-	// docker-updater attaches itself to it so the address is dialable.
 	AddressNetwork string
-	// DockerHealthcheck reports whether the container has an effective Docker
-	// HEALTHCHECK -- the same signal waitHealthy branches on (State.Health).
-	// It is what makes a discovery warning able to name the fallback the
-	// container will ACTUALLY get instead of the one it might have had.
+	// DockerHealthcheck reports whether the container has an effective Docker HEALTHCHECK.
 	DockerHealthcheck bool
 
-	// Unmonitorable, when set, is why this container can never be checked as
-	// it stands: no registry repository to poll, a locally built image in
-	// image mode, or a mode nothing implements. Discovery keeps such a
-	// container instead of dropping it, so the dashboard reports the reason.
-	// A dropped container has no status at all, and the row then reads as up
-	// to date.
+	// Unmonitorable, when set, is why this container can never be checked as it stands: no registry repository to poll.
 	Unmonitorable string
 
 	// Rolling update: start new container before stopping old.
@@ -83,18 +59,11 @@ type ContainerInfo struct {
 	// Force is set when an operator asked for this update from the dashboard.
 	Force bool
 
-	// Post-update health check fields.
-	// If HealthCheckURL is set, HTTP GET is polled until 2xx.
-	// Otherwise if HealthCheckCommand is set, it is exec'd via sh -c.
-	// Falls back to Docker HEALTHCHECK status when neither is set.
+	// Post-update health check fields. If HealthCheckURL is set, HTTP GET is polled until 2xx.
 	HealthCheckURL     string
 	HealthCheckCommand string
 	HealthCheckTimeout time.Duration
-	// HealthCheckURLFromContainer marks HealthCheckURL as built from the
-	// container's own address rather than written by an operator. Such a URL
-	// names the container being replaced, so the gate re-resolves its host
-	// against the container the update just started. An operator-written
-	// absolute URL names something else on purpose and is polled as written.
+	// HealthCheckURLFromContainer marks HealthCheckURL as built from the container's own address rather than written.
 	HealthCheckURLFromContainer bool
 }
 
@@ -104,8 +73,7 @@ type UpdateResult struct {
 	Updated   bool
 	OldRef    string // old digest or commit SHA
 	NewRef    string // new digest or commit SHA
-	// The commit the new image was built from, and its page, when its labels
-	// name one. Image mode only.
+	// The commit the new image was built from, and its page, when its labels name one. Image mode only.
 	NewCommit    string
 	NewCommitURL string
 	Error        error
@@ -114,8 +82,8 @@ type UpdateResult struct {
 	Skipped      bool
 	SkipReason   string
 	Pulled       bool // a registry pull was performed during this check
-	// Warnings are operator-actionable notes about how this container is
-	// configured (no standard endpoints, nonstandard label overrides). They
-	// describe configuration, not the outcome of this cycle.
+	// Warnings are operator-actionable notes about how this container is configured.
 	Warnings []string
+	// Drift is set when a compose-managed container no longer matches its compose file, or when the comparison failed.
+	Drift *ComposeDrift
 }

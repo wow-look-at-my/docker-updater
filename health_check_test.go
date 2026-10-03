@@ -21,9 +21,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Speed up health-check polling and the no-healthcheck grace period so the
-	// suite finishes well within the global 30s test timeout. Production code
-	// still uses the real defaults.
+	// Speed up health-check polling and the no-healthcheck grace period.
 	healthCheckPollInterval = 10 * time.Millisecond
 	execPollInterval = 10 * time.Millisecond
 	noHealthcheckGracePeriod = 50 * time.Millisecond
@@ -31,7 +29,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// baseInspect returns a ContainerJSON for the initial inspect of the old container.
+// baseInspect returns a ContainerJSON for the initial inspect of the
+// container.
 func baseInspect() types.ContainerJSON {
 	return types.ContainerJSON{
 		ContainerJSONBase: &types.ContainerJSONBase{
@@ -309,7 +308,6 @@ func TestRecreateContainerFallbackDockerHealthy(t *testing.T) {
 		ID:    "old123456789",
 		Name:  "myapp",
 		Image: "myapp:latest",
-		// no HealthCheckURL / HealthCheckCommand -> Docker status fallback
 	}
 
 	err := recreateContainer(context.Background(), cli, info, "myapp:latest")
@@ -423,7 +421,7 @@ func TestListMonitoredContainersHealthCheckURLResolve(t *testing.T) {
 // --- post-update health gate: the address must follow the new container ---
 
 // serveOn starts an HTTP server bound to addr on an arbitrary port and returns
-// its port. Two loopback addresses stand in for Docker handing the replacement
+// its port. Loopback addresses stand in for Docker handing the replacement
 // container a different IP than the one the update destroyed.
 func serveOn(t *testing.T, addr string, status int) int {
 	t.Helper()
@@ -453,8 +451,6 @@ func inspectWithIP(ip string) types.ContainerJSON {
 }
 
 func TestWaitPostUpdateHealthyFollowsNewContainerAddress(t *testing.T) {
-	// The new container serves on 127.0.0.2; the URL built before the update
-	// still names 127.0.0.1, where nothing answers.
 	port := serveOn(t, "127.0.0.2", http.StatusOK)
 
 	cli := &mockDocker{
@@ -477,8 +473,7 @@ func TestWaitPostUpdateHealthyFollowsNewContainerAddress(t *testing.T) {
 }
 
 func TestWaitPostUpdateHealthyKeepsOperatorURL(t *testing.T) {
-	// An operator-written absolute URL names something else on purpose. The
-	// new container's address must not displace it.
+	// An operator-written absolute URL names something else on purpose. The new container's address must not displace it.
 	port := serveOn(t, "127.0.0.2", http.StatusOK)
 
 	cli := &mockDocker{

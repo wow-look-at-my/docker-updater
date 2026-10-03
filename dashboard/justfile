@@ -1,0 +1,11 @@
+# Compiles dashboard.ts to the dashboard.js that the Go binary embeds.
+build:
+	npx tsc
+
+typecheck:
+	npx tsc --noEmit
+	npx tsc -p tsconfig.test.json
+
+# Runs against the compiled dashboard.js, so build first.
+test:
+	node --test snapshot.test.mts

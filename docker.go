@@ -48,8 +48,7 @@ func newDockerClient() (DockerClient, error) {
 	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 }
 
-// AuthResolver returns a base64-encoded RegistryAuth string for the given
-// image name, or empty string for anonymous pulls.
+// AuthResolver returns a base64-encoded RegistryAuth string for the given image name.
 type AuthResolver func(imageName string) string
 
 type dockerConfig struct {
@@ -144,7 +143,7 @@ func newAuthResolver(cfg *dockerConfig) AuthResolver {
 // crash-looping container is the one that most needs a new image. Without it the
 // sweep cannot see such a container at all: it is never checked, never pulled
 // and never recreated, so a container broken by its own image stays broken until
-// a human notices. go-s3-server sat in that loop for 29 hours.
+// a human notices. go-s3-server sat in that loop for many hours.
 func listMonitoredContainers(ctx context.Context, cli DockerClient, label string) ([]ContainerInfo, error) {
 	containers, err := cli.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
@@ -162,12 +161,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			continue
 		}
 
-		// A rolling update's own scratch container is never a target. It is
-		// created from the config of the container being replaced, opt-in label
-		// and all, so the next sweep adopted it and began building a "-next-next"
-		// of its own. Only the transient is skipped: it is named for a container
-		// that is still here, and it disappears at the rename when the update
-		// lands.
+		// A rolling update's own scratch container is never a target.
 		if base, ok := rollingBaseName(containerName(c.Names)); ok && present.Contains(base) {
 			continue
 		}
@@ -199,12 +193,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
-		// Compose metadata is read for every mode, not just build mode. A
-		// compose-managed container recreated from its own stored HostConfig
-		// silently keeps the config it was created with, so edits to the
-		// compose file (a new mount, a changed env var) never reach the
-		// service. Image mode uses these labels to converge through `docker
-		// compose up -d` instead, making the compose file authoritative.
+		// Compose metadata is read for every mode, not build mode.
 		info.ComposeProject = c.Labels["com.docker.compose.project"]
 		info.ComposeService = c.Labels["com.docker.compose.service"]
 		info.ComposeConfigFiles = c.Labels["com.docker.compose.project.config_files"]
@@ -260,10 +249,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 			}
 		}
 
-		// Discovery inputs for the standard /.well-known/docker-updater/
-		// endpoints. Both come from the container's own settings, so a
-		// container that says nothing beyond the enable label is still
-		// reachable without configuration.
+		// Discovery inputs for the standard /.well-known/docker-updater/ endpoints.
 		info.Address, info.AddressNetwork = containerEndpoint(inspect)
 		info.ExposedPorts = exposedTCPPorts(inspect)
 		info.DockerHealthcheck = hasDockerHealthcheck(inspect)
@@ -282,12 +268,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 		}
 
 		if mode == UpdateModeImage {
-			// Derive the registry reference from a stable, tag-independent
-			// source: Config.Image (what the container was created with),
-			// falling back to the running image's RepoDigests. This must not
-			// depend on the running image still carrying a repo tag, and must
-			// never poll the bare image ID that the container-list view
-			// degrades to once RepoTags is lost.
+			// Derive the registry reference from a stable, tag-independent source: Config.Image (what the container was created with).
 			configImage := ""
 			if inspect.Config != nil {
 				configImage = inspect.Config.Image
@@ -300,11 +281,7 @@ func listMonitoredContainers(ctx context.Context, cli DockerClient, label string
 				continue
 			}
 
-			// Whether ref is pullable is the REGISTRY's answer, given by the
-			// pull itself. The running image's RepoDigests say nothing about
-			// it: a container started from a local CI build of a registry image
-			// has none, and it is exactly the drifted container an update must
-			// replace.
+			// Whether ref is pullable is the REGISTRY's answer, given by the pull itself.
 			info.Image = ref
 			info.ImageDigest = imageIdentity(repoDigests, inspect.Image, repositoryOf(ref))
 		} else {
@@ -338,29 +315,21 @@ func runningRepoDigests(ctx context.Context, cli DockerClient, imageID string) [
 	return img.RepoDigests
 }
 
-// pullImage pulls the latest version of an image and returns its identity (the
-// registry manifest digest, falling back to the content ID) and whether the
-// pull actually fetched new content.
+// pullImage pulls the latest version of an image and returns its identity
+// (the registry manifest digest, falling back to the content ID) and whether
+// the pull fetched new content.
 //
 // fetched is true only when the local image the reference resolves to changed
 // as a result of the pull: a pull that finds the image already up to date
-// downloads nothing and reports fetched=false. This distinguishes "we ran a
-// pull check" (every cycle) from "we downloaded a newer image" (rare), so
-// callers can record when an image was genuinely pulled rather than merely
-// polled.
+// downloads nothing and reports fetched=false. This distinguishes ".
 func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (digest string, fetched bool, err error) {
 	// Never issue a pull/manifest request against a bare image ID (e.g.
-	// "sha256:..."): it is not a registry repository and the daemon rejects it
-	// with "pull access denied". Callers resolve a real reference first; this
-	// guard enforces the invariant so a bad reference can never reach the daemon.
+	// "sha256:...").
 	if !hasRepository(imageName) {
 		return "", false, fmt.Errorf("cannot pull %q: not a registry repository reference", imageName)
 	}
 
-	// Record the content ID the reference resolves to before pulling, so we can
-	// tell afterwards whether the pull fetched new content. A reference not yet
-	// present locally inspects with an error, leaving beforeID empty -- in which
-	// case any successful pull is, by definition, fetching new content.
+	// Record the content ID the reference resolves to before pulling.
 	beforeID := ""
 	if before, _, e := cli.ImageInspectWithRaw(ctx, imageName); e == nil {
 		beforeID = before.ID
@@ -377,12 +346,7 @@ func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveA
 	}
 	defer reader.Close()
 
-	// Decode the pull's JSON progress stream to completion. The daemon
-	// reports mid-pull failures (registry 429/5xx, dropped connections) as
-	// in-band `error` records in a cleanly terminated stream, so blindly
-	// draining the reader would treat a failed pull as success -- the caller
-	// would then inspect the OLD local image and wrongly conclude
-	// "up-to-date". jsonmessage surfaces those records as an error.
+	// Decode the pull's JSON progress stream to completion.
 	if err := jsonmessage.DisplayJSONMessagesStream(reader, io.Discard, 0, false, nil); err != nil {
 		return "", false, fmt.Errorf("pulling image %s: %w", imageName, err)
 	}

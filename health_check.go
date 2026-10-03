@@ -17,19 +17,17 @@ import (
 )
 
 // healthCheckPollInterval is the polling interval for HTTP and exec health checks.
-// Overridden in tests to keep the suite fast.
 var healthCheckPollInterval = 2 * time.Second
 
 // execPollInterval is the polling interval when waiting for an exec to finish.
-// Overridden in tests to keep the suite fast.
 var execPollInterval = 100 * time.Millisecond
 
-// waitPostUpdateHealthy verifies the new container is healthy after an update.
-// If info.HealthCheckURL is set, it polls via HTTP GET.
-// If info.HealthCheckCommand is set, it polls via exec inside the container.
-// Otherwise it falls back to Docker's HEALTHCHECK status with a budget derived
-// from the container's healthcheck configuration; a container with no
-// HEALTHCHECK at all just has to stay running through a short grace period.
+// waitPostUpdateHealthy verifies the new container is healthy after an
+// update. If info.HealthCheckURL is set, it polls via HTTP GET. If
+// info.HealthCheckCommand is set, it polls via exec inside the container.
+// Otherwise it falls back to Docker's HEALTHCHECK status with a budget
+// derived from the container's healthcheck configuration; a container with no
+// HEALTHCHECK at all has to stay running through a short grace period.
 func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID string, info ContainerInfo) error {
 	if info.HealthCheckURL != "" {
 		url := info.HealthCheckURL
@@ -47,8 +45,7 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 		log.Printf("container %s: waiting for exec health check: %s", info.Name, info.HealthCheckCommand)
 		return waitExecHealthy(ctx, cli, containerID, info.HealthCheckCommand, info.HealthCheckTimeout)
 	}
-	// No health-check label: fall back to Docker's HEALTHCHECK status. waitHealthy
-	// derives its own budget from the container's healthcheck config.
+	// No health-check label: fall back to Docker's HEALTHCHECK status. waitHealthy derives its own budget.
 	return waitHealthy(ctx, cli, containerID)
 }
 

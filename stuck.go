@@ -16,7 +16,7 @@ import (
 // age, which is the part an operator can act on.
 //
 // printf is where the lines go. A test passes its own rather than redirect the
-// global logger, which two tests running at once cannot share.
+// global logger, which tests running at once cannot share.
 func reportStuck(snap Snapshot, now time.Time, printf func(string, ...any)) {
 	if printf == nil {
 		printf = log.Printf

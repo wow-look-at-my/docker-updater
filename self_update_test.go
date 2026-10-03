@@ -14,8 +14,7 @@ import (
 )
 
 func TestContainerIDFromMountinfo(t *testing.T) {
-	// A representative slice of a real container's /proc/self/mountinfo: the
-	// container ID appears in the host paths Docker bind-mounts over /etc/*.
+	// A representative slice of a real container's /proc/self/mountinfo: the container ID appears in the host paths Docker bind-mounts.
 	id := "0872e0c937f6" + strings.Repeat("a", 52) // a full 64-hex container ID
 	mountinfo := strings.Join([]string{
 		"1234 1200 0:50 / / rw,relatime - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/AAA",
@@ -165,8 +164,7 @@ func TestSelfUpdateSpawnsHelper(t *testing.T) {
 	assert.Equal(t, []string{"/var/run/docker.sock:/var/run/docker.sock"}, createdHost.Binds)
 	assert.Equal(t, container.NetworkMode("host"), createdHost.NetworkMode)
 
-	// The whole point: self-update must never tear down our own container
-	// inline -- that is what kills the updater mid-swap.
+	// The whole point: self-update must never tear down our own container inline.
 	assert.NotContains(t, stoppedIDs, "selfid")
 	assert.NotContains(t, removedIDs, "selfid")
 }

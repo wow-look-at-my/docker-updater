@@ -1,14 +1,4 @@
 // The gate for the "copy JSON" button.
-//
-// The button's promise is that a paste explains the screen. The design that
-// makes that true is that the page is DRAWN from the object the button copies,
-// so the property to test is a round trip: copy the JSON, render it into a
-// fresh empty page, and get the same page back. Anything the screen shows that
-// is not in the copy shows up as a difference in that second render — which is
-// a stronger check than any list of fields someone remembered to assert, and it
-// keeps working when a column is added.
-//
-// It drives dashboard.js, not dashboard.ts, so a stale build fails here too.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -21,7 +11,7 @@ const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 // A payload shaped like a real one: monitored and unmonitored containers,
 // online and offline, a configuration warning, a failed check, a held-back
 // update, a container Docker could not inspect (null restarts), a container in
-// a crash loop, and one nothing can check.
+// a crash loop, one nothing can check, and a compose drift found and unknown.
 const PAYLOAD = {
 	generated_at: "2026-08-08T19:09:05.713435114Z",
 	interval: "10m0s",
@@ -30,8 +20,7 @@ const PAYLOAD = {
 	version: "3d93f61589ca1c34e673d08be7fc189f851156c3",
 	last_cycle: "2026-08-08T18:59:27.472951275Z",
 	next_cycle: "2026-08-08T19:09:27.472951275Z",
-	// Not in ApiResponse: stands in for a field the server grows later. The copy
-	// must carry it without this file being taught about it.
+	// Not in ApiResponse: stands in for a field the server grows later.
 	future_server_field: "must survive the copy",
 	containers: [
 		{
@@ -125,6 +114,48 @@ const PAYLOAD = {
 			stuck_since: "2026-08-05T19:00:00Z",
 		},
 		{
+			name: "gsm-rolling",
+			image: "ghcr.io/wow-look-at-my/github-state-mirror:latest",
+			image_id: "59f03d035986",
+			state: "running",
+			status: "Up 2 days",
+			health: "",
+			created: 1786620105,
+			restarts: 0,
+			auto_update: true,
+			mode: "image",
+			update_available: false,
+			current_ref: "c83fd7303795",
+			compose_drift: {
+				state: "drift",
+				service: "github-state-mirror",
+				config_files: ["/srv/mirror/compose.yml"],
+				running_hash: "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+				file_hash: "9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd",
+				command: "docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror",
+			},
+		},
+		{
+			name: "git-site",
+			image: "nginx:latest",
+			image_id: "1234abcd5678",
+			state: "running",
+			status: "Up 2 days",
+			health: "",
+			created: 1786620105,
+			restarts: 0,
+			auto_update: true,
+			mode: "git",
+			update_available: false,
+			compose_drift: {
+				state: "unknown",
+				service: "site",
+				config_files: ["/srv/site/compose.yml"],
+				command: "docker compose -f /srv/site/compose.yml -p site up -d --no-deps site",
+				error: "compose file /srv/site/compose.yml is not visible to docker-updater",
+			},
+		},
+		{
 			name: "goflow2",
 			image: "netsampler/goflow2:v2.2.6",
 			image_id: "7ef8537117ab",
@@ -166,17 +197,12 @@ async function load(payload: unknown): Promise<Harness> {
 		: async () => ({ ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(payload)) })
 	) as unknown as typeof fetch;
 
-	// A <script> element, not window.eval: the compiled bundle is emitted in
-	// strict mode, where an eval's function declarations stay inside the eval
-	// instead of becoming the page globals the browser gives them.
+	// A <script> element, not window.eval: the compiled bundle is emitted in strict mode.
 	const tag = dom.window.document.createElement("script");
 	tag.textContent = js;
 	dom.window.document.body.appendChild(tag);
 
-	// copyText is a top-level function declaration, so it is a property of the
-	// window the script's own calls resolve through: replacing it intercepts
-	// what the button would have put on the clipboard. jsdom implements no
-	// clipboard, so this is also the only way to read it.
+	// copyText is a top-level function declaration, so it is a property of the window the script's own calls resolve through.
 	let captured: string | null = null;
 	win.copyText = async (text: string) => {
 		captured = text;
@@ -408,8 +434,30 @@ test("a container nothing can check says so and counts as an error", async () =>
 		const rows = page.doc.getElementById("group-managed-online-rows")!;
 		assert.ok(rows.textContent!.includes("cannot update"));
 		assert.ok(rows.textContent!.includes("no registry repository to poll"));
-		// buildhost's failed pull, plus s3, which no cycle will ever retry.
-		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "2");
+		// buildhost's failed pull, s3, which no cycle will ever retry, and both compose drifts.
+		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "4");
+	} finally {
+		page.close();
+	}
+});
+
+// A drifted container looks healthy and up to date. The row must name the
+// drift, the files and the command that applies them, and an unknown result
+// must say unknown rather than nothing.
+test("compose drift is on the row, with the command that applies the file", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const lines = [...page.doc.querySelectorAll(".drift")].map((n) => n.textContent || "");
+		assert.equal(lines.length, 2);
+		const drift = lines.find((l) => l.includes("github-state-mirror"))!;
+		assert.match(drift, /drifted from compose file: service github-state-mirror in \/srv\/mirror\/compose\.yml/);
+		assert.match(drift, /hashes to 9999cccc8888, the container runs aaaa1111bbbb/);
+		assert.ok(drift.endsWith("Apply the file: docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror"));
+		const unknown = lines.find((l) => l.includes("service site"))!;
+		assert.match(unknown, /compose drift unknown for service site in \/srv\/site\/compose\.yml: compose file \/srv\/site\/compose\.yml is not visible/);
+
+		const report = (page.win.errorReport as (d: unknown) => string)(page.copy().json);
+		assert.match(report, /gsm-rolling[\s\S]*drifted from compose file/);
 	} finally {
 		page.close();
 	}

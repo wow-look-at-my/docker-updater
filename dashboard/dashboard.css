@@ -203,9 +203,13 @@ a.commit:hover { color: var(--accent); text-decoration: underline; }
 .up-available,
 .restarts-warn { color: var(--amber); font-weight: 600; }
 
+.warn,
+.drift { font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
 /* Per-container configuration warnings (missing or nonstandard update-check
    endpoints). Amber, not red: the update path still works. */
-.warn { color: var(--amber); font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
+.warn { color: var(--amber); }
+/* Compose drift is red: the next manual compose up applies the file. */
+.drift { color: var(--red); }
 
 /* The last line a failing container logged, under its name. Red because it is
    the container's own account of why it is not running, not a config note. */

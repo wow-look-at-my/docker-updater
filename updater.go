@@ -50,9 +50,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 
 	log.Printf("checking %d monitored container(s)", len(containers))
 
-	// Join the networks of the containers being checked before probing them:
-	// discovery dials each container's own IP, which is only routable from a
-	// network they share.
+	// Join the networks of the containers being checked before probing them.
 	attacher := newSelfAttacher(ctx, cli, cfg.SelfContainerID)
 
 	var results []UpdateResult
@@ -76,10 +74,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			warnings = append(warnings, w)
 		}
 
-		// Discover the standard /.well-known/docker-updater/ endpoints before
-		// the mode switch: they fill in the pre-update gate and the
-		// post-update liveness check for every container that serves them, and
-		// produce the warnings the dashboard shows for those that do not.
+		// Discover the standard /.well-known/docker-updater/ endpoints before the mode switch: they fill in the pre-update gate.
 		info, wellKnownWarnings := applyWellKnown(ctx, info)
 		warnings = append(warnings, wellKnownWarnings...)
 		logContainerWarnings(info.Name, warnings)
@@ -89,6 +84,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			CheckedAt: time.Now(),
 			DryRun:    dryRun(cfg, info),
 			Warnings:  warnings,
+			Drift:     checkComposeDrift(ctx, defaultComposeRunner, info, cfg),
 		}
 
 		switch info.Mode {
@@ -119,9 +115,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	// Pulled reflects whether the pull actually fetched a newer image, not merely
-	// that a pull check ran. An up-to-date check downloads nothing and must not
-	// reset the "last pulled" timestamp.
+	// Pulled reflects whether the pull fetched a newer image, not merely that a pull check ran.
 	result.Pulled = fetched
 
 	if newDigest == "" {
@@ -202,8 +196,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, runner composeRunn
 // tag.
 func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult, resolveAuth AuthResolver) UpdateResult {
 	if info.BaseImage == "" {
-		// Unresolvable base: skip without erroring the loop. listMonitoredContainers
-		// already logged once at resolution; report a one-line skip here too.
+		// Unresolvable base: skip without erroring the loop. listMonitoredContainers already logged once at resolution.
 		result.Skipped = true
 		result.SkipReason = "no base image to watch (set docker-updater.base-image or a parseable Dockerfile FROM)"
 		log.Printf("container %s: build mode but no base image to watch; use docker-updater.base-image (skipping)", info.Name)
@@ -247,9 +240,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 	}
 
 	if dryRun(cfg, info) {
-		// Dry-run must mutate nothing: no compose build, no recreate, and the
-		// recorded "built-from" base must not advance, so the same update keeps
-		// showing as available until it is really applied.
+		// Dry-run must mutate nothing: no compose build, no recreate, and the recorded "built-from" base must not advance.
 		log.Printf("container %s: dry-run mode, would rebuild service %s on new base %s (no changes made)", info.Name, info.ComposeService, shortID(newBase))
 		result.Updated = true
 		return result
@@ -262,8 +253,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 		return result
 	}
 
-	// A cache-hit rebuild (identical image ID) is not a churn-worthy update, but
-	// the base did advance, so still report that the check applied the new base.
+	// A cache-hit rebuild (identical image ID) is not a churn-worthy update.
 	result.Updated = true
 	_ = changed
 	return result
@@ -300,30 +290,16 @@ func dryRun(cfg Config, info ContainerInfo) bool {
 
 func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config) error {
 	// Updating our own container can't be done inline -- stopping it would kill
-	// this process before the replacement is created. Hand the swap to a
-	// detached helper instead.
+	// this process before the replacement is created.
 	if sameContainer(info.ID, cfg.SelfContainerID) {
 		return selfUpdate(ctx, cli, info, info.Image)
 	}
 	if info.Rolling {
-		// Rolling updates start the replacement before draining the old
-		// container, which compose cannot express: `up -d` always stops the
-		// existing container first. Zero downtime therefore keeps the raw-API
-		// path, which carries the container definition over from the running
-		// container rather than from the compose file.
-		if composeManaged(info) {
-			log.Printf("container %s: rolling update carries its config over from the running container; compose-file changes need a `docker compose up -d %s` to apply", info.Name, info.ComposeService)
-		}
+		// Rolling updates start the replacement before draining the container, which compose cannot express.
 		return rollingUpdateContainer(ctx, cli, info, info.Image)
 	}
-	// A compose-managed service is converged through compose so the compose
-	// file stays authoritative; only containers compose does not own fall back
-	// to replaying the previous container's config.
-	//
-	// Image mode only: git mode recreates a container whose image and compose
-	// config are both unchanged (the new commit arrives through a mount), and
-	// `up -d` is a no-op when nothing drifted, so it would silently stop
-	// applying git updates.
+	// A compose-managed service is converged through compose so the compose file
+	// stays authoritative.
 	if info.Mode == UpdateModeImage && composeManaged(info) {
 		return recreateViaCompose(ctx, cli, runner, info)
 	}
@@ -339,8 +315,8 @@ func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner
 // checks.
 //
 // force carries container names from the dashboard's force-update button. The
-// loop runs each one between cycles, so a forced update never races a cycle.
-// It may be nil.
+// loop runs each between cycles, so a forced update never races a cycle. It
+// may be nil.
 func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.Signal, resolveAuth AuthResolver, store *Store, trigger <-chan struct{}, force <-chan string) {
 	log.Printf("starting docker-updater (interval=%s, label=%s, dry_run=%v)", cfg.Interval, cfg.Label, cfg.DryRun)
 
@@ -367,8 +343,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 		case <-trigger:
 			log.Print("webhook trigger received, running update check now")
 			runCheck()
-			// Realign the interval so the next scheduled check is a full
-			// interval after this one, rather than firing right on its heels.
+			// Realign the interval so the next scheduled check is a full interval after this.
 			ticker.Reset(cfg.Interval)
 		case name := <-force:
 			log.Printf("force update requested for %s", name)

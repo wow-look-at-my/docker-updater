@@ -38,10 +38,10 @@ func composeServiceInfo() ContainerInfo {
 }
 
 // composeDocker serves every update path from one fixture: the pre-update
-// container reports the config the raw-API paths clone, and any other container
-// is the replacement reporting health. The compose path re-finds its container
-// by compose label, the raw paths health-check the one they just created, so
-// neither needs to redefine inspection.
+// container reports the config the raw-API paths clone, and any other
+// container is the replacement reporting health. The compose path re-finds
+// its container by compose label, the raw paths health-check the one they
+// created, so neither needs to redefine inspection.
 func composeDocker(health string) *mockDocker {
 	return &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
@@ -82,8 +82,8 @@ func recordCreates(cli *mockDocker, names *[]string) {
 	}
 }
 
-// A compose-managed service must be converged with compose, never rebuilt from
-// the old container's stored config: that is the only way an edited compose
+// A compose-managed service must be converged with compose, never rebuilt
+// from the container's stored config: that is the only way an edited compose
 // file (a newly added mount) reaches the running service.
 func TestUpdateContainerConvergesComposeServiceThroughCompose(t *testing.T) {
 	cli := composeDocker("healthy")
@@ -161,7 +161,7 @@ func TestUpdateContainerKeepsRawRecreateWithoutComposeLabels(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "a non-compose container has no compose file to converge")
 }
 
-// Rolling updates must keep starting the replacement before draining the old
+// Rolling updates must keep starting the replacement before draining the
 // container: compose cannot express that, so they stay on the raw-API path.
 func TestRollingUpdateStaysOnRawPathForComposeService(t *testing.T) {
 	cli := composeDocker("healthy")
@@ -194,7 +194,7 @@ func TestGitModeKeepsForcedRecreate(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "`up -d` would skip a recreate when nothing drifted")
 }
 
-// Compose metadata must be captured for every mode, not just build mode:
+// Compose metadata must be captured for every mode, not build mode:
 // image-mode services are the common case and need it to converge.
 func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T) {
 	cli := &mockDocker{
@@ -237,8 +237,8 @@ func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T
 }
 
 // composeDockerStillRunning is composeDocker with the pre-update container
-// reporting what it actually looks like when compose failed without touching
-// it: still running, still on its original image.
+// reporting what it looks like when compose failed without touching it: still
+// running, still on its original image.
 func composeDockerStillRunning() *mockDocker {
 	cli := composeDocker("healthy")
 	inner := cli.containerInspectFn
@@ -254,10 +254,10 @@ func composeDockerStillRunning() *mockDocker {
 }
 
 // A compose invocation that fails before replacing the container (unreadable
-// compose file, invalid config) leaves the service exactly as it was. Claiming
-// "ROLLBACK FAILED, <service> may be down" then sends operators chasing a
-// service that never went down — and the rollback just re-runs the same
-// failing command.
+// compose file, invalid config) leaves the service exactly as it was.
+// Claiming "ROLLBACK FAILED, <service> may be down" then sends operators
+// chasing a service that never went down — and the rollback re-runs the
+// same failing command.
 func TestComposeConvergeSkipsRollbackWhenContainerUntouched(t *testing.T) {
 	runner := &fakeComposeRunner{upNoDepsErr: errors.New("compose file not visible to docker-updater")}
 
@@ -318,8 +318,8 @@ func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {
 		"the compose invocation must carry -p from com.docker.compose.project")
 }
 
-// The project name reaches the argv, not just the runner: -p must be in the
-// command line compose actually receives.
+// The project name reaches the argv, not the runner: -p must be in the
+// command line compose receives.
 func TestComposeArgsCarryProjectName(t *testing.T) {
 	args := composeArgs(composeTargetFor(composeServiceInfo()), "up", "-d", "--no-deps", "server")
 

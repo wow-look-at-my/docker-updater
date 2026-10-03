@@ -15,27 +15,15 @@ import (
 	"github.com/wow-look-at-my/go-containers/set"
 )
 
-// maxWebhookBody caps how much of a webhook request body we read. GitHub
-// package payloads are a few KB; bounding the read protects the public endpoint
-// from memory-exhaustion attempts.
-const maxWebhookBody = 1 << 20 // 1 MiB
+// maxWebhookBody caps how much of a webhook request body we read.
+const maxWebhookBody = 1 << 20
 
-// githubWebhookServer is an authenticated, publicly-reachable HTTP endpoint that
-// lets GitHub notify the updater that a package (a ghcr image) was published or
-// updated. A valid delivery triggers an immediate update check, so a freshly
-// pushed image rolls out without waiting for the next interval tick.
-//
-// It runs as its own listener, separate from the dashboard, so the public
-// webhook surface stays isolated from the dashboard's container inventory: the
-// operator can expose this port to the internet while keeping the dashboard
-// internal.
+// githubWebhookServer is an authenticated, publicly-reachable HTTP endpoint
+// that lets GitHub notify the updater that a package.
 type githubWebhookServer struct {
 	addr   string
 	secret []byte
-	// allow is an optional set of package identifiers (lowercased "name" and/or
-	// "namespace/name"). When non-empty, only matching packages trigger a check
-	// -- the knob for an org-level webhook that fires for every package. Empty
-	// means any package event triggers.
+	// allow is an optional set of package identifiers (lowercased "name" and/or "namespace/name").
 	allow   set.Set[string]
 	trigger chan<- struct{}
 }
@@ -58,8 +46,7 @@ func newGitHubWebhookServer(addr, secret string, packages []string, trigger chan
 // interval even if the webhook cannot listen.
 func (s *githubWebhookServer) run(ctx context.Context) {
 	mux := http.NewServeMux()
-	// Mounted at the root so the operator is free to choose any path in the
-	// GitHub webhook URL (e.g. behind a reverse proxy); every path lands here.
+	// Mounted at the root so the operator is free to choose any path in the GitHub webhook URL (e.g. behind a reverse proxy).
 	mux.HandleFunc("/", s.handleWebhook)
 
 	srv := &http.Server{
@@ -95,8 +82,7 @@ func (s *githubWebhookServer) handleWebhook(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Authenticate every request against the shared secret using GitHub's
-	// HMAC-SHA256 scheme before trusting anything it carries. This is the lock
-	// on the public endpoint: without a valid signature the request is rejected.
+	// HMAC-SHA256 scheme before trusting anything it carries.
 	if !validSignature(s.secret, body, r.Header.Get("X-Hub-Signature-256")) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
@@ -104,8 +90,7 @@ func (s *githubWebhookServer) handleWebhook(w http.ResponseWriter, r *http.Reque
 
 	switch r.Header.Get("X-GitHub-Event") {
 	case "ping":
-		// GitHub sends a ping when the webhook is created. Ack it so the
-		// delivery is marked healthy, but don't trigger a check.
+		// GitHub sends a ping when the webhook is created.
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("pong"))
 	case "package", "registry_package":
@@ -131,10 +116,7 @@ func (s *githubWebhookServer) handleWebhook(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// fire requests an update check without blocking. The trigger channel is
-// buffered with depth 1, so a burst of deliveries (e.g. a multi-arch push that
-// emits several package events) coalesces into at most one pending check rather
-// than queueing a storm.
+// fire requests an update check without blocking.
 func (s *githubWebhookServer) fire() {
 	select {
 	case s.trigger <- struct{}{}:
@@ -167,7 +149,7 @@ type packageInfo struct {
 	pkgType   string
 }
 
-// fullName returns "namespace/name" when both are present, else just the name.
+// fullName returns "namespace/name" when both are present, else the name.
 func (p packageInfo) fullName() string {
 	if p.namespace != "" && p.name != "" {
 		return p.namespace + "/" + p.name
@@ -211,10 +193,8 @@ type packageFields struct {
 }
 
 // allowed reports whether a package event should trigger a check. With no
-// allowlist configured every package qualifies. With an allowlist, the package
-// must match by name or "namespace/name" (case-insensitive). An unparseable
-// name fails open: an authenticated delivery we can't classify still triggers,
-// since a missed trigger only delays the update to the next interval.
+// allowlist configured every package qualifies. With an allowlist, the
+// package must match by name or "namespace/name" (case-insensitive).
 func (s *githubWebhookServer) allowed(p packageInfo) bool {
 	if s.allow.IsEmpty() || p.name == "" {
 		return true

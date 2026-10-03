@@ -14,20 +14,11 @@ import (
 )
 
 // A container that fails to start says why in its own logs, and nowhere else.
-// The dashboard reported "Restarting (126)" and stopped there, so the reason
-// lived only on the host: an operator had to reach a shell to read a line the
-// updater already had an API for. One buildhost deployment restarted on exit 126
-// for hours with that line one docker logs away and nobody able to run it.
-//
-// Read-only, and the tail is bounded. This surface never starts, stops or
-// removes anything.
 
-// logsMaxTail bounds a request. A caller asking for more gets this, because an
-// unbounded tail turns one click into a whole container's history over the wire.
+// logsMaxTail bounds a request.
 const logsMaxTail = 2000
 
-// logsDefaultTail is what a request with no tail parameter gets: enough to hold
-// a panic and the lines that led to it.
+// logsDefaultTail is what a request with no tail parameter gets: enough to hold a panic and the lines that led to it.
 const logsDefaultTail = 200
 
 // handleAPILogs serves GET /api/logs?container=<name>&tail=<n> as plain text.
@@ -58,8 +49,7 @@ func (s *dashboardServer) handleAPILogs(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if len(body) == 0 {
-		// An empty body renders as an empty panel, which reads as a failure of
-		// the dashboard rather than an answer about the container.
+		// An empty body renders as an empty panel.
 		body = []byte("(this container has written nothing to stdout or stderr)\n")
 	}
 	_, _ = w.Write(body)
@@ -79,8 +69,7 @@ func containerLogTail(ctx context.Context, cli DockerClient, name string, tail i
 	}
 	defer rc.Close()
 
-	// Bounded by the tail count and a generous per-line allowance, so a
-	// container logging one enormous line cannot pull the dashboard over.
+	// Bounded by the tail count and a generous per-line allowance.
 	raw, err := io.ReadAll(io.LimitReader(rc, int64(tail)*8192))
 	if err != nil {
 		return nil, err
@@ -90,10 +79,6 @@ func containerLogTail(ctx context.Context, cli DockerClient, name string, tail i
 
 // demuxDockerStream strips the 8-byte frame header Docker puts in front of each
 // chunk when the container has no TTY.
-//
-// The header is [stream, 0, 0, 0, len32be]. A TTY container's logs carry no
-// headers at all, so a stream that does not parse as framed is returned as it
-// came: guessing wrong would eat the first eight characters of every line.
 func demuxDockerStream(raw []byte) []byte {
 	if !looksFramed(raw) {
 		return raw
@@ -110,8 +95,6 @@ func demuxDockerStream(raw []byte) []byte {
 }
 
 // looksFramed reports whether raw begins with a plausible Docker frame header.
-// Byte 0 is the stream (0 stdin, 1 stdout, 2 stderr) and bytes 1-3 are padding,
-// a shape ordinary log text does not have.
 func looksFramed(raw []byte) bool {
 	if len(raw) < 8 {
 		return false
@@ -123,9 +106,7 @@ func looksFramed(raw []byte) bool {
 	return size > 0 && size <= len(raw)-8
 }
 
-// logExcerptTail is how far back the row's reason line looks. A process that
-// dies at exec writes one line, and a few is enough to find it past whatever
-// the runtime printed after.
+// logExcerptTail is how far back the row's reason line looks.
 const logExcerptTail = 20
 
 // isFailing reports whether a container is in a state whose logs are worth
@@ -140,10 +121,6 @@ func isFailing(state, status string) bool {
 
 // logExcerpt is the short reason line the dashboard shows beside a failing
 // container, from the tail of its logs.
-//
-// It is the last non-blank line, minus the RFC3339 timestamp Docker prefixes.
-// The last line is where a process that died says why, and it is the one an
-// operator would read first after running docker logs by hand.
 func logExcerpt(logs []byte) string {
 	lines := strings.Split(strings.TrimRight(string(logs), "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -156,7 +133,7 @@ func logExcerpt(logs []byte) string {
 }
 
 // stripLogTimestamp removes the leading RFC3339Nano stamp Timestamps adds. It
-// leaves a line alone unless the first field really parses as one, because a
+// leaves a line alone unless the first field parses as one, because a
 // container's own first word is not a timestamp to be eaten.
 func stripLogTimestamp(line string) string {
 	first, rest, found := strings.Cut(line, " ")

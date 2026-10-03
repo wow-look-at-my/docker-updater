@@ -86,7 +86,7 @@ tests:
 		fi
 		# A vacuous pass is the failure mode of a check like this one: an empty
 		# rootfs would also match no interpreter. The image ships busybox, the
-		# docker CLI and its two plugins.
+		# docker CLI and its plugins.
 		found="$(wc -l < "$WORK/elf.txt")"
 		test "$found" -ge 4 || { echo "expected at least 4 ELF files, found $found" >&2; exit 1; }
 		echo "all-static elf=$found"

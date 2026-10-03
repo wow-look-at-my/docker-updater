@@ -109,7 +109,7 @@ func TestReportStuckNamesTheAgeAndTheReason(t *testing.T) {
 
 // The same "cannot be updated" reason every cycle is a frozen deployment too,
 // and it escalates the same way: the run's age and count on one ERROR line,
-// instead of one plain line repeated for three days.
+// instead of one plain line repeated for a few days.
 func TestRepeatedUnmonitorableReasonEscalatesToStuck(t *testing.T) {
 	s := newStore()
 	start := time.Now().Add(-3 * 24 * time.Hour)

@@ -512,7 +512,7 @@ test("compose drift is on the row", async () => {
 		assert.ok(drift.endsWith("Queue a recreate to apply the fileshow 1 difference"), drift);
 		const blocked = lines.find((l) => l.includes("service updater"))!;
 		assert.match(blocked, /docker-updater cannot recreate its own container through compose/);
-		assert.ok(blocked.endsWith("Apply the file: docker compose -f /srv/updater/compose.yml --project-directory /srv/updater -p updater up -d --no-deps updatershow 0 differences"), blocked);
+		assert.ok(blocked.endsWith("Apply the file: docker compose -f /srv/updater/compose.yml --project-directory /srv/updater -p updater up -d --no-deps updatershow details"), blocked);
 		const unknown = lines.find((l) => l.includes("service site"))!;
 		assert.match(unknown, /compose drift unknown for service site in \/srv\/site\/compose\.yml: compose file \/srv\/site\/compose\.yml is not visible/);
 

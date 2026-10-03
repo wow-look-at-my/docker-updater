@@ -749,7 +749,7 @@ function driftLine(c: ApiContainer, ui: UiState): HTMLElement[] {
   const open = Boolean(ui.drift_open[c.name]);
   const n = (d.differences || []).length;
   const toggle = el("button", { class: "logs-link diff-toggle", type: "button", title: "What the compose file changes" },
-    open ? "hide differences" : "show " + (n === 1 ? "1 difference" : n + " differences"));
+    open ? "hide differences" : n === 0 ? "show details" : "show " + (n === 1 ? "1 difference" : n + " differences"));
   toggle.addEventListener("click", (ev) => {
     ev.stopPropagation();
     if (driftOpen[c.name]) delete driftOpen[c.name];

@@ -136,6 +136,9 @@ func driftDifferences(ctx context.Context, cli DockerClient, runner composeRunne
 	if err != nil {
 		return nil, fmt.Errorf("inspecting container %s: %w", info.Name, err)
 	}
+	if inspect.ContainerJSONBase == nil || inspect.Config == nil {
+		return nil, fmt.Errorf("the inspect of container %s carries no config", info.Name)
+	}
 	var img *container.Config
 	if imgInspect, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image); err == nil {
 		img = imgInspect.Config

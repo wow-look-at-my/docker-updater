@@ -39,22 +39,22 @@ type composeNamed struct {
 }
 
 type composeService struct {
-	Image       string              `json:"image"`
-	Entrypoint  []string            `json:"entrypoint"`
-	Command     []string            `json:"command"`
-	Environment map[string]*string  `json:"environment"`
-	Labels      map[string]string   `json:"labels"`
-	Volumes     []composeMount      `json:"volumes"`
-	Tmpfs       []string            `json:"tmpfs"`
-	Ports       []composePort       `json:"ports"`
+	Image       string                     `json:"image"`
+	Entrypoint  []string                   `json:"entrypoint"`
+	Command     []string                   `json:"command"`
+	Environment map[string]*string         `json:"environment"`
+	Labels      map[string]string          `json:"labels"`
+	Volumes     []composeMount             `json:"volumes"`
+	Tmpfs       []string                   `json:"tmpfs"`
+	Ports       []composePort              `json:"ports"`
 	Networks    map[string]json.RawMessage `json:"networks"`
-	NetworkMode string              `json:"network_mode"`
-	Restart     string              `json:"restart"`
-	User        string              `json:"user"`
-	WorkingDir  string              `json:"working_dir"`
-	Privileged  bool                `json:"privileged"`
-	CapAdd      []string            `json:"cap_add"`
-	CapDrop     []string            `json:"cap_drop"`
+	NetworkMode string                     `json:"network_mode"`
+	Restart     string                     `json:"restart"`
+	User        string                     `json:"user"`
+	WorkingDir  string                     `json:"working_dir"`
+	Privileged  bool                       `json:"privileged"`
+	CapAdd      []string                   `json:"cap_add"`
+	CapDrop     []string                   `json:"cap_drop"`
 }
 
 type composeMount struct {
@@ -80,7 +80,7 @@ func composeDifferences(proj composeProject, service string, c types.ContainerJS
 	if !ok {
 		return nil, fmt.Errorf("compose config has no service %s", service)
 	}
-	if c.Config == nil || c.HostConfig == nil {
+	if c.ContainerJSONBase == nil || c.Config == nil || c.HostConfig == nil {
 		return nil, fmt.Errorf("the container inspect carries no config")
 	}
 	if img == nil {

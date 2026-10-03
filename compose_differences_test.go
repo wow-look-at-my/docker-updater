@@ -155,7 +155,7 @@ func TestDifferencesLongValueShowsAsHash(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, diffs, 1)
 	assert.Equal(t, "HostConfig.SecurityOpt", diffs[0].Field)
-	assert.Regexp(t, `^\["seccomp=<253 bytes, sha256 [0-9a-f]{12}>"\]$`, diffs[0].File)
+	assert.Regexp(t, `^\["seccomp=<255 bytes, sha256 [0-9a-f]{12}>"\]$`, diffs[0].File)
 	assert.NotEqual(t, diffs[0].File, diffs[0].Container)
 }
 

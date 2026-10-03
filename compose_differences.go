@@ -276,8 +276,12 @@ func equalValues(a, b any) bool {
 
 // canonical is v as JSON. encoding/json sorts map keys, so equal values give equal text.
 func canonical(v any) string {
-	data, _ := json.Marshal(v)
-	return string(data)
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	// The dashboard shows this text as is, so a <, > or & must not turn into an escape code.
+	enc.SetEscapeHTML(false)
+	enc.Encode(v)
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // longValue is the length past which a string shows as its hash. A seccomp profile is many kilobytes.

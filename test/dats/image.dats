@@ -134,7 +134,7 @@ tests:
 		name="du-dats-drift-$$"
 		mkdir -p "$p"
 		write_compose() {
-			printf 'services:\n  app:\n    image: %s\n    entrypoint: ["/bin/sh", "-c", "sleep 600"]\n    labels:\n      %s: "true"\n      docker-updater.well-known: "false"\n%s' "$IMAGE" "$name" "$1" > "$p/compose.yml"
+			printf 'services:\n  app:\n    image: %s\n    entrypoint: ["/bin/sh", "-c", "sleep 600"]\n    labels:\n      %s: "true"\n      docker-updater.well-known: "false"\n%b' "$IMAGE" "$name" "$1" > "$p/compose.yml"
 		}
 		write_compose ''
 		docker compose -f "$p/compose.yml" -p "$name" up -d --quiet-pull 2>&1

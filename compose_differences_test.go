@@ -84,7 +84,7 @@ func TestDifferencesRemovedKey(t *testing.T) {
 
 func TestDifferencesEnvLabelsAndNetworks(t *testing.T) {
 	c := capturedContainer(t)
-	c.Config.Env = []string{"MODE=dev", "PATH=/bin", "TOKEN=s3cret"}
+	c.Config.Env = []string{"MODE=dev", "PATH=/bin", "TOKEN=s3cret", "EMPTY="}
 	delete(c.Config.Labels, "team")
 	c.Config.Labels["old"] = "x"
 	c.NetworkSettings.Networks["legacy"] = &network.EndpointSettings{}
@@ -94,17 +94,14 @@ func TestDifferencesEnvLabelsAndNetworks(t *testing.T) {
 	diffs, err := composeDifferences(captureFixture(t, "create-insync.json"), c, capturedImage(t))
 	require.NoError(t, err)
 	assert.Equal(t, []ComposeDifference{
-		{Field: "Config.Env MODE", File: "set (value hidden)", Container: "a different value"},
-		{Field: "Config.Env TOKEN", File: none, Container: "set"},
+		{Field: "Config.Env EMPTY", File: none, Container: `""`},
+		{Field: "Config.Env MODE", File: `"prod"`, Container: `"dev"`},
+		{Field: "Config.Env TOKEN", File: none, Container: `"s3cret"`},
 		{Field: "Config.Labels old", File: none, Container: "x"},
 		{Field: "Config.Labels team", File: "core", Container: none},
 		{Field: "network e2e_default Aliases", File: `["e2e-runner-1","runner"]`, Container: `["runner"]`},
 		{Field: "network legacy", File: none, Container: "joined"},
 	}, diffs)
-	for _, d := range diffs {
-		assert.NotContains(t, d.File+d.Container, "s3cret", "an environment value must never reach the dashboard")
-		assert.NotContains(t, d.File+d.Container, "prod")
-	}
 }
 
 // A field no rule names is compared too, so a new compose or Docker field needs no code.
@@ -142,8 +139,8 @@ func TestDifferencesImageCommand(t *testing.T) {
 	}, diffs)
 }
 
-// A seccomp profile is kilobytes. It shows as its size and hash, and different bodies never match.
-func TestDifferencesLongValueShowsAsHash(t *testing.T) {
+// A seccomp profile is kilobytes, and it shows in full.
+func TestDifferencesLongValueShowsInFull(t *testing.T) {
 	profile := "seccomp={" + strings.Repeat(`"x":1,`, 40) + `"y":2}`
 	req := editRequest(t, func(req map[string]any) {
 		req["HostConfig"].(map[string]any)["SecurityOpt"] = []any{profile}
@@ -155,8 +152,8 @@ func TestDifferencesLongValueShowsAsHash(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, diffs, 1)
 	assert.Equal(t, "HostConfig.SecurityOpt", diffs[0].Field)
-	assert.Regexp(t, `^\["seccomp=<255 bytes, sha256 [0-9a-f]{12}>"\]$`, diffs[0].File)
-	assert.NotEqual(t, diffs[0].File, diffs[0].Container)
+	assert.Equal(t, canonical([]any{profile}), diffs[0].File)
+	assert.Equal(t, canonical([]any{c.HostConfig.SecurityOpt[0]}), diffs[0].Container)
 }
 
 // A file with no restart key sends an empty policy, and the daemon stores "no".

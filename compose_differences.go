@@ -2,11 +2,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -54,8 +53,6 @@ var nullOnlyZero = set.Of[string]("HostConfig.MaskedPaths", "HostConfig.Readonly
 // would send now with the running container. The request carries compose's
 // own translation of the file, so only the fields the daemon or the image
 // fills in need a rule. img is the config of the container's image.
-// Environment values never appear, because they can hold secrets and the
-// dashboard has no login.
 func composeDifferences(createRequest []byte, c types.ContainerJSON, img *container.Config) ([]ComposeDifference, error) {
 	if c.ContainerJSONBase == nil || c.Config == nil || c.HostConfig == nil {
 		return nil, fmt.Errorf("the container inspect carries no config")
@@ -184,7 +181,7 @@ func splitEnv(env []string) map[string]string {
 	return m
 }
 
-// envDifferences names each variable the request and the container disagree
+// envDifferences lists each variable the request and the container disagree
 // on. The daemon adds the image's variables under the request's.
 func envDifferences(want, running, image []string) []ComposeDifference {
 	expect, have := splitEnv(image), splitEnv(running)
@@ -195,14 +192,17 @@ func envDifferences(want, running, image []string) []ComposeDifference {
 	for _, k := range unionKeys(expect, have) {
 		w, inReq := expect[k]
 		h, ok := have[k]
-		switch {
-		case !inReq:
-			out = append(out, ComposeDifference{Field: "Config.Env " + k, File: none, Container: "set"})
-		case !ok:
-			out = append(out, ComposeDifference{Field: "Config.Env " + k, File: "set", Container: none})
-		case w != h:
-			out = append(out, ComposeDifference{Field: "Config.Env " + k, File: "set (value hidden)", Container: "a different value"})
+		if inReq && ok && w == h {
+			continue
 		}
+		file, running := none, none
+		if inReq {
+			file = strconv.Quote(w)
+		}
+		if ok {
+			running = strconv.Quote(h)
+		}
+		out = append(out, ComposeDifference{Field: "Config.Env " + k, File: file, Container: running})
 	}
 	return out
 }
@@ -285,10 +285,7 @@ func canonical(v any) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// longValue is the length past which a string shows as its hash. A seccomp profile is many kilobytes.
-const longValue = 120
-
-// render is v for the dashboard: a bare string, or compact JSON. A long string shows as its size and hash.
+// render is v for the dashboard, in full: a bare string, or compact JSON.
 func render(v any) string {
 	if list, ok := v.([]any); ok && len(list) == 0 {
 		return "[]"
@@ -296,39 +293,10 @@ func render(v any) string {
 	if isZero(v) {
 		return none
 	}
-	v = shortenStrings(v)
 	if s, ok := v.(string); ok {
 		return s
 	}
 	return canonical(v)
-}
-
-func shortenStrings(v any) any {
-	switch x := v.(type) {
-	case string:
-		if len(x) <= longValue {
-			return x
-		}
-		sum := sha256.Sum256([]byte(x))
-		prefix := ""
-		if name, _, found := strings.Cut(x, "="); found && len(name) <= 32 {
-			prefix = name + "="
-		}
-		return fmt.Sprintf("%s<%d bytes, sha256 %s>", prefix, len(x), hex.EncodeToString(sum[:])[:12])
-	case []any:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = shortenStrings(e)
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(x))
-		for k, e := range x {
-			out[k] = shortenStrings(e)
-		}
-		return out
-	}
-	return v
 }
 
 func unionKeys[V any](a, b map[string]V) []string {

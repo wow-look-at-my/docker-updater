@@ -41,7 +41,7 @@ Every key of `Config`, `HostConfig` and each network endpoint is compared. A few
 - compose's own labels change on every recreate. As a result, they are skipped.
 - The daemon assigns the address and the IDs of an endpoint when the container starts. As a result, they are skipped.
 
-Environment variables appear by name, never by value. A long value shows as its size and hash. A seccomp profile is one, because compose puts the whole profile into the request.
+Every value shows in full, environment values included. A seccomp profile shows as its whole JSON, because compose puts the profile into the request.
 
 The list is unavailable when compose fails, or when it wants another write before the create. One example is a dependent service with `restart: true`, which compose stops first. The drift line then says why.
 

@@ -35,7 +35,7 @@ type ContainerStatus struct {
 	// Drift is the compose drift the latest check found, or nil.
 	Drift *ComposeDrift
 
-	LastError string // last error message, if the most recent check failed
+	LastError  string // last error message, if the most recent check failed
 	Skipped    bool   // the most recent update was skipped by a pre-check
 	SkipReason string
 	DryRun     bool

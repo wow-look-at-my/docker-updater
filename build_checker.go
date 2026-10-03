@@ -34,8 +34,8 @@ type composeRunner interface {
 }
 
 // composeTarget is the one service a compose invocation acts on, addressed
-// exactly as the running container reports itself. All four fields come from
-// the container's own compose labels — grouped in a struct so an invocation
+// exactly as the running container reports itself. All fields come from the
+// container's own compose labels — grouped in a struct so an invocation
 // cannot silently lose one (dropping Project made compose create a second
 // container instead of recreating the running one).
 type composeTarget struct {
@@ -215,7 +215,7 @@ var defaultComposeRunner composeRunner = execComposeRunner{}
 
 // baseDigestStore records, per build-mode service, the base image identity
 // last observed or built from. The primary staleness signal is the stateless
-// layer-prefix check (see checkBuildUpdate); this store serves two roles:
+// layer-prefix check (see checkBuildUpdate); this store serves roles:
 // remembering the previous base identity for reporting the old->new
 // transition, and acting as the change signal for services whose builds the
 // layer check cannot validate (see prefixIncapableStore).

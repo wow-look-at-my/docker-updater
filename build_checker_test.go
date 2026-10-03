@@ -151,10 +151,10 @@ func TestIsLayerPrefix(t *testing.T) {
 // simulate registry pushes, rebuilds, and recreates between cycles.
 type layeredFixture struct {
 	cli          *mockDocker
-	baseManifest string   // manifest digest the base tag currently resolves to
+	baseManifest string
 	baseLayers   []string // RootFS layers of the pulled base image
 	runningID    string   // image ID the service's container currently runs
-	builtID      string   // image ID the derived tag currently points at
+	builtID      string
 	imageLayers  map[string][]string
 }
 
@@ -378,15 +378,13 @@ func TestBuildPrefixIncapableFallsBackWithoutRebuildLoop(t *testing.T) {
 	info := fixtureInfo()
 	cfg := Config{Label: "docker-updater.enable"}
 
-	// Cycle 1: layer check says stale -> rebuild -> cache hit -> marked
-	// prefix-incapable, baseline recorded.
 	r := checkAndUpdateBuild(context.Background(), f.cli, runner, info, cfg, UpdateResult{Container: info}, newAuthResolver(nil))
 	require.NoError(t, r.Error)
 	assert.Equal(t, 1, runner.buildCalls)
 	assert.Equal(t, 0, runner.upCalls, "cache hit must not recreate")
 	assert.True(t, isPrefixIncapable(buildStateKey(info)))
 
-	// Cycles 2 and 3: digest unchanged -> no rebuild. The loop is broken.
+	// The loop is broken.
 	for cycle := 2; cycle <= 3; cycle++ {
 		r = checkAndUpdateBuild(context.Background(), f.cli, runner, info, cfg, UpdateResult{Container: info}, newAuthResolver(nil))
 		require.NoError(t, r.Error)
@@ -532,7 +530,6 @@ func TestCheckAndUpdateBuildPreCheckSkips(t *testing.T) {
 	t.Serial()
 	resetBuildState()
 
-	// A pre-check HTTP endpoint that always refuses (503) holds the rebuild back.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))

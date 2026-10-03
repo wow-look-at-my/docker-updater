@@ -87,7 +87,7 @@ func TestComposeDriftDifferentHashReportsDrift(t *testing.T) {
 	assert.Contains(t, logged, "service github-state-mirror in "+mirrorComposeFile)
 	assert.Contains(t, logged, "Queue a recreate on the dashboard to apply the file")
 	assert.NotContains(t, logged, "ERROR", "a drift the operator can queue is pending work, not a failure")
-	assert.NotEmpty(t, d.DifferencesError, "an empty compose config names no service, and the drift says so")
+	assert.NotEmpty(t, d.DifferencesError, "an empty create request lists nothing, and the drift says so")
 
 	assert.Zero(t, runner.upNoDepsCalls, "the check alone must not recreate anything")
 }

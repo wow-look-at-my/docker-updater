@@ -40,13 +40,13 @@ type fakeComposeRunner struct {
 	configHashErr     error
 	configHashTargets []composeTarget
 
-	// ServiceConfig answers with serviceConfig or serviceConfigErr.
-	serviceConfig    composeProject
-	serviceConfigErr error
+	// CreateRequest answers with createRequest or createRequestErr.
+	createRequest    []byte
+	createRequestErr error
 }
 
-func (f *fakeComposeRunner) ServiceConfig(_ context.Context, _ composeTarget) (composeProject, error) {
-	return f.serviceConfig, f.serviceConfigErr
+func (f *fakeComposeRunner) CreateRequest(_ context.Context, _ composeTarget) ([]byte, error) {
+	return f.createRequest, f.createRequestErr
 }
 
 func (f *fakeComposeRunner) ConfigHash(_ context.Context, t composeTarget) (string, error) {

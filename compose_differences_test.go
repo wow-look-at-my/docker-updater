@@ -87,7 +87,9 @@ func TestDifferencesEnvLabelsAndNetworks(t *testing.T) {
 	c.Config.Env = []string{"MODE=dev", "PATH=/bin", "TOKEN=s3cret"}
 	delete(c.Config.Labels, "team")
 	c.Config.Labels["old"] = "x"
-	c.NetworkSettings.Networks = map[string]*network.EndpointSettings{"legacy": {}}
+	c.NetworkSettings.Networks["legacy"] = &network.EndpointSettings{}
+	c.NetworkSettings.Networks["e2e_default"].Aliases = []string{"runner"}
+	c.NetworkSettings.Networks["e2e_default"].IPAddress = "172.18.0.2"
 
 	diffs, err := composeDifferences(captureFixture(t, "create-insync.json"), c, capturedImage(t))
 	require.NoError(t, err)
@@ -96,7 +98,8 @@ func TestDifferencesEnvLabelsAndNetworks(t *testing.T) {
 		{Field: "Config.Env TOKEN", File: none, Container: "set"},
 		{Field: "Config.Labels old", File: none, Container: "x"},
 		{Field: "Config.Labels team", File: "core", Container: none},
-		{Field: "networks", File: `["e2e_default"]`, Container: `["legacy"]`},
+		{Field: "network e2e_default Aliases", File: `["e2e-runner-1","runner"]`, Container: `["runner"]`},
+		{Field: "network legacy", File: none, Container: "joined"},
 	}, diffs)
 	for _, d := range diffs {
 		assert.NotContains(t, d.File+d.Container, "s3cret", "an environment value must never reach the dashboard")

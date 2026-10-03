@@ -3,13 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
 	"strings"
-
-	"github.com/docker/docker/api/types/container"
 )
 
 // composeConfigHashLabel holds the service hash compose stamps on each container it creates.

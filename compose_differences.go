@@ -96,14 +96,45 @@ func composeDifferences(createRequest []byte, c types.ContainerJSON, img *contai
 	}
 	mode := c.HostConfig.NetworkMode
 	if !mode.IsHost() && !mode.IsNone() && !mode.IsContainer() {
-		endpoints, _ := wantNet["EndpointsConfig"].(map[string]any)
-		var have []string
+		var have map[string]any
 		if c.NetworkSettings != nil {
-			have = sortedKeys(c.NetworkSettings.Networks)
+			have = mustObject(c.NetworkSettings.Networks)
 		}
-		out = appendDifference(out, "networks", toAny(sortedKeys(endpoints)), toAny(have))
+		out = append(out, endpointDifferences(objectOf(wantNet["EndpointsConfig"]), have)...)
 	}
 	return out, nil
+}
+
+// endpointRuntime are the endpoint fields the daemon assigns when the container joins the network.
+var endpointRuntime = map[string]bool{
+	"NetworkID": true, "EndpointID": true, "Gateway": true, "IPAddress": true, "IPPrefixLen": true,
+	"IPv6Gateway": true, "GlobalIPv6Address": true, "GlobalIPv6PrefixLen": true, "DNSNames": true,
+}
+
+// endpointDifferences compares the networks the request joins, and every setting of each endpoint.
+func endpointDifferences(want, have map[string]any) []ComposeDifference {
+	var out []ComposeDifference
+	for _, name := range unionKeys(want, have) {
+		w, inReq := want[name].(map[string]any)
+		h, joined := have[name].(map[string]any)
+		switch {
+		case !inReq:
+			out = append(out, ComposeDifference{Field: "network " + name, File: none, Container: "joined"})
+		case !joined:
+			out = append(out, ComposeDifference{Field: "network " + name, File: "joined", Container: none})
+		default:
+			for _, k := range unionKeys(w, h) {
+				// The daemon picks a MAC address when the request names none.
+				if endpointRuntime[k] || (k == "MacAddress" && isZero(w[k])) {
+					continue
+				}
+				if !equalValues(w[k], h[k]) {
+					out = append(out, ComposeDifference{Field: "network " + name + " " + k, File: render(w[k]), Container: render(h[k])})
+				}
+			}
+		}
+	}
+	return out
 }
 
 // appendDifference adds field when the request's value and the container's

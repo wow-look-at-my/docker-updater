@@ -166,7 +166,26 @@
   ],
   "NetworkSettings": {
     "Networks": {
-      "e2e_default": {}
+      "e2e_default": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "e2e-runner-1",
+          "runner"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
     }
   }
 }

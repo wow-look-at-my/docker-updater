@@ -118,6 +118,9 @@ body {
 /* The force-update button sits under a held-back update's detail lines. */
 .force { margin-top: 6px; }
 .force-btn:hover:not(:disabled) { border-color: var(--amber); }
+/* A recreate from the compose file is purple, apart from an image update's amber. */
+.force-btn-drift { color: var(--purple); border-color: rgba(188,140,255,0.45); }
+.force-btn-drift:hover:not(:disabled) { border-color: var(--purple); color: var(--purple); }
 
 main { padding: 0 24px 24px; }
 
@@ -153,6 +156,9 @@ tbody tr:hover { background: var(--bg-row); }
    accent make the affected rows scannable without hunting the Upstream column. */
 tr.row-pending { background: rgba(210,153,34,0.07); }
 tr.row-pending td:first-child { box-shadow: inset 3px 0 0 0 var(--amber); }
+/* A row out of sync with its compose file, with no image update behind it. */
+tr.row-drift { background: rgba(188,140,255,0.07); }
+tr.row-drift td:first-child { box-shadow: inset 3px 0 0 0 var(--purple); }
 @keyframes row-flash {
   from { background: rgba(59,158,255,0.30); }
   to { background: rgba(210,153,34,0.07); }
@@ -202,14 +208,17 @@ a.commit:hover { color: var(--accent); text-decoration: underline; }
    restarting. */
 .up-available,
 .restarts-warn { color: var(--amber); font-weight: 600; }
+.up-drift { color: var(--purple); font-weight: 600; }
 
 .warn,
 .drift { font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
 /* Per-container configuration warnings (missing or nonstandard update-check
    endpoints). Amber, not red: the update path still works. */
 .warn { color: var(--amber); }
-/* Compose drift is red: the next manual compose up applies the file. */
+/* Compose drift is red when only the operator can apply the file, and purple
+   when the updater recreates the container from it. */
 .drift { color: var(--red); }
+.drift-applies { color: var(--purple); }
 
 /* The last line a failing container logged, under its name. Red because it is
    the container's own account of why it is not running, not a config note. */

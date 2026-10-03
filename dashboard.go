@@ -238,6 +238,8 @@ type apiContainer struct {
 	// no standard /.well-known/docker-updater/ endpoints, or nonstandard
 	// label overrides. Not errors: the update path still works.
 	Warnings []string `json:"warnings,omitempty"`
+	// ComposeDrift is set when the running config no longer matches the compose file, or when nothing could compare them.
+	ComposeDrift *ComposeDrift `json:"compose_drift,omitempty"`
 }
 
 // apiResponse is the top-level JSON payload served at /api/containers.
@@ -329,6 +331,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			// this container's labels, and the cycle's warnings are about its
 			// update checks. Neither replaces the other.
 			ac.Warnings = append(ac.Warnings, st.Warnings...)
+			ac.ComposeDrift = st.Drift
 			if st.Stuck() {
 				ac.StuckCycles = st.StuckCycles
 				ac.StuckSince = nonZeroTime(st.StuckSince)

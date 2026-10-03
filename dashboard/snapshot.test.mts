@@ -21,7 +21,7 @@ const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 // A payload shaped like a real one: monitored and unmonitored containers,
 // online and offline, a configuration warning, a failed check, a held-back
 // update, a container Docker could not inspect (null restarts), a container in
-// a crash loop, and one nothing can check.
+// a crash loop, one nothing can check, and a compose drift found and unknown.
 const PAYLOAD = {
 	generated_at: "2026-08-08T19:09:05.713435114Z",
 	interval: "10m0s",
@@ -123,6 +123,48 @@ const PAYLOAD = {
 			unmonitorable: "no registry repository to poll: the container runs a bare image ID and its image carries no repo digest",
 			stuck_cycles: 800,
 			stuck_since: "2026-08-05T19:00:00Z",
+		},
+		{
+			name: "gsm-rolling",
+			image: "ghcr.io/wow-look-at-my/github-state-mirror:latest",
+			image_id: "59f03d035986",
+			state: "running",
+			status: "Up 2 days",
+			health: "",
+			created: 1786620105,
+			restarts: 0,
+			auto_update: true,
+			mode: "image",
+			update_available: false,
+			current_ref: "c83fd7303795",
+			compose_drift: {
+				state: "drift",
+				service: "github-state-mirror",
+				config_files: ["/srv/mirror/compose.yml"],
+				running_hash: "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+				file_hash: "9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd",
+				command: "docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror",
+			},
+		},
+		{
+			name: "git-site",
+			image: "nginx:latest",
+			image_id: "1234abcd5678",
+			state: "running",
+			status: "Up 2 days",
+			health: "",
+			created: 1786620105,
+			restarts: 0,
+			auto_update: true,
+			mode: "git",
+			update_available: false,
+			compose_drift: {
+				state: "unknown",
+				service: "site",
+				config_files: ["/srv/site/compose.yml"],
+				command: "docker compose -f /srv/site/compose.yml -p site up -d --no-deps site",
+				error: "compose file /srv/site/compose.yml is not visible to docker-updater",
+			},
 		},
 		{
 			name: "goflow2",
@@ -408,8 +450,30 @@ test("a container nothing can check says so and counts as an error", async () =>
 		const rows = page.doc.getElementById("group-managed-online-rows")!;
 		assert.ok(rows.textContent!.includes("cannot update"));
 		assert.ok(rows.textContent!.includes("no registry repository to poll"));
-		// buildhost's failed pull, plus s3, which no cycle will ever retry.
-		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "2");
+		// buildhost's failed pull, s3, which no cycle will ever retry, and both compose drifts.
+		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "4");
+	} finally {
+		page.close();
+	}
+});
+
+// A drifted container looks healthy and up to date. The row must name the
+// drift, the files and the command that applies them, and an unknown result
+// must say unknown rather than nothing.
+test("compose drift is on the row, with the command that applies the file", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const lines = [...page.doc.querySelectorAll(".drift")].map((n) => n.textContent || "");
+		assert.equal(lines.length, 2);
+		const drift = lines.find((l) => l.includes("github-state-mirror"))!;
+		assert.match(drift, /drifted from compose file: service github-state-mirror in \/srv\/mirror\/compose\.yml/);
+		assert.match(drift, /hashes to 9999cccc8888, the container runs aaaa1111bbbb/);
+		assert.ok(drift.endsWith("Apply the file: docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror"));
+		const unknown = lines.find((l) => l.includes("service site"))!;
+		assert.match(unknown, /compose drift unknown for service site in \/srv\/site\/compose\.yml: compose file \/srv\/site\/compose\.yml is not visible/);
+
+		const report = (page.win.errorReport as (d: unknown) => string)(page.copy().json);
+		assert.match(report, /gsm-rolling[\s\S]*drifted from compose file/);
 	} finally {
 		page.close();
 	}

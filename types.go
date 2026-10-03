@@ -118,4 +118,6 @@ type UpdateResult struct {
 	// configured (no standard endpoints, nonstandard label overrides). They
 	// describe configuration, not the outcome of this cycle.
 	Warnings []string
+	// Drift is set when a compose-managed container no longer matches its compose file, or when the comparison failed.
+	Drift *ComposeDrift
 }

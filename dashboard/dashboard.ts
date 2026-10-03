@@ -59,9 +59,21 @@ interface ApiContainer {
   // Configuration notes, not failures: no standard
   // /.well-known/docker-updater/ endpoints, or nonstandard label overrides.
   warnings?: string[];
-  // The last line a failing container logged. Served only for a container that
-  // is restarting or exited non-zero.
+  // The last line a failing container logged. Served only for a container that is restarting or exited non-zero.
   log_excerpt?: string;
+  // Set when the running config no longer matches the compose file, or when nothing could compare them.
+  compose_drift?: ApiComposeDrift;
+}
+
+// ApiComposeDrift mirrors ComposeDrift in compose_drift.go.
+interface ApiComposeDrift {
+  state: string;
+  service: string;
+  config_files: string[];
+  running_hash?: string;
+  file_hash?: string;
+  command: string;
+  error?: string;
 }
 
 // ApiResponse mirrors apiResponse in dashboard.go (the payload of /api/containers).
@@ -355,7 +367,19 @@ function upstreamCell(c: ApiContainer, ui: UiState): HTMLElement {
 // check at all. The second case never clears on its own, so leaving it out of
 // the count reported a fleet with an unupdatable container as error-free.
 function errored(c: ApiContainer): boolean {
-  return Boolean(c.auto_update && (c.error || c.unmonitorable));
+  return Boolean(c.auto_update && (c.error || c.unmonitorable || c.compose_drift));
+}
+
+// driftText states a compose drift with every fact needed to act on it: the
+// service, the files, both hashes or the error, and the command that applies
+// the file.
+function driftText(d: ApiComposeDrift): string {
+  const where = "service " + d.service + " in " + d.config_files.join(", ");
+  const what = d.state === "unknown"
+    ? "compose drift unknown for " + where + ": " + (d.error || "?")
+    : "drifted from compose file: " + where + " hashes to " + (d.file_hash || "?").slice(0, 12) +
+      ", the container runs " + (d.running_hash || "?").slice(0, 12) + ". Updates keep the running config";
+  return what + ". Apply the file: " + d.command;
 }
 
 // errorReport renders every current error as plain text for pasting into an
@@ -379,6 +403,7 @@ function errorReport(data: ApiResponse): string {
     }
     if (c.skipped) lines.push("  skipped: " + (c.skip_reason || "pre-check"));
     if (c.unmonitorable) lines.push("  cannot update: " + c.unmonitorable);
+    if (c.compose_drift) lines.push("  " + driftText(c.compose_drift));
     if (c.error) lines.push("  error: " + c.error);
     return lines.join("\n");
   });
@@ -618,6 +643,14 @@ function warningLines(c: ApiContainer): HTMLElement[] {
   return (c.warnings || []).map((w) => el("div", { class: "warn", title: w }, "⚠ " + w));
 }
 
+// driftLine renders a compose drift under the container's name, in red: the
+// next manual `docker compose up` applies the file and can destroy data.
+function driftLine(c: ApiContainer): HTMLElement[] {
+  if (!c.compose_drift) return [];
+  const text = driftText(c.compose_drift);
+  return [el("div", { class: "drift", title: text }, "✖ " + text)];
+}
+
 // logsLink opens the container's own output. A container in a restart loop
 // explains itself there and nowhere else, and the row used to end at
 // "Restarting (126)" — a status that names the failure and hides the reason.
@@ -648,6 +681,7 @@ function row(c: ApiContainer, ui: UiState): HTMLElement {
       c.commit ? " · " : null,
       c.commit ? commitLink(c.commit, c.commit_url) : null,
     ),
+    ...driftLine(c),
     ...warningLines(c),
     ...reasonLine(c),
   );

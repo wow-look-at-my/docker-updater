@@ -89,6 +89,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			CheckedAt: time.Now(),
 			DryRun:    dryRun(cfg, info),
 			Warnings:  warnings,
+			Drift:     checkComposeDrift(ctx, defaultComposeRunner, info, cfg),
 		}
 
 		switch info.Mode {
@@ -306,14 +307,7 @@ func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner
 		return selfUpdate(ctx, cli, info, info.Image)
 	}
 	if info.Rolling {
-		// Rolling updates start the replacement before draining the old
-		// container, which compose cannot express: `up -d` always stops the
-		// existing container first. Zero downtime therefore keeps the raw-API
-		// path, which carries the container definition over from the running
-		// container rather than from the compose file.
-		if composeManaged(info) {
-			log.Printf("container %s: rolling update carries its config over from the running container; compose-file changes need a `docker compose up -d %s` to apply", info.Name, info.ComposeService)
-		}
+		// Rolling updates start the replacement before draining the container, which compose cannot express.
 		return rollingUpdateContainer(ctx, cli, info, info.Image)
 	}
 	// A compose-managed service is converged through compose so the compose

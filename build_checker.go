@@ -29,6 +29,8 @@ type composeRunner interface {
 	// docker-in-docker daemon, a database) must not lose it because a sibling
 	// service took a new image.
 	UpNoDeps(ctx context.Context, t composeTarget) error
+	// ConfigHash runs `docker compose <target> config --hash <service>`.
+	ConfigHash(ctx context.Context, t composeTarget) (string, error)
 }
 
 // composeTarget is the one service a compose invocation acts on, addressed

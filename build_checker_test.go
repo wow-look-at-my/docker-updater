@@ -35,6 +35,16 @@ type fakeComposeRunner struct {
 	upNoDepsProjects []string
 	buildTargets     []composeTarget
 	onUpNoDeps       func() // hook to mutate fixture state between converge attempts
+
+	// ConfigHash answers with configHash or configHashErr, and records each target.
+	configHash        string
+	configHashErr     error
+	configHashTargets []composeTarget
+}
+
+func (f *fakeComposeRunner) ConfigHash(_ context.Context, t composeTarget) (string, error) {
+	f.configHashTargets = append(f.configHashTargets, t)
+	return f.configHash, f.configHashErr
 }
 
 func (f *fakeComposeRunner) Build(_ context.Context, t composeTarget) error {

@@ -24,7 +24,7 @@ jobs:
           node-version: '22'
       - uses: wow-look-at-my/go-toolchain@master
         with:
-          generate: 86bbd283414e
+          generate: 3c60da638b28
 
   dashboard:
     runs-on: ubuntu-latest
@@ -35,7 +35,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # 22 for native TypeScript type stripping: snapshot.test.mts runs as authored, with no build step.
           node-version: '22'
       - run: sudo apt-get update && sudo apt-get install -y just
       - run: npm ci

@@ -150,7 +150,8 @@ tests:
 			sleep 1
 		done
 		docker logs "$name-du" 2>&1 | grep -i 'drift\|compose' || true
-		tr ',' '\n' < "$p/api.json" | grep -E '"field"|differences_error' || true
+		grep -E '"(field|file|container|differences_error)":' "$p/api.json" | tr -d ' ' || true
+		echo "fields=$(grep -c '"field":' "$p/api.json" || true)"
 		after="$(docker compose -f "$p/compose.yml" -p "$name" ps -q app)"
 		echo "unchanged=$([ "$before" = "$after" ] && echo yes || echo no)"
 		echo "status=$(docker inspect -f '{{ .State.Status }}' "$after")"
@@ -158,9 +159,12 @@ tests:
 		docker compose -f "$p/compose.yml" -p "$name" down -t 0 2>&1
 	  outputs:
 		stdout:
-			- '"field":"HostConfig.Memory"'
-			- '"field":"HostConfig.PidsLimit"'
-			- '"field":"HostConfig.SecurityOpt"'
+			- '"field":"HostConfig.Memory",'
+			- '"file":"67108864",'
+			- '"field":"HostConfig.PidsLimit",'
+			- '"field":"HostConfig.SecurityOpt",'
+			- '"file":"[\"no-new-privileges:true\"]",'
+			- "fields=3"
 			- "unchanged=yes"
 			- "status=running"
 

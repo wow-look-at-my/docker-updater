@@ -36,6 +36,7 @@ var daemonDefaults = set.Of[string]("Config.Hostname",
 	"HostConfig.Runtime",
 	"HostConfig.MemorySwap",
 	"HostConfig.Isolation",
+	"HostConfig.RestartPolicy",
 	"HostConfig.MaskedPaths",
 	"HostConfig.ReadonlyPaths")
 

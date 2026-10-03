@@ -159,6 +159,19 @@ func TestDifferencesLongValueShowsAsHash(t *testing.T) {
 	assert.NotEqual(t, diffs[0].File, diffs[0].Container)
 }
 
+// A file with no restart key sends an empty policy, and the daemon stores "no".
+func TestDifferencesDefaultRestartPolicy(t *testing.T) {
+	req := editRequest(t, func(req map[string]any) {
+		req["HostConfig"].(map[string]any)["RestartPolicy"] = map[string]any{"Name": "", "MaximumRetryCount": json.Number("0")}
+	})
+	c := capturedContainer(t)
+	c.HostConfig.RestartPolicy = container.RestartPolicy{Name: "no"}
+
+	diffs, err := composeDifferences(req, c, capturedImage(t))
+	require.NoError(t, err)
+	assert.Empty(t, diffs)
+}
+
 func TestDifferencesRejectsABadRequest(t *testing.T) {
 	_, err := composeDifferences([]byte("not json"), capturedContainer(t), capturedImage(t))
 	require.Error(t, err)

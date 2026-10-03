@@ -309,7 +309,7 @@ function differenceLines(d: ApiComposeDrift): string[] {
   if (d.differences_error) return ["differences unavailable: " + d.differences_error];
   const diffs = d.differences || [];
   if (diffs.length === 0) {
-    return ["no difference in the fields this view compares. Compare `docker compose config " + d.service + "` with `docker inspect`"];
+    return ["the container matches what compose would create. The hash also covers settings compose applies outside the create request, such as post_start hooks"];
   }
   return diffs.map((x) => x.field + ": " + x.container + " → " + x.file);
 }

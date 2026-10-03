@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/wow-look-at-my/go-containers/set"
 )
 
 // none marks a value one side does not set.
@@ -26,31 +27,27 @@ type ComposeDifference struct {
 
 // daemonDefaults are the fields the daemon fills in when a create request
 // leaves them empty. Only a value the request sets can disagree with them.
-var daemonDefaults = map[string]bool{
-	"Config.Hostname":          true,
-	"Config.Domainname":        true,
-	"HostConfig.LogConfig":     true,
-	"HostConfig.CgroupnsMode":  true,
-	"HostConfig.IpcMode":       true,
-	"HostConfig.ShmSize":       true,
-	"HostConfig.Runtime":       true,
-	"HostConfig.MemorySwap":    true,
-	"HostConfig.Isolation":     true,
-	"HostConfig.MaskedPaths":   true,
-	"HostConfig.ReadonlyPaths": true,
-}
+var daemonDefaults = set.Of[string]("Config.Hostname",
+	"Config.Domainname",
+	"HostConfig.LogConfig",
+	"HostConfig.CgroupnsMode",
+	"HostConfig.IpcMode",
+	"HostConfig.ShmSize",
+	"HostConfig.Runtime",
+	"HostConfig.MemorySwap",
+	"HostConfig.Isolation",
+	"HostConfig.MaskedPaths",
+	"HostConfig.ReadonlyPaths")
 
 // imageDefaults are the Config fields the daemon copies from the image when a create request leaves them empty.
-var imageDefaults = map[string]bool{
-	"Cmd": true, "Entrypoint": true, "WorkingDir": true, "User": true, "StopSignal": true,
-	"Healthcheck": true, "Shell": true, "OnBuild": true, "ArgsEscaped": true,
-}
+var imageDefaults = set.Of[string]("Cmd", "Entrypoint", "WorkingDir", "User", "StopSignal",
+	"Healthcheck", "Shell", "OnBuild", "ArgsEscaped")
 
 // imageMerged are the Config maps the daemon merges with the image's. The container carries both sets of keys.
-var imageMerged = map[string]bool{"Labels": true, "ExposedPorts": true, "Volumes": true}
+var imageMerged = set.Of[string]("Labels", "ExposedPorts", "Volumes")
 
 // nullOnlyZero are fields where an empty list is a value. systempaths=unconfined sends empty lists, and null asks for the daemon's defaults.
-var nullOnlyZero = map[string]bool{"HostConfig.MaskedPaths": true, "HostConfig.ReadonlyPaths": true}
+var nullOnlyZero = set.Of[string]("HostConfig.MaskedPaths", "HostConfig.ReadonlyPaths")
 
 // composeDifferences compares every field of the create request compose
 // would send now with the running container. The request carries compose's
@@ -80,12 +77,12 @@ func composeDifferences(createRequest []byte, c types.ContainerJSON, img *contai
 		switch {
 		case k == "Env":
 			out = append(out, envDifferences(stringList(want[k]), c.Config.Env, img.Env)...)
-		case imageMerged[k]:
+		case imageMerged.Contains(k):
 			out = append(out, mergedDifferences("Config."+k, objectOf(want[k]), objectOf(haveCfg[k]), objectOf(imgCfg[k]))...)
 		default:
 			w := want[k]
 			// The daemon drops the image's command when the request names its own entrypoint.
-			if isZero(w) && imageDefaults[k] && !(k == "Cmd" && !isZero(want["Entrypoint"])) {
+			if isZero(w) && imageDefaults.Contains(k) && !(k == "Cmd" && !isZero(want["Entrypoint"])) {
 				w = imgCfg[k]
 			}
 			out = appendDifference(out, "Config."+k, w, haveCfg[k])
@@ -106,10 +103,8 @@ func composeDifferences(createRequest []byte, c types.ContainerJSON, img *contai
 }
 
 // endpointRuntime are the endpoint fields the daemon assigns when the container joins the network.
-var endpointRuntime = map[string]bool{
-	"NetworkID": true, "EndpointID": true, "Gateway": true, "IPAddress": true, "IPPrefixLen": true,
-	"IPv6Gateway": true, "GlobalIPv6Address": true, "GlobalIPv6PrefixLen": true, "DNSNames": true,
-}
+var endpointRuntime = set.Of[string]("NetworkID", "EndpointID", "Gateway", "IPAddress", "IPPrefixLen",
+	"IPv6Gateway", "GlobalIPv6Address", "GlobalIPv6PrefixLen", "DNSNames")
 
 // endpointDifferences compares the networks the request joins, and every setting of each endpoint.
 func endpointDifferences(want, have map[string]any) []ComposeDifference {
@@ -125,7 +120,7 @@ func endpointDifferences(want, have map[string]any) []ComposeDifference {
 		default:
 			for _, k := range unionKeys(w, h) {
 				// The daemon picks a MAC address when the request names none.
-				if endpointRuntime[k] || (k == "MacAddress" && isZero(w[k])) {
+				if endpointRuntime.Contains(k) || (k == "MacAddress" && isZero(w[k])) {
 					continue
 				}
 				if !equalValues(w[k], h[k]) {
@@ -141,13 +136,13 @@ func endpointDifferences(want, have map[string]any) []ComposeDifference {
 // disagree. A field the daemon fills in counts only when the request sets it.
 func appendDifference(out []ComposeDifference, field string, want, have any) []ComposeDifference {
 	zero := isZero(want)
-	if nullOnlyZero[field] {
+	if nullOnlyZero.Contains(field) {
 		zero = want == nil
 	}
-	if zero && daemonDefaults[field] {
+	if zero && daemonDefaults.Contains(field) {
 		return out
 	}
-	if equalValues(want, have) && (!nullOnlyZero[field] || (want == nil) == (have == nil)) {
+	if equalValues(want, have) && (!nullOnlyZero.Contains(field) || (want == nil) == (have == nil)) {
 		return out
 	}
 	return append(out, ComposeDifference{Field: field, File: render(want), Container: render(have)})
@@ -230,16 +225,6 @@ func mustObject(v any) map[string]any {
 	data, _ := json.Marshal(v)
 	m, _ := decodeObject(data)
 	return m
-}
-
-// toAny is v in the shape of a decoded JSON value.
-func toAny(v any) any {
-	data, _ := json.Marshal(v)
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var out any
-	dec.Decode(&out)
-	return out
 }
 
 func objectOf(v any) map[string]any {

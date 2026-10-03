@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -267,6 +269,43 @@ func TestExecConfigHashReportsAnInvisibleFile(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not visible to docker-updater")
+}
+
+// fakeDockerOnPath puts a `docker` script first on PATH. It prints its
+// arguments to args.txt and then runs body.
+func fakeDockerOnPath(t *testing.T, body string) string {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho \"$@\" > " + dir + "/args.txt\n" + body + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir
+}
+
+func TestExecConfigHashRunsComposeConfigHash(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "compose.yml")
+	require.NoError(t, os.WriteFile(file, []byte("services: {}\n"), 0o644))
+	dir := fakeDockerOnPath(t, "echo 'web "+fileConfigHash+"'")
+
+	got, err := execComposeRunner{}.ConfigHash(context.Background(), composeTarget{
+		ConfigFiles: []string{file}, WorkingDir: "/srv/w", Project: "p", Service: "web",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, fileConfigHash, got)
+	args, err := os.ReadFile(filepath.Join(dir, "args.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "compose -f "+file+" --project-directory /srv/w -p p config --hash web\n", string(args))
+}
+
+func TestExecConfigHashCarriesComposeStderr(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "compose.yml")
+	require.NoError(t, os.WriteFile(file, []byte("services: {}\n"), 0o644))
+	fakeDockerOnPath(t, "echo 'no such service: web' >&2; exit 1")
+
+	_, err := execComposeRunner{}.ConfigHash(context.Background(), composeTarget{ConfigFiles: []string{file}, Service: "web"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no such service: web")
 }
 
 func TestParseConfigHash(t *testing.T) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -46,7 +47,7 @@ type composeService struct {
 	Volumes     []composeMount      `json:"volumes"`
 	Tmpfs       []string            `json:"tmpfs"`
 	Ports       []composePort       `json:"ports"`
-	Networks    map[string]struct{} `json:"networks"`
+	Networks    map[string]json.RawMessage `json:"networks"`
 	NetworkMode string              `json:"network_mode"`
 	Restart     string              `json:"restart"`
 	User        string              `json:"user"`

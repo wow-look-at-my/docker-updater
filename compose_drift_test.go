@@ -50,7 +50,7 @@ func TestComposeDriftMatchingHashReportsNothing(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: runningConfigHash}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner, rollingComposeInfo(), Config{})
 	})
 
 	assert.Nil(t, d)
@@ -69,7 +69,7 @@ func TestComposeDriftDifferentHashReportsDrift(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: fileConfigHash}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner, rollingComposeInfo(), Config{})
 	})
 
 	require.NotNil(t, d)
@@ -101,7 +101,7 @@ func TestComposeDriftOnSelfIsBlocked(t *testing.T) {
 	info.Rolling = false
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,info, Config{SelfContainerID: info.ID})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner, info, Config{SelfContainerID: info.ID})
 	})
 
 	require.NotNil(t, d)
@@ -117,7 +117,7 @@ func TestComposeDriftHashErrorIsUnknownNotClean(t *testing.T) {
 	runner := &fakeComposeRunner{configHashErr: errors.New("compose file /srv/mirror/compose.yml: permission denied")}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner, rollingComposeInfo(), Config{})
 	})
 
 	require.NotNil(t, d, "a failed comparison must never read as no drift")
@@ -135,7 +135,7 @@ func TestComposeDriftMissingHashLabelIsUnknown(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: fileConfigHash}
 	var d *ComposeDrift
 	captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,info, Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner, info, Config{})
 	})
 
 	require.NotNil(t, d)
@@ -176,7 +176,7 @@ func TestComposeDriftScope(t *testing.T) {
 			runner := &fakeComposeRunner{configHash: fileConfigHash}
 			var d *ComposeDrift
 			captureLog(t, func() {
-				d = checkComposeDrift(context.Background(), &mockDocker{}, runner,tc.info, tc.cfg)
+				d = checkComposeDrift(context.Background(), &mockDocker{}, runner, tc.info, tc.cfg)
 			})
 			if tc.checked {
 				assert.Len(t, runner.configHashTargets, 1)
@@ -425,6 +425,7 @@ func TestUpdateContainerTakesAQueuedRollingServiceThroughCompose(t *testing.T) {
 
 // Without a queued recreate a rolling update stays rolling, and the drift stays for the operator.
 func TestUpdateContainerKeepsAnUnqueuedRollingServiceRolling(t *testing.T) {
+	t.Serial()
 	saved := aliasSettleDelay
 	aliasSettleDelay = 0
 	t.Cleanup(func() { aliasSettleDelay = saved })

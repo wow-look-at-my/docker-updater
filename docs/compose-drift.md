@@ -1,6 +1,6 @@
 # Compose drift
 
-A compose file can change after compose created a container from it. The container then runs a config the file no longer describes. docker-updater treats that drift like an available update. It recreates the container from the file.
+A compose file can change after compose created a container from it. The container then runs a config the file no longer describes. docker-updater reports that drift and lists what differs. It recreates the container from the file only after an operator queues the recreate on the dashboard.
 
 ## The check
 
@@ -17,24 +17,30 @@ The project, files and directory come from the container's own compose labels. T
 | Result | Action | Dashboard |
 | --- | --- | --- |
 | Hashes match | nothing | nothing |
-| Hashes differ, no image update | recreate from the file | purple `out of sync` while held back, with a `force recreate` button |
-| Hashes differ, image update found | the update goes through compose and applies the file too | amber `update available`, with a `force update` button |
+| Hashes differ, nothing queued | nothing applied | purple `out of sync`, with a `recreate` button |
+| Hashes differ, recreate queued | recreate from the file at the next check | purple `recreate queued`, with `force recreate` and `cancel` buttons |
 | Hashes differ on docker-updater's own container | `ERROR` log, nothing applied | red drift line, counted as an error |
 | No hash (compose failed, file not visible, no label) | `ERROR` log, nothing applied | red unknown line, counted as an error |
 
-The recreate runs:
+Each drift line has a toggle that lists the differences, as `field: container → file`. The list compares the image, entrypoint, command, environment, labels, mounts, ports, networks, restart policy, user, working directory, privileged mode and capabilities. It names environment variables but never shows their values. Compose hashes other fields too. As a result, a drift can list no difference. Compare `docker compose config <service>` with `docker inspect` for those.
+
+## The recreate
+
+The `recreate` button queues a recreate of the file the dashboard shows. The queue is in memory, and a restart of docker-updater forgets it. At the next check the recreate runs:
 
 ```sh
 docker compose -f <config_files...> --project-directory <working_dir> -p <project> up -d --no-deps <service>
 ```
 
-It waits on the same gates as an update. The pre-update check and dry-run mode hold it back. The force button skips both. The post-update health check runs on the new container.
+It waits on the same gates as an update. The pre-update check and dry-run mode hold it back. `force recreate` skips both and runs it now. `cancel` drops it. The post-update health check runs on the new container.
 
-An update of a drifted rolling or git-mode service also goes through that command. A rolling update then stops the container before it starts the new one, because compose cannot start the replacement first.
+The queue names the file hash the operator approved. If the file changes again before the recreate runs, the entry is dropped and the dashboard offers `recreate` again.
+
+An image update of a compose service in image mode always goes through compose. As a result, it applies the file whether a recreate is queued. An update of a rolling or git-mode service copies the running config, unless a recreate is queued. Then it goes through compose too. A rolling update then stops the container before it starts the new one, because compose cannot start the replacement first.
 
 ## Limits
 
 - Compose keeps no copy of the config. A recreate that fails its health check cannot roll back. The error says so. The next cycle sees no drift. As a result, it does not loop. Fix the file and apply it again.
-- The file replaces the container's config, mounts included. A file that swaps a bind mount for a tmpfs loses the data on the recreate. Use the pre-update check or dry-run mode to hold a container whose file you have not reviewed.
+- The file replaces the container's config, mounts included. A file that swaps a bind mount for a tmpfs loses the data on the recreate. Read the differences before you queue it.
 - docker-updater never recreates its own container through compose. Compose stops this process before it starts the replacement. The log and the dashboard give the command to run.
 - Interpolation reads docker-updater's own environment and the project's `.env`. A variable that exists only in the shell that ran `docker compose up` reads as drift. The recreate drops it.

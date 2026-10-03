@@ -12,7 +12,7 @@ docker-updater keeps running containers on their newest build. It watches the co
 
 The updater creates the new container from the one's configuration, with the new image. It first clears the values the image supplied, so the new image supplies its own. A rolling update starts the replacement beside the container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed. The image comes back.
 
-A compose service in image mode is recreated through `docker compose up -d --no-deps`. As a result, the compose file applies. A rolling, git-mode or self update instead copies the running container's config. Each check compares those containers with their compose file. Depth: `docs/compose-drift.md`.
+A compose service in image mode is recreated through `docker compose up -d --no-deps`. As a result, the compose file applies. Each check also compares every compose container with its file. A container that drifted from its file is recreated from it, like an update, and the dashboard marks it out of sync while that waits. Depth: `docs/compose-drift.md`.
 
 An image can ask for `--security-opt` values with the label `docker-updater.security-opt` (space-separated). The replacement gets the missing ones, and they persist. Only a container that binds the Docker socket gets them: it is already root on the host.
 

@@ -103,7 +103,7 @@ func matchingContainer() types.ContainerJSON {
 }
 
 func TestComposeDifferencesMatchingContainerHasNone(t *testing.T) {
-	diffs, err := composeDifferences(mirrorProject(t), "web", matchingContainer(), nginxImage())
+	diffs, err := composeDifferences(mirrorProject(t), "web", "/srv/mirror",matchingContainer(), nginxImage())
 	require.NoError(t, err)
 	assert.Empty(t, diffs, "image defaults, compose labels, anonymous image volumes and pass-through env are not differences")
 }
@@ -119,7 +119,7 @@ func TestComposeDifferencesNamesEachField(t *testing.T) {
 	c.NetworkSettings.Networks = map[string]*network.EndpointSettings{"mirror_default": {}}
 	c.HostConfig.RestartPolicy = container.RestartPolicy{Name: "on-failure", MaximumRetryCount: 3}
 
-	diffs, err := composeDifferences(mirrorProject(t), "web", c, nginxImage())
+	diffs, err := composeDifferences(mirrorProject(t), "web", "/srv/mirror",c, nginxImage())
 	require.NoError(t, err)
 	assert.Equal(t, []ComposeDifference{
 		{Field: "image", File: "nginx:1.27", Container: "nginx:1.26"},
@@ -140,7 +140,7 @@ func TestComposeDifferencesNamesEachField(t *testing.T) {
 }
 
 func TestComposeDifferencesUnknownService(t *testing.T) {
-	_, err := composeDifferences(mirrorProject(t), "db", matchingContainer(), nginxImage())
+	_, err := composeDifferences(mirrorProject(t), "db", "/srv/mirror",matchingContainer(), nginxImage())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no service db")
 }
@@ -154,7 +154,7 @@ func TestComposeDifferencesDefaultNetwork(t *testing.T) {
 	c := matchingContainer()
 	c.NetworkSettings.Networks = map[string]*network.EndpointSettings{"mirror_default": {}}
 
-	diffs, err := composeDifferences(p, "web", c, nginxImage())
+	diffs, err := composeDifferences(p, "web", "/srv/mirror", c, nginxImage())
 	require.NoError(t, err)
 	assert.Empty(t, diffs)
 }

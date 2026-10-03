@@ -55,6 +55,33 @@ type composeService struct {
 	Privileged  bool                       `json:"privileged"`
 	CapAdd      []string                   `json:"cap_add"`
 	CapDrop     []string                   `json:"cap_drop"`
+
+	SecurityOpt     []string                 `json:"security_opt"`
+	MemLimit        composeBytes             `json:"mem_limit"`
+	MemswapLimit    composeBytes             `json:"memswap_limit"`
+	MemReservation  composeBytes             `json:"mem_reservation"`
+	ShmSize         composeBytes             `json:"shm_size"`
+	PidsLimit       int64                    `json:"pids_limit"`
+	Cpus            float64                  `json:"cpus"`
+	Deploy          *composeDeploy           `json:"deploy"`
+	Ulimits         map[string]composeUlimit `json:"ulimits"`
+	Sysctls         map[string]string        `json:"sysctls"`
+	Devices         []composeDevice          `json:"devices"`
+	Init            *bool                    `json:"init"`
+	ReadOnly        bool                     `json:"read_only"`
+	Tty             bool                     `json:"tty"`
+	StdinOpen       bool                     `json:"stdin_open"`
+	Hostname        string                   `json:"hostname"`
+	StopSignal      string                   `json:"stop_signal"`
+	StopGracePeriod string                   `json:"stop_grace_period"`
+	Ipc             string                   `json:"ipc"`
+	Pid             string                   `json:"pid"`
+	GroupAdd        []string                 `json:"group_add"`
+	DNS             []string                 `json:"dns"`
+	ExtraHosts      []string                 `json:"extra_hosts"`
+	Runtime         string                   `json:"runtime"`
+	OomScoreAdj     int64                    `json:"oom_score_adj"`
+	Logging         *composeLogging          `json:"logging"`
 }
 
 type composeMount struct {
@@ -75,7 +102,8 @@ type composePort struct {
 // container. img is the config of the container's image: it supplies what the
 // file leaves unset. Environment values never appear, because they can hold
 // secrets and the dashboard has no login.
-func composeDifferences(proj composeProject, service string, c types.ContainerJSON, img *container.Config) ([]ComposeDifference, error) {
+// dir is the project directory: a relative seccomp profile path resolves against it.
+func composeDifferences(proj composeProject, service, dir string, c types.ContainerJSON, img *container.Config) ([]ComposeDifference, error) {
 	svc, ok := proj.Services[service]
 	if !ok {
 		return nil, fmt.Errorf("compose config has no service %s", service)
@@ -113,6 +141,7 @@ func composeDifferences(proj composeProject, service string, c types.ContainerJS
 	add("privileged", fmt.Sprint(svc.Privileged), fmt.Sprint(c.HostConfig.Privileged))
 	add("cap_add", capSet(svc.CapAdd), capSet(c.HostConfig.CapAdd))
 	add("cap_drop", capSet(svc.CapDrop), capSet(c.HostConfig.CapDrop))
+	out = append(out, hostDifferences(svc, dir, c, img)...)
 	return out, nil
 }
 

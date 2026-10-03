@@ -143,7 +143,7 @@ func driftDifferences(ctx context.Context, cli DockerClient, runner composeRunne
 	if imgInspect, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image); err == nil {
 		img = imgInspect.Config
 	}
-	return composeDifferences(proj, target.Service, inspect, img)
+	return composeDifferences(proj, target.Service, target.WorkingDir, inspect, img)
 }
 
 // logLine is the log line for one drifted or unknown container. It is an

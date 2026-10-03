@@ -311,11 +311,7 @@ func readDockerfile(path string) (string, error) {
 
 // checkBuildUpdate reports whether a build-mode container's derived image is stale relative to its base image. It pulls ONLY the base image (never the local derived tag), then determines staleness from ground truth: an image built FROM a base starts with exactly the base's RootFS layers, so the base being a layer prefix of the derived image means the derived image extends the CURRENT base. This needs no persisted state -- it survives updater restarts and detects staleness that predates this process (the failure mode of the first-seen-digest baseline, which silently adopted whatever the registry served on the first cycle after every restart).
 //
-<<<<<<< HEAD
 // newBase is non-empty when a rebuild is warranted. oldBase is the previously-recorded base identity for reporting (may be empty when staleness is detected on the first cycle after a restart). verified is true when the outcome came from the layer check rather than the digest fallback.
-=======
-// newBase is non-empty when a rebuild is warranted. oldBase is the-recorded base identity for reporting (may be empty when staleness is detected on the first cycle after a restart). verified is true when the outcome came from the layer check rather than the digest fallback.
->>>>>>> origin/master
 func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo, resolveAuth AuthResolver) (oldBase, newBase string, verified bool, err error) {
 	if info.BaseImage == "" {
 		return "", "", false, fmt.Errorf("container %s has build mode but no resolvable base image", info.Name)

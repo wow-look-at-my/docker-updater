@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -18,14 +19,20 @@ import (
 )
 
 // forceServer is a dashboard server with a force queue, and a store in which
-// "held" has an update pending and "current" does not.
+// "held" has an update pending, "drifted" has a queued recreate held back by
+// its gate, "unqueued" drifted with nothing queued, "self" drifted where the
+// updater cannot apply it, and "current" has nothing to do.
 func forceServer(t *testing.T, depth int) (*dashboardServer, chan string) {
 	t.Helper()
 	store := newStore()
 	store.Record([]UpdateResult{
 		{Container: ContainerInfo{Name: "held"}, OldRef: "sha256:aaa", NewRef: "sha256:bbb", Skipped: true, SkipReason: "busy"},
+		{Container: ContainerInfo{Name: "drifted"}, OldRef: "sha256:aaa", Skipped: true, SkipReason: "busy", Resync: true, Drift: &ComposeDrift{State: driftFound, FileHash: "f1"}},
+		{Container: ContainerInfo{Name: "unqueued"}, OldRef: "sha256:aaa", Drift: &ComposeDrift{State: driftFound, FileHash: "f2"}},
+		{Container: ContainerInfo{Name: "self"}, OldRef: "sha256:aaa", Drift: &ComposeDrift{State: driftFound, FileHash: "f3", Blocked: selfDriftBlocked}},
 		{Container: ContainerInfo{Name: "current"}, OldRef: "sha256:aaa"},
 	}, time.Now())
+	store.QueueRecreate("drifted", "f1", time.Now())
 	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, store)
 	force := make(chan string, depth)
 	s.force = force
@@ -49,6 +56,15 @@ func TestForceUpdateQueuesPendingContainer(t *testing.T) {
 	assert.Equal(t, "held", <-force)
 }
 
+func TestForceUpdateQueuesDriftedContainer(t *testing.T) {
+	s, force := forceServer(t, 1)
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, forceRequest(http.MethodPost, "drifted", true))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	require.Len(t, force, 1)
+	assert.Equal(t, "drifted", <-force)
+}
+
 func TestForceUpdateRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		desc   string
@@ -58,6 +74,8 @@ func TestForceUpdateRefusals(t *testing.T) {
 		{"GET is refused", forceRequest(http.MethodGet, "held", true), http.StatusMethodNotAllowed},
 		{"a request without the header is refused", forceRequest(http.MethodPost, "held", false), http.StatusForbidden},
 		{"a container with no pending update is refused", forceRequest(http.MethodPost, "current", true), http.StatusConflict},
+		{"a drift nobody queued is refused", forceRequest(http.MethodPost, "unqueued", true), http.StatusConflict},
+		{"a drift the updater cannot apply is refused", forceRequest(http.MethodPost, "self", true), http.StatusConflict},
 		{"an unknown container is refused", forceRequest(http.MethodPost, "nope", true), http.StatusConflict},
 		{"a missing name is refused", forceRequest(http.MethodPost, "", true), http.StatusBadRequest},
 	} {
@@ -69,6 +87,90 @@ func TestForceUpdateRefusals(t *testing.T) {
 			assert.Empty(t, force, "a refused request must queue nothing")
 		})
 	}
+}
+
+func recreateRequest(method, name string, header bool) *http.Request {
+	r := httptest.NewRequest(method, "/api/recreate?container="+name, nil)
+	if header {
+		r.Header.Set(forceUpdateHeader, recreateAction)
+	}
+	return r
+}
+
+// Queueing names the file it approved, so a later change to the file is not applied under that approval.
+func TestRecreateQueuesTheApprovedFile(t *testing.T) {
+	s, force := forceServer(t, 1)
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, recreateRequest(http.MethodPost, "unqueued", true))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	hash, ok := s.store.QueuedRecreate("unqueued")
+	require.True(t, ok)
+	assert.Equal(t, "f2", hash)
+	assert.Empty(t, force, "queueing runs nothing now: the recreate waits for the next check")
+}
+
+func TestRecreateCancel(t *testing.T) {
+	s, _ := forceServer(t, 1)
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, recreateRequest(http.MethodDelete, "drifted", true))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	_, ok := s.store.QueuedRecreate("drifted")
+	assert.False(t, ok)
+
+	w = httptest.NewRecorder()
+	s.handler().ServeHTTP(w, forceRequest(http.MethodPost, "drifted", true))
+	assert.Equal(t, http.StatusConflict, w.Code, "a cancelled recreate cannot be forced")
+}
+
+func TestRecreateRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		desc   string
+		req    *http.Request
+		status int
+	}{
+		{"GET is refused", recreateRequest(http.MethodGet, "unqueued", true), http.StatusMethodNotAllowed},
+		{"a request without the header is refused", recreateRequest(http.MethodPost, "unqueued", false), http.StatusForbidden},
+		{"a container with no drift is refused", recreateRequest(http.MethodPost, "current", true), http.StatusConflict},
+		{"a drift the updater cannot apply is refused", recreateRequest(http.MethodPost, "self", true), http.StatusConflict},
+		{"cancelling nothing is refused", recreateRequest(http.MethodDelete, "unqueued", true), http.StatusConflict},
+		{"a missing name is refused", recreateRequest(http.MethodPost, "", true), http.StatusBadRequest},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			s, _ := forceServer(t, 1)
+			before := s.store.Snapshot().Recreates
+			w := httptest.NewRecorder()
+			s.handler().ServeHTTP(w, tc.req)
+			assert.Equal(t, tc.status, w.Code, w.Body.String())
+			assert.Equal(t, before, s.store.Snapshot().Recreates, "a refused request must change no queue")
+		})
+	}
+}
+
+// The API reports when the recreate was queued, which is what the dashboard draws its buttons from.
+func TestHandleAPIContainersReportsTheQueuedRecreate(t *testing.T) {
+	s, _ := forceServer(t, 1)
+	s.cli = &mockDocker{
+		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
+			return []types.Container{
+				{ID: "d", Names: []string{"/drifted"}, State: "running"},
+				{ID: "u", Names: []string{"/unqueued"}, State: "running"},
+			}, nil
+		},
+	}
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/containers", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp apiResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Containers, 2)
+	byName := map[string]apiContainer{}
+	for _, c := range resp.Containers {
+		byName[c.Name] = c
+	}
+	assert.NotNil(t, byName["drifted"].RecreateQueued)
+	assert.Nil(t, byName["unqueued"].RecreateQueued)
 }
 
 func TestForceUpdateFullQueue(t *testing.T) {
@@ -159,7 +261,7 @@ func TestCheckContainersForceSelectsOneContainer(t *testing.T) {
 			}, nil
 		},
 	}
-	results := runForceUpdate(context.Background(), cli, Config{Label: "docker-updater.enable"}, newAuthResolver(nil), "two")
+	results := runForceUpdate(context.Background(), cli, Config{Label: "docker-updater.enable"}, newAuthResolver(nil), nil, "two")
 	require.Len(t, results, 1)
 	assert.Equal(t, "two", results[0].Container.Name)
 	assert.True(t, results[0].Container.Force)

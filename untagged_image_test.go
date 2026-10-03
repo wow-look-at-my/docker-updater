@@ -182,7 +182,7 @@ func TestRunUpdateCheckUntaggedImageUpdates(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable", DryRun: true}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 
 	require.Equal(t, 1, len(results))
 	assert.Nil(t, results[0].Error)

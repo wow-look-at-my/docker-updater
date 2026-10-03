@@ -11,7 +11,8 @@ const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 // A payload shaped like a real one: monitored and unmonitored containers,
 // online and offline, a configuration warning, a failed check, a held-back
 // update, a container Docker could not inspect (null restarts), a container in
-// a crash loop, one nothing can check, and a compose drift found and unknown.
+// a crash loop, one nothing can check, and a compose drift held back, blocked
+// and unknown.
 const PAYLOAD = {
 	generated_at: "2026-08-08T19:09:05.713435114Z",
 	interval: "10m0s",
@@ -126,6 +127,9 @@ const PAYLOAD = {
 			mode: "image",
 			update_available: false,
 			current_ref: "c83fd7303795",
+			skipped: true,
+			skip_reason: "pre-update endpoint answered 503",
+			recreate_queued: "2026-08-08T19:04:00Z",
 			compose_drift: {
 				state: "drift",
 				service: "github-state-mirror",
@@ -133,6 +137,58 @@ const PAYLOAD = {
 				running_hash: "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
 				file_hash: "9999cccc8888dddd7777eeee6666ffff5555aaaa4444bbbb3333cccc2222dddd",
 				command: "docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror",
+				differences: [
+					{ field: "mount /data", file: "tmpfs", container: "bind /srv/mirror/data" },
+				],
+			},
+		},
+		{
+			name: "media",
+			image: "ghcr.io/example/media:latest",
+			image_id: "5a5a5a5a5a5a",
+			state: "running",
+			status: "Up 4 days",
+			health: "",
+			created: 1786420105,
+			restarts: 0,
+			auto_update: true,
+			mode: "image",
+			update_available: false,
+			current_ref: "6b6b6b6b6b6b",
+			compose_drift: {
+				state: "drift",
+				service: "media",
+				config_files: ["/srv/media/compose.yml"],
+				running_hash: "1212121212121212121212121212121212121212121212121212121212121212",
+				file_hash: "3434343434343434343434343434343434343434343434343434343434343434",
+				command: "docker compose -f /srv/media/compose.yml --project-directory /srv/media -p media up -d --no-deps media",
+				differences: [
+					{ field: "image", file: "ghcr.io/example/media:2", container: "ghcr.io/example/media:latest" },
+					{ field: "environment TOKEN", file: "set (value hidden)", container: "a different value" },
+				],
+			},
+		},
+		{
+			name: "docker-updater",
+			image: "ghcr.io/wow-look-at-my/docker-updater:latest",
+			image_id: "0a1b2c3d4e5f",
+			state: "running",
+			status: "Up 3 days",
+			health: "",
+			created: 1786520105,
+			restarts: 0,
+			auto_update: true,
+			mode: "image",
+			update_available: false,
+			current_ref: "77aa88bb99cc",
+			compose_drift: {
+				state: "drift",
+				service: "updater",
+				config_files: ["/srv/updater/compose.yml"],
+				running_hash: "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff",
+				file_hash: "ffffeeeeddddccccbbbbaaaa0000999988887777666655554444333322221111",
+				command: "docker compose -f /srv/updater/compose.yml --project-directory /srv/updater -p updater up -d --no-deps updater",
+				blocked: "docker-updater cannot recreate its own container through compose, because compose stops this process before it starts the replacement",
 			},
 		},
 		{
@@ -380,8 +436,9 @@ test("a crash-looping container is offline and red", async () => {
 test("force update asks first, then posts the container", async () => {
 	const page = await load(PAYLOAD);
 	try {
-		const buttons = [...page.doc.querySelectorAll<HTMLButtonElement>(".force-btn")];
-		assert.equal(buttons.length, 1, "only the held-back container gets the button");
+		const buttons = [...page.doc.querySelectorAll<HTMLButtonElement>(".force-btn:not(.force-btn-drift)")];
+		assert.equal(buttons.length, 1, "only the held-back update gets the update button");
+		assert.equal(buttons[0].textContent, "force update");
 		assert.ok(buttons[0].closest("tr")!.textContent!.includes("webhook-runner"));
 
 		const posts: { url: string; init: RequestInit }[] = [];
@@ -409,7 +466,7 @@ test("force update asks first, then posts the container", async () => {
 		assert.equal(posts[0].init.method, "POST");
 		assert.equal((posts[0].init.headers as Record<string, string>)["X-Docker-Updater-Action"], "force-update");
 
-		const after = page.doc.querySelector<HTMLButtonElement>(".force-btn")!;
+		const after = page.doc.querySelector<HTMLButtonElement>(".force-btn:not(.force-btn-drift)")!;
 		assert.equal(after.textContent, "queued");
 		assert.ok(after.disabled, "a queued request cannot be sent twice");
 
@@ -434,7 +491,7 @@ test("a container nothing can check says so and counts as an error", async () =>
 		const rows = page.doc.getElementById("group-managed-online-rows")!;
 		assert.ok(rows.textContent!.includes("cannot update"));
 		assert.ok(rows.textContent!.includes("no registry repository to poll"));
-		// buildhost's failed pull, s3, which no cycle will ever retry, and both compose drifts.
+		// buildhost's failed pull, s3, which no cycle will ever retry, the unknown drift, and the drift only the operator can apply.
 		assert.equal(page.doc.getElementById("stat-errors")!.textContent, "4");
 	} finally {
 		page.close();
@@ -442,22 +499,154 @@ test("a container nothing can check says so and counts as an error", async () =>
 });
 
 // A drifted container looks healthy and up to date. The row must name the
-// drift, the files and the command that applies them, and an unknown result
-// must say unknown rather than nothing.
-test("compose drift is on the row, with the command that applies the file", async () => {
+// drift and the files. A drift only the operator can apply carries the
+// command, and an unknown result must say unknown rather than nothing.
+test("compose drift is on the row", async () => {
 	const page = await load(PAYLOAD);
 	try {
 		const lines = [...page.doc.querySelectorAll(".drift")].map((n) => n.textContent || "");
-		assert.equal(lines.length, 2);
+		assert.equal(lines.length, 4);
 		const drift = lines.find((l) => l.includes("github-state-mirror"))!;
 		assert.match(drift, /drifted from compose file: service github-state-mirror in \/srv\/mirror\/compose\.yml/);
 		assert.match(drift, /hashes to 9999cccc8888, the container runs aaaa1111bbbb/);
-		assert.ok(drift.endsWith("Apply the file: docker compose -f /srv/mirror/compose.yml --project-directory /srv/mirror -p mirror up -d --no-deps github-state-mirror"));
+		assert.ok(drift.endsWith("Queue a recreate to apply the fileshow 1 difference"), drift);
+		const blocked = lines.find((l) => l.includes("service updater"))!;
+		assert.match(blocked, /docker-updater cannot recreate its own container through compose/);
+		assert.ok(blocked.endsWith("Apply the file: docker compose -f /srv/updater/compose.yml --project-directory /srv/updater -p updater up -d --no-deps updatershow details"), blocked);
 		const unknown = lines.find((l) => l.includes("service site"))!;
 		assert.match(unknown, /compose drift unknown for service site in \/srv\/site\/compose\.yml: compose file \/srv\/site\/compose\.yml is not visible/);
 
 		const report = (page.win.errorReport as (d: unknown) => string)(page.copy().json);
-		assert.match(report, /gsm-rolling[\s\S]*drifted from compose file/);
+		assert.match(report, /docker-updater {2}\[ghcr\.io\/wow-look-at-my\/docker-updater:latest\][\s\S]*cannot recreate its own container/);
+		assert.ok(!report.includes("gsm-rolling"), "a drift a recreate can apply is pending work, not an error");
+		assert.ok(!report.includes("media"));
+	} finally {
+		page.close();
+	}
+});
+
+// requestLog answers the dashboard's own requests: the poll gets the payload,
+// and every other request is recorded and accepted.
+function requestLog(page: Harness): { url: string; init: RequestInit }[] {
+	const sent: { url: string; init: RequestInit }[] = [];
+	page.win.fetch = (async (url: string, init: RequestInit) => {
+		if (url === "api/containers") {
+			return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(PAYLOAD)) };
+		}
+		sent.push({ url, init });
+		return { ok: true, status: 202, text: async () => "ok" };
+	}) as unknown as typeof fetch;
+	return sent;
+}
+
+function rowOf(page: Harness, name: string): HTMLTableRowElement {
+	const rows = [...page.doc.querySelectorAll<HTMLTableRowElement>("tbody tr")];
+	return rows.find((r) => r.querySelector(".cname")!.textContent === name)!;
+}
+
+// Out of sync with nothing queued: the only action is to queue a recreate,
+// and the question lists what the file changes.
+test("an out-of-sync container offers a recreate that queues", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const tr = rowOf(page, "media");
+		assert.ok(tr.classList.contains("row-drift"));
+		assert.equal(tr.querySelector(".up-drift")!.textContent, "out of sync");
+		assert.match(tr.textContent!, /compose file changed · not applied until a recreate is queued/);
+		assert.equal(tr.querySelectorAll(".force-btn:not(.recreate-btn)").length, 0, "nothing to force before a recreate is queued");
+		assert.equal(tr.querySelectorAll(".cancel-btn").length, 0);
+		const btn = tr.querySelector<HTMLButtonElement>(".recreate-btn")!;
+		assert.equal(btn.textContent, "recreate");
+		assert.equal(page.doc.getElementById("stat-updates")!.textContent, "3", "both out-of-sync rows count as pending");
+
+		const sent = requestLog(page);
+		let asked = "";
+		page.win.confirm = (msg?: string) => {
+			asked = String(msg);
+			return true;
+		};
+		btn.click();
+		await new Promise((r) => setTimeout(r, 0));
+
+		assert.match(asked, /^Queue a recreate of media from its compose file\?/);
+		assert.match(asked, /image: ghcr\.io\/example\/media:latest → ghcr\.io\/example\/media:2/);
+		assert.match(asked, /environment TOKEN: a different value → set \(value hidden\)/);
+		assert.match(asked, /It runs at the next check/);
+		assert.equal(sent.length, 1);
+		assert.equal(sent[0].url, "api/recreate?container=media");
+		assert.equal(sent[0].init.method, "POST");
+		assert.equal((sent[0].init.headers as Record<string, string>)["X-Docker-Updater-Action"], "recreate");
+	} finally {
+		page.close();
+	}
+});
+
+// A queued recreate shows what holds it, a force button that skips the
+// gates, and a cancel button that drops it.
+test("a queued recreate offers force recreate and cancel", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		const tr = rowOf(page, "gsm-rolling");
+		assert.equal(tr.querySelector(".up-drift")!.textContent, "recreate queued");
+		assert.match(tr.textContent!, /queued 5m ago · skipped: pre-update endpoint answered 503/);
+		assert.equal(tr.querySelectorAll(".recreate-btn").length, 0);
+		const force = tr.querySelector<HTMLButtonElement>(".force-btn-drift")!;
+		assert.equal(force.textContent, "force recreate");
+		const cancel = tr.querySelector<HTMLButtonElement>(".cancel-btn")!;
+		assert.equal(cancel.textContent, "cancel");
+
+		const sent = requestLog(page);
+		let asked = "";
+		page.win.confirm = (msg?: string) => {
+			asked = String(msg);
+			return true;
+		};
+		force.click();
+		await new Promise((r) => setTimeout(r, 0));
+		assert.match(asked, /^Recreate gsm-rolling from its compose file now\?/);
+		assert.match(asked, /mount \/data: bind \/srv\/mirror\/data → tmpfs/);
+		assert.match(asked, /Held back by: skipped: pre-update endpoint answered 503/);
+		assert.match(asked, /compose cannot restore the old one/);
+		assert.equal(sent[0].url, "api/force-update?container=gsm-rolling");
+		assert.equal(rowOf(page, "gsm-rolling").querySelector<HTMLButtonElement>(".force-btn-drift")!.textContent, "queued");
+
+		rowOf(page, "gsm-rolling").querySelector<HTMLButtonElement>(".cancel-btn")!.click();
+		await new Promise((r) => setTimeout(r, 0));
+		assert.equal(sent.length, 2);
+		assert.equal(sent[1].url, "api/recreate?container=gsm-rolling");
+		assert.equal(sent[1].init.method, "DELETE");
+	} finally {
+		page.close();
+	}
+});
+
+// The differences open under the drift line, and the open list is part of the state a copy replays.
+test("the differences open under the drift line and replay", async () => {
+	const page = await load(PAYLOAD);
+	try {
+		assert.equal(page.doc.querySelectorAll(".drift-diff").length, 0, "closed by default");
+		const toggle = rowOf(page, "media").querySelector<HTMLButtonElement>(".diff-toggle")!;
+		assert.equal(toggle.textContent, "show 2 differences");
+		toggle.click();
+
+		const list = rowOf(page, "media").querySelector(".drift-diff")!;
+		const items = [...list.querySelectorAll("li")].map((n) => n.textContent);
+		assert.deepEqual(items, [
+			"container → file",
+			"image: ghcr.io/example/media:latest → ghcr.io/example/media:2",
+			"environment TOKEN: a different value → set (value hidden)",
+		]);
+		assert.equal(rowOf(page, "media").querySelector(".diff-toggle")!.textContent, "hide differences");
+
+		const before = bodyWithoutScript(page.html());
+		const { json } = page.copy();
+		assert.deepEqual((json.ui as Json).drift_open, { media: true });
+		const replay = await roundTrip(json);
+		try {
+			assert.equal(replay.markup, before, "an open list replays open");
+		} finally {
+			replay.close();
+		}
 	} finally {
 		page.close();
 	}

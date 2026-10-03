@@ -42,6 +42,7 @@ func (s *dashboardServer) handler() http.Handler {
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
 	mux.HandleFunc("/api/logs", s.handleAPILogs)
 	mux.HandleFunc("/api/force-update", s.handleAPIForceUpdate)
+	mux.HandleFunc("/api/recreate", s.handleAPIRecreate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -218,6 +219,8 @@ type apiContainer struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// ComposeDrift is set when the running config no longer matches the compose file, or when nothing could compare them.
 	ComposeDrift *ComposeDrift `json:"compose_drift,omitempty"`
+	// RecreateQueued is when an operator queued a recreate from the compose file. It is absent when none is queued.
+	RecreateQueued *time.Time `json:"recreate_queued,omitempty"`
 }
 
 // apiResponse is the top-level JSON payload served at /api/containers.
@@ -307,6 +310,9 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			// Appended, not assigned: the both-updaters note above is about this container's labels.
 			ac.Warnings = append(ac.Warnings, st.Warnings...)
 			ac.ComposeDrift = st.Drift
+			if q, ok := snap.Recreates[name]; ok {
+				ac.RecreateQueued = nonZeroTime(q.At)
+			}
 			if st.Stuck() {
 				ac.StuckCycles = st.StuckCycles
 				ac.StuckSince = nonZeroTime(st.StuckSince)

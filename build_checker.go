@@ -27,6 +27,8 @@ type composeRunner interface {
 	UpNoDeps(ctx context.Context, t composeTarget) error
 	// ConfigHash runs `docker compose <target> config --hash <service>`.
 	ConfigHash(ctx context.Context, t composeTarget) (string, error)
+	// ServiceConfig runs `docker compose <target> config --format json <service>`.
+	ServiceConfig(ctx context.Context, t composeTarget) (composeProject, error)
 }
 
 // composeTarget is the service a compose invocation acts on, addressed

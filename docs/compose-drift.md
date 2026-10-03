@@ -22,7 +22,28 @@ The project, files and directory come from the container's own compose labels. T
 | Hashes differ on docker-updater's own container | `ERROR` log, nothing applied | red drift line, counted as an error |
 | No hash (compose failed, file not visible, no label) | `ERROR` log, nothing applied | red unknown line, counted as an error |
 
-Each drift line has a toggle that lists the differences, as `field: container → file`. The list compares the image, entrypoint, command, environment, labels, mounts, ports, networks, restart policy, user, working directory, privileged mode and capabilities. It names environment variables but never shows their values. Compose hashes other fields too. As a result, a drift can list no difference. Compare `docker compose config <service>` with `docker inspect` for those.
+Each drift line has a toggle that lists the differences, as `field: container → file`. Field names are the Docker API's, such as `HostConfig.Memory`.
+
+## The differences
+
+compose translates the file into a Docker create request, and docker-updater compares that request with `docker inspect`. It runs the recreate compose will do, against a socket of its own:
+
+```sh
+DOCKER_HOST=unix://<capture socket> docker compose -f <config_files...> --project-directory <working_dir> -p <project> up --no-deps --no-build --no-start --pull never --force-recreate <service>
+```
+
+The socket passes reads to the daemon. It records the create request and answers it with an error, so compose stops there. It refuses every other write. compose creates its replacement before it stops the container, so nothing changes.
+
+Every key of `Config`, `HostConfig` and each network endpoint is compared. A few values get a rule:
+
+- The daemon fills in some fields when the request leaves them empty. Examples are `Hostname`, `ShmSize`, `IpcMode`, `MaskedPaths` and the logging driver. Only a value the request sets is compared.
+- The image supplies the command, entrypoint, user and stop signal that the request leaves empty. The daemon merges the image's environment, labels, exposed ports and volumes with the request's.
+- compose's own labels change on every recreate. As a result, they are skipped.
+- The daemon assigns the address and the IDs of an endpoint when the container starts. As a result, they are skipped.
+
+Every value shows in full, environment values included. A seccomp profile shows as its whole JSON, because compose puts the profile into the request.
+
+The list is unavailable when compose fails, or when it wants another write before the create. One example is a dependent service with `restart: true`, which compose stops first. The drift line then says why.
 
 ## The recreate
 

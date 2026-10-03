@@ -3,13 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
 	"strings"
-
-	"github.com/docker/docker/api/types/container"
 )
 
 // composeConfigHashLabel holds the service hash compose stamps on each container it creates.
@@ -128,7 +125,7 @@ func checkComposeDrift(ctx context.Context, cli DockerClient, runner composeRunn
 // driftDifferences lists the fields where the compose file and the running
 // container disagree.
 func driftDifferences(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, target composeTarget) ([]ComposeDifference, error) {
-	proj, err := runner.ServiceConfig(ctx, target)
+	req, err := runner.CreateRequest(ctx, target)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +136,12 @@ func driftDifferences(ctx context.Context, cli DockerClient, runner composeRunne
 	if inspect.ContainerJSONBase == nil || inspect.Config == nil {
 		return nil, fmt.Errorf("the inspect of container %s carries no config", info.Name)
 	}
-	var img *container.Config
-	if imgInspect, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image); err == nil {
-		img = imgInspect.Config
+	// The image supplies what the request leaves empty. Without it, every inherited value reads as a difference.
+	imgInspect, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting image %s of container %s: %w", shortID(inspect.Image), info.Name, err)
 	}
-	return composeDifferences(proj, target.Service, inspect, img)
+	return composeDifferences(req, inspect, imgInspect.Config)
 }
 
 // logLine is the log line for one drifted or unknown container. It is an
@@ -244,20 +242,6 @@ func (execComposeRunner) ConfigHash(ctx context.Context, t composeTarget) (strin
 		return "", err
 	}
 	return parseConfigHash(out, t.Service)
-}
-
-// ServiceConfig runs `docker compose <target> config --format json <service>`:
-// the service as compose would create it now, after interpolation.
-func (execComposeRunner) ServiceConfig(ctx context.Context, t composeTarget) (composeProject, error) {
-	var proj composeProject
-	out, err := t.output(ctx, "config", "--format", "json", t.Service)
-	if err != nil {
-		return proj, err
-	}
-	if err := json.Unmarshal([]byte(out), &proj); err != nil {
-		return proj, fmt.Errorf("reading compose config --format json: %w", err)
-	}
-	return proj, nil
 }
 
 // output runs `docker compose <target> <args>` and returns its stdout. The

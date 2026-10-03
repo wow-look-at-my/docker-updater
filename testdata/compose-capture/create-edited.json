@@ -1,0 +1,148 @@
+{
+  "Hostname": "",
+  "Domainname": "",
+  "User": "",
+  "AttachStdin": false,
+  "AttachStdout": true,
+  "AttachStderr": true,
+  "ExposedPorts": {
+    "80/tcp": {}
+  },
+  "Tty": false,
+  "OpenStdin": false,
+  "StdinOnce": false,
+  "Env": [
+    "MODE=prod"
+  ],
+  "Cmd": [
+    "/bin/run",
+    "--serve"
+  ],
+  "Image": "local/tiny:1",
+  "Volumes": null,
+  "WorkingDir": "",
+  "Entrypoint": null,
+  "Labels": {
+    "com.docker.compose.config-hash": "00707aca89d170dbd90905b3bc4f1a8b6b1a56b34b2783da50e11626dc0fd6ee",
+    "com.docker.compose.container-number": "1",
+    "com.docker.compose.depends_on": "",
+    "com.docker.compose.image": "sha256:d43d6b0cd61628b6c2c95d33b4cf63b6eceb28980bc3789a7434b3991e4254fa",
+    "com.docker.compose.oneoff": "False",
+    "com.docker.compose.project": "e2e",
+    "com.docker.compose.project.config_files": "/srv/e2e/docker-compose.yml",
+    "com.docker.compose.project.working_dir": "/srv/e2e",
+    "com.docker.compose.replace": "runner-1",
+    "com.docker.compose.service": "runner",
+    "com.docker.compose.version": "5.3.1",
+    "team": "core"
+  },
+  "HostConfig": {
+    "Binds": [
+      "/srv/e2e/data:/data:rw",
+      "e2e_cache:/cache:rw"
+    ],
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "",
+      "Config": null
+    },
+    "NetworkMode": "e2e_default",
+    "PortBindings": {
+      "80/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "8080"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "",
+    "Dns": null,
+    "DnsOptions": null,
+    "DnsSearch": null,
+    "ExtraHosts": [],
+    "GroupAdd": null,
+    "IpcMode": "",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": [
+      "seccomp={\"defaultAction\":\"SCMP_ACT_ALLOW\",\"syscalls\":[]}"
+    ],
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 0,
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 25769803776,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": null,
+    "BlkioDeviceReadBps": null,
+    "BlkioDeviceWriteBps": null,
+    "BlkioDeviceReadIOps": null,
+    "BlkioDeviceWriteIOps": null,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": null,
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 25769803776,
+    "MemorySwappiness": null,
+    "OomKillDisable": false,
+    "PidsLimit": 8192,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [],
+    "ReadonlyPaths": []
+  },
+  "NetworkingConfig": {
+    "EndpointsConfig": {
+      "e2e_default": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "e2e-runner-1",
+          "runner"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
+    }
+  }
+}

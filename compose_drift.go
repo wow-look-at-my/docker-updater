@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os/exec"
 	"strings"
+
+	"github.com/docker/docker/api/types/container"
 )
 
 // composeConfigHashLabel holds the service hash compose stamps on each container it creates.
@@ -36,18 +39,59 @@ type ComposeDrift struct {
 	Error string `json:"error,omitempty"`
 	// Blocked says why the updater cannot apply the file itself. The operator must run Command.
 	Blocked string `json:"blocked,omitempty"`
+	// Differences are the fields where the file and the container disagree.
+	Differences []ComposeDifference `json:"differences,omitempty"`
+	// DifferencesError says why the differences could not be listed.
+	DifferencesError string `json:"differences_error,omitempty"`
 }
 
-// applies reports whether the updater recreates this container from its
-// compose file. It is false for a nil drift.
+// applies reports whether the updater can recreate this container from its
+// compose file once an operator queues it.
 func (d *ComposeDrift) applies() bool {
 	return d != nil && d.State == driftFound && d.Blocked == ""
+}
+
+// recreateQueue holds the recreates from the compose file that an operator
+// queued, keyed by container name.
+type recreateQueue interface {
+	QueuedRecreate(name string) (fileHash string, ok bool)
+	DropRecreate(name string)
+}
+
+// recreateApproved reports whether the operator queued a recreate for exactly
+// the file the check sees now.
+func recreateApproved(queue recreateQueue, name string, d *ComposeDrift) bool {
+	if queue == nil || !d.applies() {
+		return false
+	}
+	hash, ok := queue.QueuedRecreate(name)
+	return ok && hash == d.FileHash
+}
+
+// settleQueuedRecreate drops a queued recreate that no longer applies: the
+// container matches its file, or the file changed again after the operator
+// approved it. An unknown drift keeps the entry, because a failed comparison
+// says nothing about the file.
+func settleQueuedRecreate(queue recreateQueue, name string, d *ComposeDrift) {
+	if queue == nil {
+		return
+	}
+	hash, ok := queue.QueuedRecreate(name)
+	if !ok || (d != nil && d.State == driftUnknown) || (d.applies() && d.FileHash == hash) {
+		return
+	}
+	queue.DropRecreate(name)
+	if d == nil {
+		log.Printf("container %s: matches its compose file, so its queued recreate is done", name)
+		return
+	}
+	log.Printf("container %s: the compose file changed after the recreate was queued, so the queued recreate is dropped. Queue it again to apply the new file", name)
 }
 
 // checkComposeDrift compares a compose-managed container with its compose
 // file. It returns nil when the hashes match, and for a container that compose
 // does not own.
-func checkComposeDrift(ctx context.Context, runner composeRunner, info ContainerInfo, cfg Config) *ComposeDrift {
+func checkComposeDrift(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config) *ComposeDrift {
 	if !composeManaged(info) {
 		return nil
 	}
@@ -72,9 +116,31 @@ func checkComposeDrift(ctx context.Context, runner composeRunner, info Container
 		if sameContainer(info.ID, cfg.SelfContainerID) {
 			d.Blocked = selfDriftBlocked
 		}
+		var err error
+		if d.Differences, err = driftDifferences(ctx, cli, runner, info, target); err != nil {
+			d.DifferencesError = err.Error()
+		}
 	}
 	log.Print(d.logLine(info.Name))
 	return d
+}
+
+// driftDifferences lists the fields where the compose file and the running
+// container disagree.
+func driftDifferences(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, target composeTarget) ([]ComposeDifference, error) {
+	proj, err := runner.ServiceConfig(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	inspect, err := cli.ContainerInspect(ctx, info.ID)
+	if err != nil {
+		return nil, fmt.Errorf("inspecting container %s: %w", info.Name, err)
+	}
+	var img *container.Config
+	if imgInspect, _, err := cli.ImageInspectWithRaw(ctx, inspect.Image); err == nil {
+		img = imgInspect.Config
+	}
+	return composeDifferences(proj, target.Service, inspect, img)
 }
 
 // logLine is the log line for one drifted or unknown container. It is an
@@ -91,15 +157,15 @@ func (d ComposeDrift) logLine(name string) string {
 	if d.Blocked != "" {
 		return fmt.Sprintf("ERROR container %s: %s. %s. Apply the file with: %s", name, drift, d.Blocked, d.Command)
 	}
-	return fmt.Sprintf("container %s: %s. The updater recreates it from the file, as it does for an update", name, drift)
+	return fmt.Sprintf("container %s: %s. Queue a recreate on the dashboard to apply the file", name, drift)
 }
 
 // applyComposeDrift recreates a drifted container from its compose file when
-// the check found no update to do it. It goes through the same pre-update gate
-// and dry-run mode as an update. A held-back update keeps the drift: the
-// update applies the file when it goes.
+// an operator queued that and the check found no update to do it. It goes
+// through the same pre-update gate and dry-run mode as an update. A held-back
+// update keeps the drift: the update applies the file when it goes.
 func applyComposeDrift(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
-	if !result.Drift.applies() {
+	if !info.ComposeRecreateQueued || !result.Drift.applies() {
 		return result
 	}
 	if result.Updated && !result.DryRun {
@@ -170,19 +236,43 @@ func resyncViaCompose(ctx context.Context, cli DockerClient, runner composeRunne
 // ConfigHash runs `docker compose <target> config --hash <service>` and returns
 // the hash compose would stamp on a container it creates for the service now.
 func (execComposeRunner) ConfigHash(ctx context.Context, t composeTarget) (string, error) {
+	out, err := t.output(ctx, "config", "--hash", t.Service)
+	if err != nil {
+		return "", err
+	}
+	return parseConfigHash(out, t.Service)
+}
+
+// ServiceConfig runs `docker compose <target> config --format json <service>`:
+// the service as compose would create it now, after interpolation.
+func (execComposeRunner) ServiceConfig(ctx context.Context, t composeTarget) (composeProject, error) {
+	var proj composeProject
+	out, err := t.output(ctx, "config", "--format", "json", t.Service)
+	if err != nil {
+		return proj, err
+	}
+	if err := json.Unmarshal([]byte(out), &proj); err != nil {
+		return proj, fmt.Errorf("reading compose config --format json: %w", err)
+	}
+	return proj, nil
+}
+
+// output runs `docker compose <target> <args>` and returns its stdout. The
+// error carries the tail of stderr.
+func (t composeTarget) output(ctx context.Context, args ...string) (string, error) {
 	if err := checkComposeFilesVisible(t.ConfigFiles); err != nil {
 		return "", err
 	}
-	args := composeArgs(t, "config", "--hash", t.Service)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	full := composeArgs(t, args...)
+	cmd := exec.CommandContext(ctx, "docker", full...)
 	var stdout bytes.Buffer
 	stderr := &tailBuffer{max: composeErrTailBytes}
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker %s: %w: %s", strings.Join(args, " "), err, stderr.tail(composeErrTailLines))
+		return "", fmt.Errorf("docker %s: %w: %s", strings.Join(full, " "), err, stderr.tail(composeErrTailLines))
 	}
-	return parseConfigHash(stdout.String(), t.Service)
+	return stdout.String(), nil
 }
 
 // parseConfigHash reads the hash for service from `config --hash` output,

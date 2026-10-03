@@ -59,8 +59,8 @@ type ContainerInfo struct {
 	// Force is set when an operator asked for this update from the dashboard.
 	Force bool
 
-	// ComposeDrifted is set when the compose file no longer matches this container and the updater applies it.
-	ComposeDrifted bool
+	// ComposeRecreateQueued is set when an operator queued a recreate from the compose file this container drifted from.
+	ComposeRecreateQueued bool
 
 	// Post-update health check fields. If HealthCheckURL is set, HTTP GET is polled until 2xx.
 	HealthCheckURL     string
@@ -89,6 +89,6 @@ type UpdateResult struct {
 	Warnings []string
 	// Drift is set when a compose-managed container no longer matches its compose file, or when the comparison failed.
 	Drift *ComposeDrift
-	// Resync is set when the action this check took or held back is a recreate from the compose file, not an update.
+	// Resync is set when the action this check took or held back is a queued recreate from the compose file, not an update.
 	Resync bool
 }

@@ -9,14 +9,16 @@ import (
 )
 
 // runUpdateCheck checks all monitored containers for updates and applies them.
-func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver) []UpdateResult {
-	return checkContainers(ctx, cli, cfg, resolveAuth, "")
+// queue holds the recreates from the compose file that an operator asked for. It may be nil.
+func runUpdateCheck(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, queue recreateQueue) []UpdateResult {
+	return checkContainers(ctx, cli, cfg, resolveAuth, "", queue)
 }
 
-// runForceUpdate checks the one named container and applies any update it
-// finds. It ignores the pre-update gate and dry-run mode for that container.
-func runForceUpdate(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, name string) []UpdateResult {
-	results := checkContainers(ctx, cli, cfg, resolveAuth, name)
+// runForceUpdate checks the one named container and applies any update, or
+// queued recreate, it finds. It ignores the pre-update gate and dry-run mode
+// for that container.
+func runForceUpdate(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, queue recreateQueue, name string) []UpdateResult {
+	results := checkContainers(ctx, cli, cfg, resolveAuth, name, queue)
 	if len(results) == 0 {
 		log.Printf("force update: no monitored container named %s", name)
 	}
@@ -25,7 +27,7 @@ func runForceUpdate(ctx context.Context, cli DockerClient, cfg Config, resolveAu
 
 // checkContainers checks every monitored container, or only the one named by
 // force. A forced container skips the pre-update gate and dry-run mode.
-func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, force string) []UpdateResult {
+func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveAuth AuthResolver, force string, queue recreateQueue) []UpdateResult {
 	containers, err := listMonitoredContainers(ctx, cli, cfg.Label)
 	if err != nil {
 		log.Printf("error listing containers: %v", err)
@@ -79,8 +81,8 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 		warnings = append(warnings, wellKnownWarnings...)
 		logContainerWarnings(info.Name, warnings)
 
-		drift := checkComposeDrift(ctx, defaultComposeRunner, info, cfg)
-		info.ComposeDrifted = drift.applies()
+		drift := checkComposeDrift(ctx, cli, defaultComposeRunner, info, cfg)
+		info.ComposeRecreateQueued = recreateApproved(queue, info.Name, drift)
 		result := UpdateResult{
 			Container: info,
 			CheckedAt: time.Now(),
@@ -101,6 +103,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			log.Printf("container %s cannot be updated: %s", info.Name, result.Container.Unmonitorable)
 		}
 		result = applyComposeDrift(ctx, cli, defaultComposeRunner, info, cfg, result)
+		settleQueuedRecreate(queue, info.Name, result.Drift)
 
 		results = append(results, result)
 	}
@@ -297,8 +300,8 @@ func updateContainer(ctx context.Context, cli DockerClient, runner composeRunner
 	if sameContainer(info.ID, cfg.SelfContainerID) {
 		return selfUpdate(ctx, cli, info, info.Image)
 	}
-	// A clone of the running config keeps the drift, so a drifted service goes through compose, even on a rolling or git-mode update.
-	if info.ComposeDrifted {
+	// A clone of the running config keeps the drift, so a queued recreate goes through compose, even on a rolling or git-mode update.
+	if info.ComposeRecreateQueued {
 		return recreateViaCompose(ctx, cli, runner, info)
 	}
 	if info.Rolling {
@@ -334,7 +337,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 	// run, the interval tick, and the webhook trigger so all of them behave
 	// identically.
 	runCheck := func() {
-		results := runUpdateCheck(ctx, cli, cfg, resolveAuth)
+		results := runUpdateCheck(ctx, cli, cfg, resolveAuth, store)
 		store.Record(results, time.Now())
 		reportStuck(store.Snapshot(), time.Now(), nil)
 		sendWebhookNotifications(cfg, results)
@@ -354,7 +357,7 @@ func runLoop(ctx context.Context, cli DockerClient, cfg Config, sigCh <-chan os.
 			ticker.Reset(cfg.Interval)
 		case name := <-force:
 			log.Printf("force update requested for %s", name)
-			results := runForceUpdate(ctx, cli, cfg, resolveAuth, name)
+			results := runForceUpdate(ctx, cli, cfg, resolveAuth, store, name)
 			store.RecordContainers(results)
 			sendWebhookNotifications(cfg, results)
 		case sig := <-sigCh:

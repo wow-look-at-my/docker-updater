@@ -27,7 +27,7 @@ func TestRunUpdateCheckNoContainers(t *testing.T) {
 	cli := &mockDocker{}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 	assert.Equal(t, 0, len(results))
 }
 
@@ -40,7 +40,7 @@ func TestRunUpdateCheckListError(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 	assert.Nil(t, results)
 }
 
@@ -75,7 +75,7 @@ func TestRunUpdateCheckImageUpToDate(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
@@ -149,7 +149,7 @@ func TestRunUpdateCheckImageDryRun(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable", DryRun: true}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 
 	require.Equal(t, 1, len(results))
 	assert.True(t, results[0].Updated)
@@ -246,7 +246,7 @@ func TestCheckAndUpdateGitFirstRun(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 
 	require.Equal(t, 1, len(results))
 	assert.False(t, results[0].Updated)
@@ -336,7 +336,7 @@ func TestRunUpdateCheckUnknownMode(t *testing.T) {
 	}
 
 	cfg := Config{Label: "docker-updater.enable"}
-	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), nil)
 	// The result carries the verdict rather than vanishing: a container the cycle drops has no status.
 	require.Equal(t, 1, len(results))
 	assert.Equal(t, `unknown update mode "unknown"`, results[0].Container.Unmonitorable)

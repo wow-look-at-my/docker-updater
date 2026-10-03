@@ -51,6 +51,8 @@ interface ApiContainer {
   log_excerpt?: string;
   // Set when the running config no longer matches the compose file, or when nothing could compare them.
   compose_drift?: ApiComposeDrift;
+  // When an operator queued a recreate from the compose file. Absent when none is queued.
+  recreate_queued?: string | null;
 }
 
 // ApiComposeDrift mirrors ComposeDrift in compose_drift.go.
@@ -64,6 +66,16 @@ interface ApiComposeDrift {
   error?: string;
   // Why the updater cannot apply the file itself. The operator must run command.
   blocked?: string;
+  // The fields where the file and the container disagree, or why they could not be listed.
+  differences?: ApiComposeDifference[];
+  differences_error?: string;
+}
+
+// ApiComposeDifference mirrors ComposeDifference in compose_diff.go.
+interface ApiComposeDifference {
+  field: string;
+  file: string;
+  container: string;
 }
 
 // ApiResponse mirrors apiResponse in dashboard.go (the payload of /api/containers).
@@ -241,7 +253,13 @@ function stuckPrefix(c: ApiContainer): string {
   return "STUCK" + (since ? " " + since : "") + " (" + c.stuck_cycles + " cycles) · ";
 }
 
-function upstreamView(c: ApiContainer): UpstreamView {
+// recreateWaits says what holds a queued recreate back. Dry-run mode holds every one until it is forced.
+function recreateWaits(c: ApiContainer, dryRun: boolean): string {
+  if (c.error || c.skipped) return heldBackReason(c);
+  return dryRun ? "dry-run — not applied" : "waits for the next check";
+}
+
+function upstreamView(c: ApiContainer, dryRun: boolean): UpstreamView {
   // This updater never checks a watchtower container, so it has no verdict to
   // give.
   if (!c.auto_update && watchtowerOwns(c)) {
@@ -264,9 +282,12 @@ function upstreamView(c: ApiContainer): UpstreamView {
     const reason = heldBackReason(c);
     return { cls: "up-available", status: "update available", detail: stuckPrefix(c) + (detail ? detail + " · " + reason : reason) };
   }
-  // The image is current, but the compose file changed: the recreate that applies it is held back.
+  // The image is current, but the compose file changed. Nothing applies it until an operator queues a recreate.
   if (outOfSync(c)) {
-    return { cls: "up-drift", status: "out of sync", detail: stuckPrefix(c) + "compose file changed · " + heldBackReason(c) };
+    if (!c.recreate_queued) {
+      return { cls: "up-drift", status: "out of sync", detail: "compose file changed · not applied until a recreate is queued" };
+    }
+    return { cls: "up-drift", status: "recreate queued", detail: stuckPrefix(c) + "queued " + (fmtRelative(c.recreate_queued) || "") + " · " + recreateWaits(c, dryRun) };
   }
   // Errored with no newer ref detected: a plain failure, not a pending update.
   if (c.error) return { cls: "up-error", status: "error", detail: stuckPrefix(c) + c.error };
@@ -283,15 +304,35 @@ function commitLink(sha: string, url?: string): HTMLElement {
   return el("a", { class: "cref commit", href: url, target: "_blank", rel: "noopener", title: sha }, short);
 }
 
+// differenceLines lists a drift's differences as "field: container → file".
+function differenceLines(d: ApiComposeDrift): string[] {
+  if (d.differences_error) return ["differences unavailable: " + d.differences_error];
+  const diffs = d.differences || [];
+  if (diffs.length === 0) {
+    return ["no difference in the fields this view compares. Compare `docker compose config " + d.service + "` with `docker inspect`"];
+  }
+  return diffs.map((x) => x.field + ": " + x.container + " → " + x.file);
+}
+
+// recreateWhatText names the file and its differences: the change the operator is about to approve.
+function recreateWhatText(d: ApiComposeDrift): string {
+  return "\nservice " + d.service + " in " + d.config_files.join(", ") +
+    "\n\nThe file changes (container → file):\n" + differenceLines(d).map((l) => "  " + l).join("\n");
+}
+
+// queueConfirmText is the question the recreate button asks first.
+function queueConfirmText(c: ApiContainer, d: ApiComposeDrift): string {
+  return "Queue a recreate of " + c.name + " from its compose file?" + recreateWhatText(d) +
+    "\n\nIt runs at the next check, and waits for the pre-update check and dry-run mode like an update. " +
+    "The file replaces the container's config, mounts included, and compose cannot restore the old one.";
+}
+
 // forceConfirmText is the question the force button asks first. It names the
 // gate the action skips, because that gate is the reason it waits.
 function forceConfirmText(c: ApiContainer): string {
   if (!pending(c) && c.compose_drift) {
-    const d = c.compose_drift;
-    return "Recreate " + c.name + " from its compose file now?" +
-      "\nservice " + d.service + " in " + d.config_files.join(", ") +
-      "\nthe file hashes to " + (d.file_hash || "?").slice(0, 12) + ", the container runs " + (d.running_hash || "?").slice(0, 12) +
-      "\n\nHeld back by: " + heldBackReason(c) +
+    return "Recreate " + c.name + " from its compose file now?" + recreateWhatText(c.compose_drift) +
+      "\n\nHeld back by: " + recreateWaits(c, Boolean(latestData && latestData.dry_run)) +
       "\n\nThe recreate skips the pre-update check and dry-run mode. The file replaces the container's config, mounts included, and compose cannot restore the old one.";
   }
   const refs = c.current_ref || c.available_ref
@@ -320,13 +361,32 @@ async function onForceUpdate(c: ApiContainer): Promise<void> {
   repaint();
 }
 
-// forceButton applies a held-back update, or a held-back recreate from the
+// onRecreate queues (POST) or cancels (DELETE) a recreate from the compose
+// file, then polls at once so the row shows the server's new state.
+async function onRecreate(c: ApiContainer, method: "POST" | "DELETE"): Promise<void> {
+  if (method === "POST" && c.compose_drift && !window.confirm(queueConfirmText(c, c.compose_drift))) return;
+  recreateRequests[c.name] = method === "POST" ? "queuing…" : "cancelling…";
+  repaint();
+  try {
+    const res = await fetch("api/recreate?container=" + encodeURIComponent(c.name), {
+      method,
+      headers: { "X-Docker-Updater-Action": "recreate" },
+    });
+    if (res.ok) delete recreateRequests[c.name];
+    else recreateRequests[c.name] = "failed: HTTP " + res.status + ": " + (await res.text()).trim();
+  } catch (err) {
+    recreateRequests[c.name] = "failed: " + String(err);
+  }
+  await refresh();
+}
+
+// forceButton applies a held-back update, or a queued recreate from the
 // compose file, now. While a request is in flight or queued, the button shows
 // that state and does nothing.
 function forceButton(c: ApiContainer, ui: UiState): HTMLElement {
   const status = ui.force_requests[c.name];
   const busy = status === "queuing…" || status === "queued";
-  // An update applies the compose file too, so only a drift with no update behind it gets the recreate button.
+  // An update applies a queued recreate too, so only a drift with no update behind it gets the recreate button.
   const recreate = !pending(c);
   const btn = el("button", {
     class: recreate ? "copy-btn force-btn force-btn-drift" : "copy-btn force-btn",
@@ -340,13 +400,44 @@ function forceButton(c: ApiContainer, ui: UiState): HTMLElement {
     ev.stopPropagation();
     void onForceUpdate(c);
   });
-  const out: HTMLElement[] = [btn];
-  if (status && !busy) out.push(el("div", { class: "detail up-error" }, status));
-  return el("div", { class: "force" }, ...out);
+  return btn;
 }
 
-function upstreamCell(c: ApiContainer, ui: UiState): HTMLElement {
-  const view = upstreamView(c);
+// recreateButton is the drift row's own button: "recreate" queues one, and "cancel" drops a queued one.
+function recreateButton(c: ApiContainer, ui: UiState, method: "POST" | "DELETE"): HTMLElement {
+  const status = ui.recreate_requests[c.name];
+  const busy = status === "queuing…" || status === "cancelling…";
+  const btn = el("button", {
+    class: method === "POST" ? "copy-btn force-btn force-btn-drift recreate-btn" : "copy-btn cancel-btn",
+    type: "button",
+    title: method === "POST"
+      ? "Queue a recreate from the compose file. It runs at the next check, past the same gates as an update. Asks first."
+      : "Drop the queued recreate. The container keeps its config.",
+    disabled: busy ? "" : null,
+  }, busy ? status : method === "POST" ? "recreate" : "cancel");
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void onRecreate(c, method);
+  });
+  return btn;
+}
+
+// actionButtons are the Upstream cell's buttons, and the failure of the last request one of them sent.
+function actionButtons(c: ApiContainer, ui: UiState): HTMLElement[] {
+  const buttons: HTMLElement[] = [];
+  if (pending(c) || queuedRecreate(c)) buttons.push(forceButton(c, ui));
+  if (queuedRecreate(c)) buttons.push(recreateButton(c, ui, "DELETE"));
+  else if (outOfSync(c)) buttons.push(recreateButton(c, ui, "POST"));
+  if (buttons.length === 0) return [];
+  const out: HTMLElement[] = [el("div", { class: "actions" }, ...buttons)];
+  for (const status of [ui.force_requests[c.name], ui.recreate_requests[c.name]]) {
+    if (status && status.startsWith("failed")) out.push(el("div", { class: "detail up-error" }, status));
+  }
+  return [el("div", { class: "force" }, ...out)];
+}
+
+function upstreamCell(c: ApiContainer, ui: UiState, dryRun: boolean): HTMLElement {
+  const view = upstreamView(c, dryRun);
   const td = el("td", null, el("span", { class: view.cls }, view.status));
   if (view.detail) td.appendChild(el("div", { class: "detail" }, view.detail));
   // The digests above say an update exists. The commits say what is in it.
@@ -357,20 +448,25 @@ function upstreamCell(c: ApiContainer, ui: UiState): HTMLElement {
       commitLink(c.available_commit, c.available_commit_url),
     ));
   }
-  if (forceable(c)) td.appendChild(forceButton(c, ui));
+  for (const node of actionButtons(c, ui)) td.appendChild(node);
   return td;
 }
 
 // driftApplies mirrors ComposeDrift.applies in compose_drift.go: the updater
-// recreates this container from its compose file.
+// can recreate this container.
 function driftApplies(d: ApiComposeDrift | undefined): boolean {
   return Boolean(d && d.state === "drift" && !d.blocked);
 }
 
-// outOfSync reports a monitored container whose compose file changed, with
-// the recreate that applies it held back and no image update pending.
+// outOfSync reports a monitored container whose compose file changed, with no
+// image update pending.
 function outOfSync(c: ApiContainer): boolean {
   return Boolean(c.auto_update && !c.update_available && driftApplies(c.compose_drift));
+}
+
+// queuedRecreate reports an out-of-sync container whose recreate an operator queued.
+function queuedRecreate(c: ApiContainer): boolean {
+  return outOfSync(c) && Boolean(c.recreate_queued);
 }
 
 // errored is the exact predicate behind the "errors" card: a monitored
@@ -391,7 +487,7 @@ function driftText(d: ApiComposeDrift): string {
   const what = "drifted from compose file: " + where + " hashes to " + (d.file_hash || "?").slice(0, 12) +
     ", the container runs " + (d.running_hash || "?").slice(0, 12);
   if (d.blocked) return what + ". " + d.blocked + ". Apply the file: " + d.command;
-  return what + ". The updater recreates it from the file";
+  return what + ". Queue a recreate to apply the file";
 }
 
 // errorReport renders every current error as plain text for pasting into an
@@ -435,6 +531,10 @@ interface UiState {
   error_banner: string | null;
   // The state of each force-update request this page sent, by container name: in flight, queued, or the failure.
   force_requests: Record<string, string>;
+  // The state of each recreate queue or cancel request this page sent, by container name: in flight, or the failure.
+  recreate_requests: Record<string, string>;
+  // The containers whose list of compose differences is open.
+  drift_open: Record<string, boolean>;
 }
 
 type DashboardState = ApiResponse & { ui: UiState };
@@ -529,9 +629,9 @@ function pending(c: ApiContainer): boolean {
   return Boolean(c.auto_update && c.update_available);
 }
 
-// forceable is a held-back update or a held-back recreate from the compose
-// file.
-function forceable(c: ApiContainer): boolean {
+// needsAction is a held-back update or a container out of sync with its
+// compose file: the exact condition the "updates pending" card counts.
+function needsAction(c: ApiContainer): boolean {
   return pending(c) || outOfSync(c);
 }
 
@@ -635,12 +735,33 @@ function warningLines(c: ApiContainer): HTMLElement[] {
 }
 
 // driftLine renders a compose drift under the container's name. It is red when
-// only the operator can apply the file, and purple when the updater does.
-function driftLine(c: ApiContainer): HTMLElement[] {
-  if (!c.compose_drift) return [];
-  const text = driftText(c.compose_drift);
-  if (driftApplies(c.compose_drift)) return [el("div", { class: "drift drift-applies", title: text }, "↻ " + text)];
-  return [el("div", { class: "drift", title: text }, "✖ " + text)];
+// only the operator can apply the file, and purple when a recreate can. A found
+// drift carries a toggle that lists what differs.
+function driftLine(c: ApiContainer, ui: UiState): HTMLElement[] {
+  const d = c.compose_drift;
+  if (!d) return [];
+  const text = driftText(d);
+  const line = driftApplies(d)
+    ? el("div", { class: "drift drift-applies", title: text }, "↻ " + text)
+    : el("div", { class: "drift", title: text }, "✖ " + text);
+  if (d.state !== "drift") return [line];
+
+  const open = Boolean(ui.drift_open[c.name]);
+  const n = (d.differences || []).length;
+  const toggle = el("button", { class: "logs-link diff-toggle", type: "button", title: "What the compose file changes" },
+    open ? "hide differences" : "show " + (n === 1 ? "1 difference" : n + " differences"));
+  toggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    if (driftOpen[c.name]) delete driftOpen[c.name];
+    else driftOpen[c.name] = true;
+    repaint();
+  });
+  line.appendChild(toggle);
+  if (!open) return [line];
+  const list = el("ul", { class: "drift-diff" },
+    el("li", { class: "drift-diff-head" }, "container → file"),
+    ...differenceLines(d).map((l) => el("li", null, l)));
+  return [line, list];
 }
 
 // logsLink opens the container's own output. A container in a restart loop
@@ -662,7 +783,7 @@ function reasonLine(c: ApiContainer): HTMLElement[] {
   return [el("div", { class: "log-excerpt", title: c.log_excerpt }, c.log_excerpt)];
 }
 
-function row(c: ApiContainer, ui: UiState): HTMLElement {
+function row(c: ApiContainer, ui: UiState, dryRun: boolean): HTMLElement {
   const nameCell = el("td", null,
     el("span", { class: "cname" }, c.name || "—"),
     logsLink(c),
@@ -673,7 +794,7 @@ function row(c: ApiContainer, ui: UiState): HTMLElement {
       c.commit ? " · " : null,
       c.commit ? commitLink(c.commit, c.commit_url) : null,
     ),
-    ...driftLine(c),
+    ...driftLine(c, ui),
     ...warningLines(c),
     ...reasonLine(c),
   );
@@ -690,7 +811,7 @@ function row(c: ApiContainer, ui: UiState): HTMLElement {
     el("td", { class: uptime ? null : "up-na" }, uptime || "—"),
     restartsCell(c),
     el("td", { class: lastPulled === "—" ? "up-na" : null }, lastPulled),
-    upstreamCell(c, ui),
+    upstreamCell(c, ui, dryRun),
   );
   // Inline style so the alpha can fade with age.
   if (highlight) tr.style.background = highlight.background;
@@ -713,7 +834,7 @@ function render(state: DashboardState): void {
 
   // The summary cards are fleet totals: computed over every container, never narrowed by the search filter.
   const managed = containers.filter(isManaged).length;
-  const updates = containers.filter(forceable).length;
+  const updates = containers.filter(needsAction).length;
   const errors = errorCount(data);
 
   setText("stat-total", containers.length);
@@ -765,7 +886,7 @@ function render(state: DashboardState): void {
   // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
-    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map((c) => row(c, ui)));
+    document.getElementById(g.id + "-rows")!.replaceChildren(...members.map((c) => row(c, ui, data.dry_run)));
     document.getElementById(g.id + "-summary")!.textContent = g.label + " (" + members.length + ")";
     const section = document.getElementById(g.id) as HTMLDetailsElement;
     section.classList.toggle("hidden", members.length === 0);
@@ -785,6 +906,8 @@ function render(state: DashboardState): void {
 let latestData: ApiResponse | null = null;
 let pollFailure: string | null = null;
 let forceRequests: Record<string, string> = {};
+let recreateRequests: Record<string, string> = {};
+let driftOpen: Record<string, boolean> = {};
 
 // currentState is the object the page was last drawn from, and the one the copy button serializes.
 let currentState: DashboardState | null = null;
@@ -808,6 +931,8 @@ function repaint(): void {
       expanded: expandedGroups(),
       error_banner: pollFailure,
       force_requests: { ...forceRequests },
+      recreate_requests: { ...recreateRequests },
+      drift_open: { ...driftOpen },
     },
     ...latestData,
   };
@@ -833,8 +958,12 @@ async function refresh(): Promise<void> {
     if (!resp.ok) throw new Error("HTTP " + resp.status + ": " + (await resp.text()));
     latestData = (await resp.json()) as ApiResponse;
     pollFailure = null;
-    const stillPending = new Set((latestData.containers || []).filter(forceable).map((c) => c.name));
+    const containers = latestData.containers || [];
+    const stillPending = new Set(containers.filter((c) => pending(c) || queuedRecreate(c)).map((c) => c.name));
     forceRequests = Object.fromEntries(Object.entries(forceRequests).filter(([name]) => stillPending.has(name)));
+    const stillDrifted = new Set(containers.filter((c) => c.compose_drift).map((c) => c.name));
+    recreateRequests = Object.fromEntries(Object.entries(recreateRequests).filter(([name]) => stillDrifted.has(name)));
+    driftOpen = Object.fromEntries(Object.entries(driftOpen).filter(([name]) => stillDrifted.has(name)));
   } catch (err) {
     pollFailure = isNullElementError(err)
       ? OUT_OF_SYNC_HINT

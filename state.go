@@ -51,17 +51,55 @@ func (s ContainerStatus) Stuck() bool { return s.StuckCycles > 1 }
 type Store struct {
 	mu        sync.RWMutex
 	statuses  map[string]ContainerStatus
+	recreates map[string]QueuedRecreate
 	lastCycle time.Time
+}
+
+// QueuedRecreate is a recreate from the compose file that an operator asked
+// for.
+type QueuedRecreate struct {
+	FileHash string
+	At       time.Time
 }
 
 // Snapshot is an immutable copy of the store's state for a reader.
 type Snapshot struct {
 	Statuses  map[string]ContainerStatus
+	Recreates map[string]QueuedRecreate
 	LastCycle time.Time
 }
 
 func newStore() *Store {
-	return &Store{statuses: make(map[string]ContainerStatus)}
+	return &Store{statuses: make(map[string]ContainerStatus), recreates: make(map[string]QueuedRecreate)}
+}
+
+// QueueRecreate queues a recreate of the named container from the compose file that hashes to fileHash.
+func (s *Store) QueueRecreate(name, fileHash string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recreates[name] = QueuedRecreate{FileHash: fileHash, At: at}
+}
+
+// QueuedRecreate returns the file hash of the named container's queued recreate.
+func (s *Store) QueuedRecreate(name string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	q, ok := s.recreates[name]
+	return q.FileHash, ok
+}
+
+// DropRecreate removes the named container's queued recreate.
+func (s *Store) DropRecreate(name string) {
+	s.CancelRecreate(name)
+}
+
+// CancelRecreate removes the named container's queued recreate and reports whether one was queued.
+func (s *Store) CancelRecreate(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.recreates[name]
+	delete(s.recreates, name)
+	return ok
 }
 
 // Record folds a cycle's update results into the store.
@@ -159,7 +197,11 @@ func (s *Store) Snapshot() Snapshot {
 	for k, v := range s.statuses {
 		statuses[k] = v
 	}
-	return Snapshot{Statuses: statuses, LastCycle: s.lastCycle}
+	recreates := make(map[string]QueuedRecreate, len(s.recreates))
+	for k, v := range s.recreates {
+		recreates[k] = v
+	}
+	return Snapshot{Statuses: statuses, Recreates: recreates, LastCycle: s.lastCycle}
 }
 
 // shortRef trims the digest algorithm prefix and shortens a digest or commit

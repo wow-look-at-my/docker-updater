@@ -118,6 +118,8 @@ body {
 /* The force-update button sits under a held-back update's detail lines. */
 .force { margin-top: 6px; }
 .force-btn:hover:not(:disabled) { border-color: var(--amber); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cancel-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 /* A recreate from the compose file is purple, apart from an image update's amber. */
 .force-btn-drift { color: var(--purple); border-color: rgba(188,140,255,0.45); }
 .force-btn-drift:hover:not(:disabled) { border-color: var(--purple); color: var(--purple); }
@@ -219,6 +221,15 @@ a.commit:hover { color: var(--accent); text-decoration: underline; }
    when the updater recreates the container from it. */
 .drift { color: var(--red); }
 .drift-applies { color: var(--purple); }
+/* The toggle and the list of differences are monospace facts, not prose. */
+.diff-toggle { color: inherit; text-decoration: underline dotted; }
+.drift-diff {
+  margin: 4px 0 0; padding: 6px 8px 6px 22px; max-width: 420px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  word-break: break-word; white-space: normal;
+}
+.drift-diff-head { list-style: none; margin-left: -14px; color: var(--text-dim); }
 
 /* The last line a failing container logged, under its name. Red because it is
    the container's own account of why it is not running, not a config note. */

@@ -50,7 +50,7 @@ func TestComposeDriftMatchingHashReportsNothing(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: runningConfigHash}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), runner, rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
 	})
 
 	assert.Nil(t, d)
@@ -69,7 +69,7 @@ func TestComposeDriftDifferentHashReportsDrift(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: fileConfigHash}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), runner, rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
 	})
 
 	require.NotNil(t, d)
@@ -85,8 +85,9 @@ func TestComposeDriftDifferentHashReportsDrift(t *testing.T) {
 
 	assert.Contains(t, logged, "container github-state-mirror: drifted from its compose file")
 	assert.Contains(t, logged, "service github-state-mirror in "+mirrorComposeFile)
-	assert.Contains(t, logged, "The updater recreates it from the file")
-	assert.NotContains(t, logged, "ERROR", "a drift the updater applies is pending work, not a failure")
+	assert.Contains(t, logged, "Queue a recreate on the dashboard to apply the file")
+	assert.NotContains(t, logged, "ERROR", "a drift the operator can queue is pending work, not a failure")
+	assert.NotEmpty(t, d.DifferencesError, "an empty compose config names no service, and the drift says so")
 
 	assert.Zero(t, runner.upNoDepsCalls, "the check alone must not recreate anything")
 }
@@ -100,7 +101,7 @@ func TestComposeDriftOnSelfIsBlocked(t *testing.T) {
 	info.Rolling = false
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), runner, info, Config{SelfContainerID: info.ID})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,info, Config{SelfContainerID: info.ID})
 	})
 
 	require.NotNil(t, d)
@@ -116,7 +117,7 @@ func TestComposeDriftHashErrorIsUnknownNotClean(t *testing.T) {
 	runner := &fakeComposeRunner{configHashErr: errors.New("compose file /srv/mirror/compose.yml: permission denied")}
 	var d *ComposeDrift
 	logged := captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), runner, rollingComposeInfo(), Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,rollingComposeInfo(), Config{})
 	})
 
 	require.NotNil(t, d, "a failed comparison must never read as no drift")
@@ -134,7 +135,7 @@ func TestComposeDriftMissingHashLabelIsUnknown(t *testing.T) {
 	runner := &fakeComposeRunner{configHash: fileConfigHash}
 	var d *ComposeDrift
 	captureLog(t, func() {
-		d = checkComposeDrift(context.Background(), runner, info, Config{})
+		d = checkComposeDrift(context.Background(), &mockDocker{}, runner,info, Config{})
 	})
 
 	require.NotNil(t, d)
@@ -175,7 +176,7 @@ func TestComposeDriftScope(t *testing.T) {
 			runner := &fakeComposeRunner{configHash: fileConfigHash}
 			var d *ComposeDrift
 			captureLog(t, func() {
-				d = checkComposeDrift(context.Background(), runner, tc.info, tc.cfg)
+				d = checkComposeDrift(context.Background(), &mockDocker{}, runner,tc.info, tc.cfg)
 			})
 			if tc.checked {
 				assert.Len(t, runner.configHashTargets, 1)
@@ -190,7 +191,7 @@ func TestComposeDriftScope(t *testing.T) {
 
 // driftCycle runs one regular cycle over a rolling compose container whose
 // file drifted and whose image is current.
-func driftCycle(t *testing.T, cfg Config) ([]UpdateResult, *fakeComposeRunner) {
+func driftCycle(t *testing.T, cfg Config, queue recreateQueue) ([]UpdateResult, *fakeComposeRunner) {
 	t.Helper()
 	runner := &fakeComposeRunner{configHash: fileConfigHash}
 	saved := defaultComposeRunner
@@ -236,17 +237,34 @@ func driftCycle(t *testing.T, cfg Config) ([]UpdateResult, *fakeComposeRunner) {
 	cfg.Label = "docker-updater.enable"
 	var results []UpdateResult
 	captureLog(t, func() {
-		results = runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil))
+		results = runUpdateCheck(context.Background(), cli, cfg, newAuthResolver(nil), queue)
 	})
 	require.Len(t, results, 1)
 	return results, runner
 }
 
-// A drift with no image update behind it recreates the container from its
-// file, as an update would. The rolling clone never runs: it would keep the drift.
-func TestRunUpdateCheckRecreatesADriftedContainer(t *testing.T) {
+// A drift nobody queued is only reported: the operator decides.
+func TestRunUpdateCheckLeavesAnUnqueuedDrift(t *testing.T) {
 	t.Serial()
-	results, runner := driftCycle(t, Config{})
+	results, runner := driftCycle(t, Config{}, newStore())
+
+	r := results[0]
+	require.NoError(t, r.Error)
+	assert.False(t, r.Updated)
+	assert.False(t, r.Resync)
+	require.NotNil(t, r.Drift)
+	assert.True(t, r.Drift.applies())
+	assert.Zero(t, runner.upNoDepsCalls, "a drift must not be applied until an operator queues it")
+}
+
+// A queued recreate with no image update behind it recreates the container
+// from its file, as an update would. The rolling clone never runs: it would
+// keep the drift.
+func TestRunUpdateCheckRecreatesAQueuedDrift(t *testing.T) {
+	t.Serial()
+	queue := newStore()
+	queue.QueueRecreate("github-state-mirror", fileConfigHash, time.Now())
+	results, runner := driftCycle(t, Config{}, queue)
 
 	r := results[0]
 	require.NoError(t, r.Error)
@@ -257,20 +275,38 @@ func TestRunUpdateCheckRecreatesADriftedContainer(t *testing.T) {
 	require.Equal(t, 1, runner.upNoDepsCalls, "the file applies through compose")
 	assert.Equal(t, []string{"github-state-mirror"}, runner.upNoDepsServices)
 	assert.Zero(t, runner.upCalls, "dependencies must not be recreated")
+	_, still := queue.QueuedRecreate("github-state-mirror")
+	assert.False(t, still, "a done recreate leaves the queue")
 
-	store := newStore()
-	store.Record(results, time.Now())
-	st := store.Snapshot().Statuses["github-state-mirror"]
+	queue.Record(results, time.Now())
+	st := queue.Snapshot().Statuses["github-state-mirror"]
 	assert.False(t, st.UpdateAvailable)
 	assert.Nil(t, st.Drift)
 	assert.False(t, st.LastUpdated.IsZero(), "the row shows the recreate like an applied update")
 }
 
-// Dry-run holds a drift recreate back like an update, and the row keeps the
-// drift so the force button can apply it.
-func TestRunUpdateCheckDryRunHoldsTheDrift(t *testing.T) {
+// The operator approved one file. A file that changed again after that is a
+// different change, so the queued recreate is dropped, not applied.
+func TestRunUpdateCheckDropsARecreateQueuedForAnOlderFile(t *testing.T) {
 	t.Serial()
-	results, runner := driftCycle(t, Config{DryRun: true})
+	queue := newStore()
+	queue.QueueRecreate("github-state-mirror", "an-older-file-hash", time.Now())
+	results, runner := driftCycle(t, Config{}, queue)
+
+	assert.False(t, results[0].Updated)
+	assert.NotNil(t, results[0].Drift)
+	assert.Zero(t, runner.upNoDepsCalls)
+	_, still := queue.QueuedRecreate("github-state-mirror")
+	assert.False(t, still)
+}
+
+// Dry-run holds a queued recreate back like an update, and the queue keeps it
+// so the force button can apply it.
+func TestRunUpdateCheckDryRunHoldsTheQueuedRecreate(t *testing.T) {
+	t.Serial()
+	queue := newStore()
+	queue.QueueRecreate("github-state-mirror", fileConfigHash, time.Now())
+	results, runner := driftCycle(t, Config{DryRun: true}, queue)
 
 	r := results[0]
 	assert.True(t, r.Updated)
@@ -278,12 +314,20 @@ func TestRunUpdateCheckDryRunHoldsTheDrift(t *testing.T) {
 	assert.True(t, r.Resync)
 	require.NotNil(t, r.Drift)
 	assert.Zero(t, runner.upNoDepsCalls, "dry-run must change nothing")
+	_, still := queue.QueuedRecreate("github-state-mirror")
+	assert.True(t, still)
 
-	store := newStore()
-	store.Record(results, time.Now())
-	st := store.Snapshot().Statuses["github-state-mirror"]
-	assert.False(t, st.UpdateAvailable, "a held drift is not an image update")
+	queue.Record(results, time.Now())
+	st := queue.Snapshot().Statuses["github-state-mirror"]
+	assert.False(t, st.UpdateAvailable, "a held recreate is not an image update")
 	assert.True(t, st.Drift.applies())
+}
+
+// queuedInfo is a compose service with a queued recreate.
+func queuedInfo() ContainerInfo {
+	info := composeServiceInfo()
+	info.ComposeRecreateQueued = true
+	return info
 }
 
 // The pre-update gate holds a drift recreate exactly as it holds an update.
@@ -292,7 +336,7 @@ func TestApplyComposeDriftAsksThePreCheck(t *testing.T) {
 		http.Error(w, "busy", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(gate.Close)
-	info := composeServiceInfo()
+	info := queuedInfo()
 	info.PreCheckURL = gate.URL
 	info.PreCheckTimeout = time.Second
 	runner := &fakeComposeRunner{}
@@ -318,7 +362,7 @@ func TestApplyComposeDriftAsksThePreCheck(t *testing.T) {
 // Compose keeps no copy of the config, so an unhealthy recreate fails loudly
 // and does not claim a rollback.
 func TestApplyComposeDriftUnhealthyFailsWithoutRollbackClaim(t *testing.T) {
-	info := composeServiceInfo()
+	info := queuedInfo()
 	runner := &fakeComposeRunner{}
 
 	var r UpdateResult
@@ -338,12 +382,13 @@ func TestApplyComposeDriftUnhealthyFailsWithoutRollbackClaim(t *testing.T) {
 
 func TestApplyComposeDriftLeavesOtherOutcomesAlone(t *testing.T) {
 	drift := &ComposeDrift{State: driftFound}
-	info := composeServiceInfo()
+	info := queuedInfo()
 	cases := []struct {
 		name      string
 		in        UpdateResult
 		wantDrift bool
 	}{
+		{"not queued", UpdateResult{Container: composeServiceInfo(), Drift: drift}, true},
 		{"no drift", UpdateResult{Container: info}, false},
 		{"unknown drift", UpdateResult{Container: info, Drift: &ComposeDrift{State: driftUnknown}}, true},
 		{"blocked drift", UpdateResult{Container: info, Drift: &ComposeDrift{State: driftFound, Blocked: selfDriftBlocked}}, true},
@@ -354,7 +399,7 @@ func TestApplyComposeDriftLeavesOtherOutcomesAlone(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &fakeComposeRunner{}
-			r := applyComposeDrift(context.Background(), composeDocker("healthy"), runner, info, Config{}, tc.in)
+			r := applyComposeDrift(context.Background(), composeDocker("healthy"), runner, tc.in.Container, Config{}, tc.in)
 			assert.Zero(t, runner.upNoDepsCalls)
 			assert.False(t, r.Resync)
 			assert.Equal(t, tc.wantDrift, r.Drift != nil)
@@ -362,21 +407,40 @@ func TestApplyComposeDriftLeavesOtherOutcomesAlone(t *testing.T) {
 	}
 }
 
-// An update of a drifted service goes through compose, so the file applies
-// with the new image. A rolling clone would keep the drift.
-func TestUpdateContainerTakesADriftedRollingServiceThroughCompose(t *testing.T) {
+// An update of a service with a queued recreate goes through compose, so the
+// file applies with the new image. A rolling clone would keep the drift.
+func TestUpdateContainerTakesAQueuedRollingServiceThroughCompose(t *testing.T) {
+	cli := composeDocker("healthy")
+	var creates []string
+	recordCreates(cli, &creates)
+	runner := &fakeComposeRunner{}
+	info := queuedInfo()
+	info.Rolling = true
+
+	require.NoError(t, updateContainer(context.Background(), cli, runner, info, Config{}))
+
+	assert.Empty(t, creates, "a queued service must not be cloned from its old config")
+	assert.Equal(t, 1, runner.upNoDepsCalls)
+}
+
+// Without a queued recreate a rolling update stays rolling, and the drift stays for the operator.
+func TestUpdateContainerKeepsAnUnqueuedRollingServiceRolling(t *testing.T) {
+	saved := aliasSettleDelay
+	aliasSettleDelay = 0
+	t.Cleanup(func() { aliasSettleDelay = saved })
 	cli := composeDocker("healthy")
 	var creates []string
 	recordCreates(cli, &creates)
 	runner := &fakeComposeRunner{}
 	info := composeServiceInfo()
 	info.Rolling = true
-	info.ComposeDrifted = true
 
-	require.NoError(t, updateContainer(context.Background(), cli, runner, info, Config{}))
+	captureLog(t, func() {
+		_ = updateContainer(context.Background(), cli, runner, info, Config{})
+	})
 
-	assert.Empty(t, creates, "a drifted service must not be cloned from its old config")
-	assert.Equal(t, 1, runner.upNoDepsCalls)
+	assert.Equal(t, []string{rollingNextName(info.Name)}, creates)
+	assert.Zero(t, runner.upNoDepsCalls)
 }
 
 // The dashboard row carries the drift, so it is visible without the logs.

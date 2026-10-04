@@ -24,7 +24,7 @@ jobs:
           node-version: '22'
       - uses: wow-look-at-my/go-toolchain@master
         with:
-          generate: 86bbd283414e
+          generate: 3c60da638b28
 
   dashboard:
     runs-on: ubuntu-latest
@@ -35,13 +35,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # 22 for native TypeScript type stripping: snapshot.test.mts runs as authored, with no build step.
           node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y just
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
+      - run: just typecheck
+      - run: just build
       # Runs against the compiled dashboard.js, not source nobody ships.
-      - run: npm test
+      - run: just test
 
   # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:
@@ -63,7 +63,7 @@ jobs:
       - run: docker build -t docker-updater:ci .
       - env:
           DU_IMAGE: docker-updater:ci
-        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+        run: sh "${{ runner.temp }}/dats" --no-sandbox -v test test/dats/image.dats
 
   publish-ghcr:
     needs: [test, image-e2e]

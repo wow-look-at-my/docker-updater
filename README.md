@@ -10,7 +10,9 @@ docker-updater keeps running containers on their newest build. It watches the co
 
 ## What a replacement does
 
-The updater creates the new container from the old one's configuration, with the new image. It first clears the values the old image supplied, so the new image supplies its own. A rolling update starts the replacement beside the old container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed. The previous image comes back.
+The updater creates the new container from the one's configuration, with the new image. It first clears the values the image supplied, so the new image supplies its own. A rolling update starts the replacement beside the container. The service alias moves only after the replacement reports healthy. A replacement that fails its health check is removed. The image comes back.
+
+A compose service in image mode is recreated through `docker compose up -d --no-deps`. As a result, the compose file applies. Each check also compares every compose container with its file. The dashboard marks a container that drifted from its file as out of sync and lists the differences. Its `recreate` button queues a recreate from the file, which then waits for the same gates as an update. Depth: `docs/compose-drift.md`.
 
 An image can ask for `--security-opt` values with the label `docker-updater.security-opt` (space-separated). The replacement gets the missing ones, and they persist. Only a container that binds the Docker socket gets them: it is already root on the host.
 
@@ -18,7 +20,7 @@ An image can ask for `--security-opt` values with the label `docker-updater.secu
 
 Put the label `docker-updater.enable=true` on each container to monitor. The server reads the rest of its configuration from environment variables. Run the binary with no arguments to start the update loop and the dashboard.
 
-The dashboard is read only. It lists every container on this host, its update state, and any error from the last cycle. Put it behind a reverse proxy with access control.
+The dashboard lists every container on this host, its update state, and any error from the last cycle. A held-back update has a "force update" button: after a confirmation, it applies the update past the pre-check and dry-run mode. Put the dashboard behind a reverse proxy with access control.
 
 Set `DOCKER_UPDATER_STATS_URL` to the base URL of a [simple-stats-api](https://github.com/wow-look-at-my/simple-stats-api) instance to get resource graphs. The top bar shows host cpu, ram, disk, net and gpu. Every container row gets the same gauges for that container. The browser polls that API directly. It must be reachable from the browser. It needs the Docker socket mounted for the per-container figures. Without the variable the top bar says no stats source is configured. docker-updater measures nothing itself.
 

@@ -34,9 +34,7 @@ func runHTTPCheck(ctx context.Context, info ContainerInfo) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		// The standard pre-update endpoint is optional and discovered, not
-		// declared: an unreachable container means "nothing to ask", never
-		// "hold every update forever". A URL the operator configured by label
-		// is a declared gate, so its failure still blocks.
+		// declared: an unreachable container means "nothing to ask".
 		if info.PreCheckStandard {
 			return nil
 		}

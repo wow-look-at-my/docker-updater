@@ -131,8 +131,7 @@ func TestLoadConfigGitHubWebhookRequiresSecret(t *testing.T) {
 	t.Setenv("DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR", ":9000")
 	t.Setenv("DOCKER_UPDATER_GITHUB_WEBHOOK_SECRET", "")
 
-	// Enabling a public webhook without a secret must be a hard error rather
-	// than silently exposing an unauthenticated endpoint.
+	// Enabling a public webhook without a secret must be a hard error.
 	_, err := loadConfig()
 	require.NotNil(t, err)
 

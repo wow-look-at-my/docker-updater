@@ -13,8 +13,7 @@ func main() {
 	log.SetPrefix("[docker-updater] ")
 
 	// Hidden subcommand: the detached helper a self-update spawns runs
-	// `/docker-updater finish-self-update ...` to recreate the updater's own
-	// container on the new image. It is a one-shot and never starts the loop.
+	// `/docker-updater finish-self-update ...`.
 	if len(os.Args) > 1 && os.Args[1] == finishSelfUpdateCommand {
 		finishSelfUpdate(os.Args[2:])
 		return
@@ -42,12 +41,7 @@ func main() {
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
 
-	// Determine our own container ID. Two things need it: a self-update can't
-	// recreate its own container inline (that would kill this process
-	// mid-swap), so updateContainer routes it through a detached helper; and
-	// attaching to a monitored container's network means naming the container
-	// to connect. An explicit DOCKER_UPDATER_CONTAINER_ID wins; otherwise we
-	// auto-detect.
+	// Determine our own container ID.
 	if cfg.SelfContainerID == "" {
 		cfg.SelfContainerID = detectOwnContainerID()
 	}
@@ -72,10 +66,7 @@ func main() {
 
 	store := newStore()
 
-	// Inbound GitHub webhook (opt-in): a valid delivery requests an immediate
-	// check via this channel. Buffered with depth 1 and filled non-blockingly,
-	// so a burst of deliveries coalesces into at most one pending check. nil
-	// when disabled, in which case runLoop simply never selects on it.
+	// Inbound GitHub webhook (opt-in): a valid delivery requests an immediate check via this channel.
 	var trigger chan struct{}
 	if cfg.GitHubWebhookAddr != "" {
 		trigger = make(chan struct{}, 1)
@@ -84,8 +75,12 @@ func main() {
 		log.Print("github webhook disabled (DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR is empty)")
 	}
 
+	var force chan string
 	if cfg.DashboardAddr != "" {
-		go newDashboardServer(cli, cfg, store).run(ctx)
+		force = make(chan string, forceQueueDepth)
+		srv := newDashboardServer(cli, cfg, store)
+		srv.force = force
+		go srv.run(ctx)
 	} else {
 		log.Print("dashboard disabled (DOCKER_UPDATER_DASHBOARD_ADDR is empty)")
 	}
@@ -93,5 +88,5 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	runLoop(ctx, cli, cfg, sigCh, resolveAuth, store, trigger)
+	runLoop(ctx, cli, cfg, sigCh, resolveAuth, store, trigger, force)
 }

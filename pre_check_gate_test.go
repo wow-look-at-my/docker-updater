@@ -39,9 +39,9 @@ func TestPreCheckGateSkippedForAContainerThatIsNotRunning(t *testing.T) {
 	}
 }
 
-// The network a container sits on is known whether or not it currently holds
-// an IP, so docker-updater joins it before the container is back up and the
-// hostname resolves the moment it is.
+// The network a container sits on is known whether it holds an IP, so
+// docker-updater joins it before the container is back up and the hostname
+// resolves the moment it is.
 func TestContainerEndpointNamesTheNetworkWithoutAnIP(t *testing.T) {
 	inspect := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{
 		"go-s3-server_default": {NetworkID: "net-s3"},

@@ -86,7 +86,7 @@ tests:
 		fi
 		# A vacuous pass is the failure mode of a check like this one: an empty
 		# rootfs would also match no interpreter. The image ships busybox, the
-		# docker CLI and its two plugins.
+		# docker CLI and its plugins.
 		found="$(wc -l < "$WORK/elf.txt")"
 		test "$found" -ge 4 || { echo "expected at least 4 ELF files, found $found" >&2; exit 1; }
 		echo "all-static elf=$found"
@@ -122,6 +122,51 @@ tests:
 			- 'entrypoint=["/docker-updater"]'
 			- "docker-updater"
 			- "starting"
+
+	# The drift list must come from the request compose would send, through the
+	# compose plugin the image ships, against a real daemon. The capture must
+	# leave the container alone.
+	- desc: a compose drift lists the changed fields and leaves the container running
+	  cmd: |
+		set -eu
+		. {shared.env}
+		p="$WORK/drift-$$"
+		name="du-dats-drift-$$"
+		mkdir -p "$p"
+		write_compose() {
+			printf 'services:\n  app:\n    image: %s\n    entrypoint: ["/bin/sh", "-c", "sleep 600"]\n    labels:\n      %s: "true"\n      docker-updater.well-known: "false"\n%b' "$IMAGE" "$name" "$1" > "$p/compose.yml"
+		}
+		write_compose ''
+		docker compose -f "$p/compose.yml" -p "$name" up -d --quiet-pull 2>&1
+		before="$(docker compose -f "$p/compose.yml" -p "$name" ps -q app)"
+		write_compose '    mem_limit: 64m\n    pids_limit: 100\n    security_opt: ["no-new-privileges:true"]\n'
+		docker run -d --name "$name-du" -v /var/run/docker.sock:/var/run/docker.sock -v "$p:$p" \
+			-e DOCKER_UPDATER_LABEL="$name" -e DOCKER_UPDATER_DRY_RUN=true "$IMAGE" >/dev/null
+		i=0
+		while [ "$i" -lt 60 ]; do
+			if docker exec "$name-du" wget -qO- http://127.0.0.1:8080/api/containers > "$p/api.json" 2>/dev/null &&
+				grep -q '"differences' "$p/api.json"; then break; fi
+			i=$((i + 1))
+			sleep 1
+		done
+		docker logs "$name-du" 2>&1 | grep -i 'drift\|compose' || true
+		grep -E '"(field|file|container|differences_error)":' "$p/api.json" | tr -d ' ' || true
+		echo "fields=$(grep -c '"field":' "$p/api.json" || true)"
+		after="$(docker compose -f "$p/compose.yml" -p "$name" ps -q app)"
+		echo "unchanged=$([ "$before" = "$after" ] && echo yes || echo no)"
+		echo "status=$(docker inspect -f '{{ .State.Status }}' "$after")"
+		docker rm -f "$name-du" >/dev/null
+		docker compose -f "$p/compose.yml" -p "$name" down -t 0 2>&1
+	  outputs:
+		stdout:
+			- '"field":"HostConfig.Memory",'
+			- '"file":"67108864",'
+			- '"field":"HostConfig.PidsLimit",'
+			- '"field":"HostConfig.SecurityOpt",'
+			- '"file":"[\"no-new-privileges:true\"]",'
+			- "fields=3"
+			- "unchanged=yes"
+			- "status=running"
 
 	# The launcher must forward its arguments. A self-update spawns a detached
 	# helper as `/docker-updater finish-self-update ...`, and a launcher that

@@ -15,9 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// wellKnownServer starts a server answering the standard endpoints with the
-// given statuses (0 = do not register the route, i.e. 404), and returns a
-// ContainerInfo addressed at it.
 func wellKnownServer(t *testing.T, healthStatus, preUpdateStatus int) (ContainerInfo, *httptest.Server) {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -73,7 +70,7 @@ func TestWellKnownTreatsUnhealthyAsConfigured(t *testing.T) {
 // TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck covers the other
 // container, where that same sentence would be a lie.
 func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
-	info, srv := wellKnownServer(t, 0, 0) // no routes: 404 for both
+	info, srv := wellKnownServer(t, 0, 0)
 	info.DockerHealthcheck = true
 
 	state := resolveWellKnown(context.Background(), info)
@@ -91,10 +88,6 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 // nothing but the process not crashing immediately. Promising HEALTHCHECK
 // cover here tells an operator an update was checked when it was not, which is
 // the whole reason the sentence is computed per container.
-//
-// Both discovery failures say it, because both end at the same gate: a
-// container we cannot reach and one that answers 404 are different faults with
-// the same consequence.
 func TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck(t *testing.T) {
 	t.Run("endpoint missing", func(t *testing.T) {
 		info, _ := wellKnownServer(t, 0, 0)
@@ -144,10 +137,6 @@ func TestHasDockerHealthcheckReadsRuntimeState(t *testing.T) {
 	assert.False(t, hasDockerHealthcheck(types.ContainerJSON{}))
 }
 
-// A container that never answers is a different fault from one that answers
-// 404, and must not get the same sentence: "implement the endpoint" sends the
-// operator to write code that may already be there, while the actual break is
-// the route to the container or the port being probed.
 func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 	info, srv := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	info.DockerHealthcheck = true
@@ -164,8 +153,8 @@ func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 		"nothing about an unanswered probe shows the endpoint is missing")
 }
 
-// Compatibility with the original opt-in setup: the check labels still win,
-// and are reported as nonstandard rather than silently honored.
+// Compatibility with the opt-in setup: the check labels still win, and are
+// reported as nonstandard rather than silently honored.
 func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"
@@ -300,8 +289,6 @@ func TestStandardPreUpdateRefusalBlocks(t *testing.T) {
 	assert.Contains(t, err.Error(), "503")
 }
 
-// A label-configured pre-check is a declared gate: its 404 is a real failure,
-// unlike the discovered endpoint's.
 func TestLabelPreCheckStillFailsClosed(t *testing.T) {
 	info, srv := wellKnownServer(t, http.StatusOK, 0)
 	info.PreCheckURL = srv.URL + "/my-precheck"
@@ -321,10 +308,6 @@ func TestContainerEndpointIsTheContainersOwnIPAndNetwork(t *testing.T) {
 	assert.Equal(t, "172.17.0.4", addr)
 	assert.Equal(t, "net-bridge", netID, "the network to attach to, so the address is dialable")
 
-	// A container with no IP of its own gets no substitute: 127.0.0.1 is
-	// docker-updater's own loopback, so a probe would answer for the wrong
-	// process -- and could pass a post-update health gate against the updater's
-	// own dashboard. An empty address is a loud failure everywhere it is used.
 	hostNet := types.ContainerJSON{
 		NetworkSettings:   &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{"host": {}}},
 		ContainerJSONBase: &types.ContainerJSONBase{HostConfig: &container.HostConfig{NetworkMode: "host"}},

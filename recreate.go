@@ -12,17 +12,12 @@ import (
 	"github.com/docker/docker/api/types/network"
 )
 
-// rollingNextSuffix names the container a rolling update starts before it stops
-// the one it replaces. The name is this updater's, and it lasts one update: the
-// replacement is renamed onto the real name once it is healthy.
+// rollingNextSuffix names the container a rolling update starts before it stops the one it replaces.
 const rollingNextSuffix = "-next"
 
 func rollingNextName(name string) string { return name + rollingNextSuffix }
 
-// rollingBaseName returns the container a "-next" name belongs to. The caller
-// checks that the base is really present before treating the name as this
-// updater's scratch container, so an operator's own container that happens to
-// end in "-next" is left alone.
+// rollingBaseName returns the container a "-next" name belongs to.
 func rollingBaseName(name string) (string, bool) {
 	base, found := strings.CutSuffix(name, rollingNextSuffix)
 	if !found || base == "" {
@@ -31,11 +26,8 @@ func rollingBaseName(name string) (string, bool) {
 	return base, true
 }
 
-// recreateContainer stops the old container, creates a new one with the same
-// config but an updated image, and starts it. Once the old container has been
-// removed, every failure (create, start, or the post-update health gate) rolls
-// back to the previous image under the same name -- a failed update must never
-// leave the service down.
+// recreateContainer stops the container, creates a new one with the same
+// config but an updated image, and starts it. Once the container.
 func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, newImage string) error {
 	// Inspect the existing container to capture its full config.
 	inspect, err := cli.ContainerInspect(ctx, info.ID)
@@ -43,16 +35,14 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		return fmt.Errorf("inspecting container %s: %w", info.Name, err)
 	}
 
-	// Pin the running image by content ID before tearing anything down: after
-	// the pull, the original tag reference resolves to the new image, so the
-	// tag alone cannot bring the old version back.
+	// Pin the running image by content ID before tearing anything down.
 	oldImageID := inspect.Image
 	oldImageRef := ""
 	if inspect.Config != nil {
 		oldImageRef = inspect.Config.Image
 	}
 
-	// Stop and remove the old container.
+	// Stop and remove the container.
 	log.Printf("stopping container %s (%s)", info.Name, shortID(info.ID))
 	timeout := 30
 	if err := cli.ContainerStop(ctx, info.ID, container.StopOptions{Timeout: &timeout}); err != nil {
@@ -80,12 +70,11 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		}
 	}
 
-	// The old container no longer exists past this point, so merely failing
-	// the update would leave the service down. rollback removes the failed
-	// replacement (if any), brings the previous image back up under the
-	// original name, and folds the outcome into the returned error. It runs on
-	// a cancel-proof context so a shutdown mid-update cannot strand the
-	// service offline.
+	// The container no longer exists past this point, so merely failing the
+	// update would leave the service down. rollback removes the failed
+	// replacement (if any), brings the image back up under the name, and folds
+	// the outcome into the returned error. It runs on a cancel-proof context so
+	// a shutdown mid-update cannot strand the service offline.
 	rollback := func(failedID string, cause error) error {
 		rctx := context.WithoutCancel(ctx)
 		if oldImageID == "" {
@@ -99,10 +88,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 			}
 		}
 
-		// Restore by re-tagging the previous image to the original reference
-		// rather than creating from the bare image ID: a container whose
-		// Config.Image is a bare ID resolves to a digest-pinned reference on
-		// the next cycle and would never see updates again.
+		// Restore by re-tagging the image to the reference rather than creating from the bare image ID.
 		restoreRef := oldImageID
 		if hasRepository(oldImageRef) {
 			if err := cli.ImageTag(rctx, oldImageID, oldImageRef); err != nil {
@@ -124,8 +110,7 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 		return fmt.Errorf("%w; rolled back to previous image %s", cause, shortID(oldImageID))
 	}
 
-	// Create and start the new container. failedID is carried out of the attempt
-	// so a rollback can remove whatever the failed try left behind.
+	// Create and start the new container. failedID is carried out of the attempt.
 	log.Printf("creating new container %s with image %s", info.Name, newImage)
 	var failedID string
 	attempt := func() (string, error) {
@@ -147,8 +132,8 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 
 	newID, err := attempt()
 	if err != nil {
-		// The name is taken by the container that just failed, so it goes before
-		// the retry can create its replacement under the same name.
+		// The name is taken by the container that failed, so it goes before the
+		// retry can create its replacement under the same name.
 		if failedID != "" {
 			cli.ContainerStop(ctx, failedID, container.StopOptions{})
 			cli.ContainerRemove(ctx, failedID, container.RemoveOptions{})
@@ -164,12 +149,13 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 	return nil
 }
 
-// retryOnImageDefaults runs attempt once more with the new image's own process
-// fields in place of the ones cloned off the container being replaced.
+// retryOnImageDefaults runs attempt once more with the new image's own
+// process fields in place of the ones cloned off the container being
+// replaced.
 //
-// A cloned entrypoint the new image does not carry cannot exec, so the retry is
-// the difference between a deployment that heals itself and one that rolls back
-// on every cycle forever. It returns the original error untouched when there was
+// A cloned entrypoint the new image does not carry cannot exec, so the retry
+// is the difference between a deployment that heals itself and one that rolls
+// back on every cycle forever. It returns the error untouched when there was
 // nothing to strip, or when the retry fails too.
 func retryOnImageDefaults(config *container.Config, name string, cause error, attempt func() (string, error)) (string, error) {
 	if !resetToImageDefaults(config) {
@@ -184,10 +170,7 @@ func retryOnImageDefaults(config *container.Config, name string, cause error, at
 	return id, nil
 }
 
-// aliasSettleDelay is how long the new container serves under the service
-// aliases before the old one is stopped, so a proxy that caches DNS answers
-// re-resolves and learns the new address while the old is still reachable.
-// Overridden in tests.
+// aliasSettleDelay is how long the new container serves under the service aliases before the one is stopped.
 var aliasSettleDelay = 5 * time.Second
 
 // attachServiceAliases gives a running container the network aliases the
@@ -210,7 +193,7 @@ func attachServiceAliases(ctx context.Context, cli DockerClient, containerID str
 	return nil
 }
 
-// rollingUpdateContainer starts a new container before stopping the old one,
+// rollingUpdateContainer starts a new container before stopping the one,
 // enabling zero-downtime updates when a reverse proxy routes by health.
 func rollingUpdateContainer(ctx context.Context, cli DockerClient, info ContainerInfo, newImage string) error {
 	inspect, err := cli.ContainerInspect(ctx, info.ID)
@@ -225,12 +208,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	hostConfig := withImageSecurityOpts(ctx, cli, inspect, newImage, info.Name)
 	hostConfig.PortBindings = nil
 
-	// Network aliases are how a reverse proxy finds "the service", so they are
-	// deliberately withheld until the new container is healthy. With a
-	// container whose HEALTHCHECK runs on a 30s interval that is tens of
-	// seconds of answering from the version being replaced -- long enough for a
-	// client to get a response shaped by the previous build, which is how a
-	// buildhost publish came back missing a field its own release had added.
+	// Network aliases are how a reverse proxy finds "the service".
 	serviceAliases := map[string][]string{}
 	networkingConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{},
@@ -243,14 +221,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	nextName := rollingNextName(info.Name)
 	log.Printf("container %s: starting rolling update with image %s", info.Name, newImage)
 
-	// discard removes a next container whatever state it is in. A plain remove
-	// refuses a container that is running, and one that failed to start is
-	// RESTARTING under the restart policy cloned from the container being
-	// replaced -- so the remove failed, the name stayed taken, and every later
-	// cycle died on "the container name is already in use" without ever
-	// reaching a create. Force covers the kill, so there is no stop in front
-	// of it: a next container never carries traffic, and a graceful drain is
-	// for the OLD container at the cutover below.
+	// discard removes a next container whatever state it is in.
 	discard := func(id string) {
 		if err := cli.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
 			log.Printf("ERROR container %s: could not remove %s (%s), so the next cycle cannot create it: %v",
@@ -258,9 +229,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		}
 	}
 
-	// A next container left by an earlier cycle owns the name this one needs.
-	// It is this updater's own scratch container and nothing else may be called
-	// that, so it goes before the create rather than after the conflict.
+	// A next container left by an earlier cycle owns the name this needs.
 	discard(nextName)
 
 	attempt := func() (string, error) {
@@ -294,12 +263,8 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 		return fmt.Errorf("attaching service aliases to %s: %w", nextName, err)
 	}
 
-	// Let a DNS-resolving proxy observe the new endpoint before the old one
-	// stops answering. nginx and friends cache a resolved alias for a few
-	// seconds; stopping the old container while a proxy still has only its
-	// address cached turns the cutover into refused connections. The old
-	// container keeps serving normally here -- it is the LAST few seconds in
-	// which both versions can answer, down from the entire health wait.
+	// Let a DNS-resolving proxy observe the new endpoint before the stops
+	// answering. nginx and friends cache a resolved alias for a few seconds.
 	select {
 	case <-time.After(aliasSettleDelay):
 	case <-ctx.Done():
@@ -323,10 +288,7 @@ func rollingUpdateContainer(ctx context.Context, cli DockerClient, info Containe
 	return nil
 }
 
-// noHealthcheckGracePeriod is how long a container with no HEALTHCHECK (and no
-// health-check labels) is observed after an update before being declared
-// healthy. Long enough to catch crash-on-boot regressions, short enough not to
-// stall the update cycle. Var so tests can shorten it.
+// noHealthcheckGracePeriod is how long a container with no HEALTHCHECK (and no health-check labels) is observed after an update.
 var noHealthcheckGracePeriod = 15 * time.Second
 
 // waitHealthy polls containerID until Docker reports it healthy. The deadline
@@ -418,9 +380,8 @@ func waitStaysRunning(ctx context.Context, cli DockerClient, containerID string)
 			if err != nil {
 				return fmt.Errorf("inspecting container: %w", err)
 			}
-			// Carry the line it died on. A verdict with no evidence leaves the
-			// operator to go and read the logs of a container the rollback has
-			// already replaced, so in practice nobody reads them at all.
+			// Carry the line it died on. A verdict with no evidence leaves the operator to go and read the logs of a container the rollback has already replaced, so
+			// in practice nobody reads them at all.
 			if inspect.State == nil || !inspect.State.Running {
 				return fmt.Errorf("container exited within %s of starting%s",
 					noHealthcheckGracePeriod, whyItDied(ctx, cli, containerID))

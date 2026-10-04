@@ -12,15 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// refAdvert writes the git smart-HTTP advertisement fetchRemoteRef parses: the
-// service line, a flush, one ref, and a final flush. It is one write, because a
-// run of them is a document spelled across statements nobody can read as one.
+// refAdvert writes the git smart-HTTP advertisement fetchRemoteRef parses:
+// the service line, a flush, one ref, and a final flush.
 func refAdvert(w io.Writer, sha string) {
 	fmt.Fprintf(w, "001e# service=git-upload-pack\n0000\n003f%s refs/heads/main\n0000\n", sha)
 }
 
-// testRefSHA is the ref every advertisement below carries unless the test is
-// about the ref moving.
+// testRefSHA is the ref every advertisement below carries unless the test is about the ref moving.
 const testRefSHA = "ab3def1234567890ab3def1234567890ab3def12"
 
 func TestParseInfoRefs(t *testing.T) {

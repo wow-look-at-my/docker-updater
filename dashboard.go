@@ -16,22 +16,19 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// dashboard.js is tsc output from dashboard.ts, and it is gitignored: a
-// committed copy is a second source of truth that drifts, with nothing to mark
-// the moment it stops matching. The embed below needs it on disk, so generate
-// produces it and a build without generate fails to compile rather than
-// shipping whatever happened to be lying there.
 //go:generate npm --prefix dashboard ci
-//go:generate npm --prefix dashboard run build
+//go:generate dashboard/node_modules/.bin/tsc -p dashboard
 
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
-// dashboardServer serves the read-only status dashboard and JSON API.
+// dashboardServer serves the status dashboard and its JSON API.
 type dashboardServer struct {
 	cli   DockerClient
 	cfg   Config
 	store *Store
+	// force queues force-update requests for the update loop. nil disables the force-update endpoint.
+	force chan<- string
 }
 
 func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardServer {
@@ -44,6 +41,8 @@ func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
 	mux.HandleFunc("/api/logs", s.handleAPILogs)
+	mux.HandleFunc("/api/force-update", s.handleAPIForceUpdate)
+	mux.HandleFunc("/api/recreate", s.handleAPIRecreate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -56,20 +55,11 @@ type staticAsset struct {
 	etag        string // strong ETag: quoted hex SHA-256 of body
 }
 
-// assetVersionLen is how many hex chars of an asset's SHA-256 go into the
-// ?v= stamp index.html references it by. 12 (48 bits) is far beyond any
-// realistic collision between deploys while keeping URLs readable.
+// assetVersionLen is how many hex chars of an asset's SHA-256 go into the ?v= stamp index.html references it by.
 const assetVersionLen = 12
 
-// staticAssetHandler serves the embedded dashboard files with a strong
-// SHA-256 ETag and Cache-Control: no-cache. Embedded files carry a zero
-// modtime, so the old http.FileServer emitted no validators at all — browsers
-// and intermediary caches fell back to heuristic caching and could keep
-// serving an old dashboard.js/dashboard.css against a freshly deployed
-// index.html, which then crashes on the previous markup's element ids.
-// no-cache means every load revalidates (any cache in the path included) and
-// gets a cheap 304 while the binary is unchanged; a deploy changes the hashes
-// and all assets flip atomically. Hashes are computed once here, not per
+// staticAssetHandler serves the embedded dashboard files with a strong SHA-256
+// ETag and Cache-Control: no-cache. Hashes are computed once here, not per
 // request. Last-Modified is deliberately never sent (a zero modtime is
 // meaningless), leaving the ETag as the only — and sufficient — validator.
 //
@@ -80,14 +70,12 @@ const assetVersionLen = 12
 // cache key includes the query string — then stores every asset version under
 // a distinct key, so a given index.html can only ever resolve to the exact js
 // and css bytes it shipped with; an old-script/new-page pairing is impossible
-// by construction. The query string is a cache key only: serving ignores it
-// (lookup is by r.URL.Path), so any ?v= returns the same 200 + ETag.
+// by construction.
 func staticAssetHandler() http.HandlerFunc {
 	read := func(name string) []byte {
 		body, err := dashboardAssets.ReadFile("dashboard/" + name)
 		if err != nil {
-			// The embed paths are compile-time constants; this cannot fail at
-			// runtime. Log and serve 404 for the file rather than crashing.
+			// The embed paths are compile-time constants; this cannot fail at runtime.
 			log.Printf("dashboard: failed to load embedded asset %s: %v", name, err)
 			return nil
 		}
@@ -155,8 +143,6 @@ func staticAssetHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", a.contentType)
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("ETag", a.etag)
-		// ServeContent answers a matching If-None-Match with a bodyless 304
-		// and, given the zero modtime, never emits Last-Modified.
 		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(a.body))
 	}
 }
@@ -194,8 +180,7 @@ type apiContainer struct {
 	Name    string `json:"name"`
 	Image   string `json:"image"`
 	ImageID string `json:"image_id"`
-	// The commit the running image was built from, and its page. From the
-	// image's OCI labels; absent when the image carries none.
+	// The commit the running image was built from, and its page.
 	Commit    string `json:"commit,omitempty"`
 	CommitURL string `json:"commit_url,omitempty"`
 	State     string `json:"state"`
@@ -203,22 +188,14 @@ type apiContainer struct {
 	Health    string `json:"health"`
 	Created   int64  `json:"created"`
 
-	// Restarts is Docker's RestartCount: how many times the daemon's restart
-	// policy has restarted the container since it was created. docker-updater
-	// creates a fresh container on every pull/update, so for monitored
-	// containers this is effectively "restarts since the last pull". nil when
-	// the container could not be inspected.
+	// Restarts is Docker's RestartCount: how many times the daemon's restart policy has restarted the container.
 	Restarts *int `json:"restarts,omitempty"`
 
 	AutoUpdate bool   `json:"auto_update"`
 	Mode       string `json:"mode,omitempty"`
-	// Updater names who keeps this container current: "docker-updater",
-	// "watchtower", "both", or empty for a container nothing updates. It exists
-	// so watchtower's containers stop reading as neglected ones.
+	// Updater names who keeps this container current: "docker-updater", "watchtower", "both".
 	Updater string `json:"updater,omitempty"`
-	// LogExcerpt is the last line a failing container logged. A container in a
-	// restart loop says why in its own output, and "Restarting (126)" alone
-	// sends the reader to a host shell to find out.
+	// LogExcerpt is the last line a failing container logged.
 	LogExcerpt string `json:"log_excerpt,omitempty"`
 
 	LastChecked     *time.Time `json:"last_checked,omitempty"`
@@ -233,19 +210,17 @@ type apiContainer struct {
 	Error              string `json:"error,omitempty"`
 	Skipped            bool   `json:"skipped,omitempty"`
 	SkipReason         string `json:"skip_reason,omitempty"`
-	// Unmonitorable is why a container that carries the enable label can never
-	// be checked as it stands. The row must say so: a container no check can
-	// reach is not an up-to-date one.
+	// Unmonitorable is why a container that carries the enable label can never be checked as it stands.
 	Unmonitorable string `json:"unmonitorable,omitempty"`
-	// StuckCycles counts the consecutive cycles that offered an update this
-	// container did not take, and StuckSince is when that run began. A single
-	// failure is ordinary; a long run is a deployment frozen where it stands.
+	// StuckCycles counts the consecutive cycles that offered an update this container did not take.
 	StuckCycles int        `json:"stuck_cycles,omitempty"`
 	StuckSince  *time.Time `json:"stuck_since,omitempty"`
-	// Warnings describe how the container is configured for update checks --
-	// no standard /.well-known/docker-updater/ endpoints, or nonstandard
-	// label overrides. Not errors: the update path still works.
+	// Warnings describe how the container is configured for update checks -- no standard /.well-known/docker-updater/ endpoints.
 	Warnings []string `json:"warnings,omitempty"`
+	// ComposeDrift is set when the running config no longer matches the compose file, or when nothing could compare them.
+	ComposeDrift *ComposeDrift `json:"compose_drift,omitempty"`
+	// RecreateQueued is when an operator queued a recreate from the compose file. It is absent when none is queued.
+	RecreateQueued *time.Time `json:"recreate_queued,omitempty"`
 }
 
 // apiResponse is the top-level JSON payload served at /api/containers.
@@ -302,8 +277,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		ac.Commit, ac.CommitURL = commitOf(c.Labels)
 
 		// Only for a container that is failing: a healthy one's last log line is
-		// noise, and reading every container's logs on every poll would make
-		// the page cost a Docker API call per row.
+		// noise.
 		if isFailing(c.State, c.Status) {
 			if logs, err := containerLogTail(r.Context(), s.cli, c.ID, logExcerptTail); err == nil {
 				ac.LogExcerpt = logExcerpt(logs)
@@ -335,10 +309,12 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.LastChecked = nonZeroTime(st.LastChecked)
 			ac.LastPulled = nonZeroTime(st.LastPulled)
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)
-			// Appended, not assigned: the both-updaters note above is about
-			// this container's labels, and the cycle's warnings are about its
-			// update checks. Neither replaces the other.
+			// Appended, not assigned: the both-updaters note above is about this container's labels.
 			ac.Warnings = append(ac.Warnings, st.Warnings...)
+			ac.ComposeDrift = st.Drift
+			if q, ok := snap.Recreates[name]; ok {
+				ac.RecreateQueued = nonZeroTime(q.At)
+			}
 			if st.Stuck() {
 				ac.StuckCycles = st.StuckCycles
 				ac.StuckSince = nonZeroTime(st.StuckSince)

@@ -39,7 +39,6 @@ LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.description="Automatic Docker container updater service"
 
-# /tmp (mode 1777) and /root (mode 0700) from the skeleton above.
 COPY --from=dockercli /skel/ /
 COPY --from=gcr.io/distroless/static-debian12 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
@@ -53,10 +52,7 @@ COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/l
 # the image carries the busybox of the shell stage above.
 COPY --from=shell /shell /bin
 # The APE sits under /usr/local/lib and a shebang launcher takes its place at
-# the entrypoint path. A launcher the kernel can exec keeps the shell an
-# implementation detail of this image: a container recreated from an older
-# container's config still names /docker-updater, and still starts, instead of
-# exiting 126 on a bare exec.
+# the entrypoint path.
 COPY --chmod=755 build/docker-updater /usr/local/lib/docker-updater/docker-updater
 COPY --chmod=755 scripts/image-launcher.sh /docker-updater
 
@@ -74,7 +70,6 @@ ENV TMPDIR=/tmp
 # the last place that failure is cheap.
 RUN ["/bin/sh", "-c", "test -x /docker-updater && test -x /usr/local/lib/docker-updater/docker-updater"]
 
-# Web dashboard / JSON API (DOCKER_UPDATER_DASHBOARD_ADDR, default :8080).
 EXPOSE 8080
 
 STOPSIGNAL SIGTERM

@@ -17,9 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// volumes builds a container.Config.Volumes value. The docker API spells that
-// field as a bare map, so a real set type cannot stand in for it; this keeps the
-// spelling to one place.
+// volumes builds a container.Config.Volumes value.
 func volumes(paths ...string) map[string]struct{} {
 	v := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
@@ -40,12 +38,13 @@ func captureLog(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// The incident this guards: a buildhost container created in August carried the
-// entrypoint of the image it was created from, ["buildhost"]. The image later
-// switched to an Actually Portable Executable, whose header is a shell script
-// the kernel cannot exec. Every rolling update since cloned that entrypoint onto
-// the new image, the replacement exited 126 immediately, the update rolled back,
-// and the old container -- with the stale entrypoint -- was never replaced.
+// The incident this guards: a buildhost container created in August carried
+// the entrypoint of the image it was created from, ["buildhost"]. The image
+// later switched to an Portable Executable, whose header is a shell script
+// the kernel cannot exec. Every rolling update since cloned that entrypoint
+// onto the new image, the replacement exited 126 immediately, the update
+// rolled back, and the container -- with the stale entrypoint -- was never
+// replaced.
 func TestClearInheritedImageDefaultsDropsTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	config := &container.Config{

@@ -63,6 +63,8 @@ jobs:
           name: go-build-test.broot
           path: build/
       - run: chmod +x build/docker-updater
+      # The suite runs docker compose, and the dind runner image ships no compose plugin.
+      - run: sudo apt-get update && sudo apt-get install -y docker-compose-v2 && docker compose version
       # Building the image is not an assertion. Every assertion is in the suite.
       - run: docker build -t docker-updater:ci .
       - env:

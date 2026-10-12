@@ -4,6 +4,10 @@ on:
   push:
     branches: ['**']
 
+concurrency:
+  group: gha_${{ github.repository }}_${{ github.workflow }}_${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 permissions:
   id-token: write
   contents: write
@@ -15,7 +19,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # The go:generate directives in dashboard.go compile dashboard.js, which the embed needs and which is not committed.
@@ -27,7 +31,7 @@ jobs:
           generate: 3c60da638b28
 
   dashboard:
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: dashboard
@@ -47,7 +51,7 @@ jobs:
   image-e2e:
     needs: test
     # A self-hosted runner carries a registered APE binfmt handler, which makes the kernel run any APE through a shell and masks this defect.
-    runs-on: ${{ vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
@@ -72,7 +76,7 @@ jobs:
   # image-e2e is the only job that executes the APE these bytes are.
   publish-buildhost:
     needs: [test, image-e2e]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:

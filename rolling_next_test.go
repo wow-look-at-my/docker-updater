@@ -69,7 +69,7 @@ func TestListMonitoredSkipsTheRollingScratchContainer(t *testing.T) {
 }
 
 // The wedge: a next container that failed to start is RESTARTING, a plain
-// remove refuses it, the name stays taken, and every later cycle dies on the
+// remove refuses it. The name stays taken, and every later cycle dies on the
 // conflict without reaching a create.
 func TestRollingUpdateClearsAStaleNextContainer(t *testing.T) {
 	t.Serial()

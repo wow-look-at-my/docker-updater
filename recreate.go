@@ -153,8 +153,8 @@ func recreateContainer(ctx context.Context, cli DockerClient, info ContainerInfo
 // process fields in place of the ones cloned off the container being
 // replaced.
 //
-// A cloned entrypoint the new image does not carry cannot exec, so the retry
-// is the difference between a deployment that heals itself and one that rolls
+// A cloned entrypoint the new image does not carry cannot exec. The retry is
+// the difference between a deployment that heals itself and one that rolls
 // back on every cycle forever. It returns the error untouched when there was
 // nothing to strip, or when the retry fails too.
 func retryOnImageDefaults(config *container.Config, name string, cause error, attempt func() (string, error)) (string, error) {
@@ -175,7 +175,7 @@ var aliasSettleDelay = 5 * time.Second
 
 // attachServiceAliases gives a running container the network aliases the
 // container it replaces is serving under. Docker cannot add an alias to an
-// existing endpoint, so each network is disconnected and reconnected -- safe
+// existing endpoint. Each network is disconnected and reconnected -- safe
 // precisely because this container carries no traffic yet: nothing resolves to
 // it until this call lands.
 func attachServiceAliases(ctx context.Context, cli DockerClient, containerID string, aliases map[string][]string) error {
@@ -359,7 +359,7 @@ func whyItDied(ctx context.Context, cli DockerClient, containerID string) string
 }
 
 // waitStaysRunning is the health gate for containers with no healthcheck of
-// any kind: the container passes if it is still running, with no restarts, at
+// any kind. The container passes if it is still running, with no restarts, at
 // the end of the grace period. A nonzero restart count means the process
 // crashed and a restart policy revived it -- "running right now" would be a
 // false positive.
@@ -380,8 +380,9 @@ func waitStaysRunning(ctx context.Context, cli DockerClient, containerID string)
 			if err != nil {
 				return fmt.Errorf("inspecting container: %w", err)
 			}
-			// Carry the line it died on. A verdict with no evidence leaves the operator to go and read the logs of a container the rollback has already replaced, so
-			// in practice nobody reads them at all.
+			// Carry the line it died on. Consider a verdict with no evidence. That
+			// verdict leaves the operator to go and read the logs of a container the
+			// rollback has already replaced.
 			if inspect.State == nil || !inspect.State.Running {
 				return fmt.Errorf("container exited within %s of starting%s",
 					noHealthcheckGracePeriod, whyItDied(ctx, cli, containerID))

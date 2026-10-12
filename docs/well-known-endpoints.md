@@ -18,7 +18,7 @@ Both answer `GET` and carry their meaning in the **status code**. Both must be c
 
 `pre-update` is the place to say "not right now". Reasons include a running migration, a long request in flight, and a draining queue. It must not block. Answer immediately with what is true at that moment.
 
-The gate is asked only of a running container. One that is restarting, exited, or dead has nothing in flight. The update is what brings it back. So it is applied without asking. This holds for the label-configured `docker-updater.pre-check.url` and `.command` too.
+The gate is asked only of a running container. One that restarts, exited, or dead has nothing in flight. The update is what brings it back. So it is applied without asking. This holds for the label-configured `docker-updater.pre-check.url` and `.command` too.
 
 Neither endpoint needs a body, so a one-line handler is a complete implementation.
 
@@ -41,11 +41,13 @@ The join needs docker-updater's own container ID, the same one self-update uses.
 
 Networks are joined once per check cycle and never disconnected. An endpoint left behind by a departed container is harmless. Dropping a network something else attached breaks reachability docker-updater did not create. A join that fails is reported as a per-container warning. The warning names the network and the error, because that is why the probe cannot connect.
 
-**It does not route between the networks it joins.** Membership of multiple networks is not a bridge between them. `ip_forward` is a per-namespace sysctl that starts at `0` in a container. Nothing in another container routes through docker-updater. Docker's own inter-network isolation rules are untouched. What each join does add is the other direction. The dashboard and webhook ports become reachable from that network, because docker-updater gets an address and a DNS name on it.
+**It does not route between the networks it joins.** Membership of multiple networks is not a bridge between them. `ip_forward` is a per-namespace sysctl that starts at `0` in a container. Nothing in another container routes through docker-updater. Docker's own inter-network isolation rules are untouched. What each join does add is the other direction.
+
+The dashboard and webhook ports become reachable from that network, because docker-updater gets an address and a DNS name on it.
 
 ### The address after an update
 
-An update replaces the container, and Docker gives the replacement its own IP. So the address discovery resolved belongs to a container that no longer exists. Docker can since have recycled that IP onto an unrelated container. Before it polls `health`, docker-updater re-resolves the address from the container it just started and rebuilds the URL. The port and path are unchanged, because a recreated container keeps the port it serves on.
+An update replaces the container, and Docker gives the replacement its own IP. So the address discovery resolved belongs to a container that no longer exists. Docker can since recycled that IP onto an unrelated container. Before it polls `health`, docker-updater re-resolves the address from the container it just started and rebuilds the URL. The port and path are unchanged, because a recreated container keeps the port it serves on.
 
 If the new container has no IP of its own, the gate fails and the update rolls back. It never falls back to the pre-update address. That either burns the whole health budget on a dead IP, or passes the gate on another service's health.
 

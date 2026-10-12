@@ -35,9 +35,10 @@ func pulledCommit(ctx context.Context, cli DockerClient, imageName string) (sha,
 	return commitOf(inspect.Config.Labels)
 }
 
-// pullFailure reports a failed pull with the daemon's own reason. Only when the
+// pullFailure reports a failed pull with the daemon's own reason. A local
+// compose `build:` tag is not in any registry. This applies only when the
 // registry says the repository or manifest does not exist is build mode a
-// remedy: a local compose `build:` tag is not in any registry.
+// remedy:.
 func pullFailure(ref string, err error) error {
 	msg := err.Error()
 	for _, absent := range []string{"repository does not exist", "manifest unknown", "not found"} {

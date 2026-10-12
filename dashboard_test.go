@@ -292,8 +292,8 @@ func TestDashboardServesStaticAssets(t *testing.T) {
 }
 
 // Without this a cache in front could keep serving an old dashboard.js against
-// a new index.html after a deploy — the compiled JS then dereferences
-// element ids the other version's markup doesn't have.
+// a new index.html after a deploy. The compiled JS then dereferences element
+// ids the other version's markup doesn't have.
 func TestDashboardAssetCaching(t *testing.T) {
 	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, newStore())
 	ts := httptest.NewServer(s.handler())
@@ -350,14 +350,14 @@ func TestDashboardAssetCaching(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestDashboardVersionStampedAssetURLs locks in the cache-key busting: the
+// TestDashboardVersionStampedAssetURLs locks in the cache-key busting. The
 // served index.html references its assets as dashboard.js?v=<hash-prefix> /
-// dashboard.css?v=<hash-prefix>, stamped from each asset's own content hash.
-// Any HTTP cache — including a cache-everything edge rule, whose default cache
-// key includes the query string — then stores each asset version under a
-// distinct key, so an index.html can only ever pull the exact js/css it
-// shipped with; an old-script/new-page pairing is impossible. The query string
-// must be a pure cache key: serving ignores it.
+// dashboard.css?v=<hash-prefix>, stamped from each asset's own content hash. Any
+// HTTP cache — including a cache-everything edge rule, whose default cache key
+// includes the query string. Then stores each asset version under a distinct
+// key, so an index.html can only ever pull the exact js/css it shipped with. An
+// old-script/new-page pairing is impossible. The query string must be a pure
+// cache key: serving ignores it.
 func TestDashboardVersionStampedAssetURLs(t *testing.T) {
 	s := newDashboardServer(&mockDocker{}, Config{Interval: time.Minute}, newStore())
 	ts := httptest.NewServer(s.handler())
@@ -453,9 +453,8 @@ func TestDashboardJSIsNotCommitted(t *testing.T) {
 
 // TestDashboardCopyButtonsWired pins the ids the copy buttons are wired by to
 // BOTH sides of the contract. The script looks each up with getElementById
-// and silently does nothing when it is absent, so a renamed or dropped button
-// in index.html would leave a dead control on the page with no error
-// anywhere.
+// and silently does nothing when it is absent. A renamed or dropped button in
+// index.html would leave a dead control on the page with no error anywhere.
 func TestDashboardCopyButtonsWired(t *testing.T) {
 	html, err := dashboardAssets.ReadFile("dashboard/index.html")
 	require.Nil(t, err)

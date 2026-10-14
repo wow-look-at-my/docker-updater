@@ -7,7 +7,7 @@ import (
 )
 
 // reportStuck says, once per cycle, which containers the updater could not
-// move: an update they did not take, a check that keeps failing, or no
+// move: an update they did not take. A check that keeps failing, or no
 // possible check.
 //
 // The per-container failure line is already logged where the failure happens.

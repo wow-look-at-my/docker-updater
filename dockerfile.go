@@ -7,7 +7,7 @@ import (
 
 // parseBaseImageFromDockerfile extracts the base image of the *final* build stage from a Dockerfile's text.
 //
-// A multi-stage Dockerfile has several FROM lines; only the final stage produces the image the container runs, so that is the one whose base must be watched for updates. We therefore return the FROM of the last stage, resolving both ways a later stage can reference an earlier one:
+// A multi-stage Dockerfile has several FROM lines. Only the final stage produces the image the container runs. That is the one whose base must be watched for updates. We therefore return the FROM of the last stage, resolving both ways a later stage can reference an earlier one:
 //
 //   - `FROM <image> AS <name>` names a stage. A later `FROM <name>` that refers
 //     to an earlier named stage is NOT a registry image -- it is resolved back

@@ -18,7 +18,7 @@ type selfAttacher struct {
 // reflected without any state to go stale.
 //
 // A nil attacher never attaches, and is what a docker-updater that cannot
-// identify its own container gets -- main says so at startup, since without
+// identify its own container gets. Main says so at startup, since without
 // an ID there is nothing per-container to add.
 func newSelfAttacher(ctx context.Context, cli DockerClient, selfID string) *selfAttacher {
 	if selfID == "" {
@@ -43,8 +43,9 @@ func newSelfAttacher(ctx context.Context, cli DockerClient, selfID string) *self
 
 // ensure joins the container's network when docker-updater is not on it yet,
 // and returns a warning when it cannot. A failed join never stops the cycle --
-// the update itself does not need the network -- but it is never silent either:
-// the probe that follows will fail to reach the container, and this names why.
+// the update itself does not need the network. However, it is never silent
+// either: the probe that follows will fail to reach the container, and this
+// names why.
 func (a *selfAttacher) ensure(ctx context.Context, info ContainerInfo) string {
 	if a == nil || info.AddressNetwork == "" || a.joined[info.AddressNetwork] {
 		return ""

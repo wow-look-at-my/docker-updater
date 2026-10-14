@@ -10,7 +10,7 @@ const NOW = Date.UTC(2026, 7, 8, 19, 9, 0);
 
 // A payload shaped like a real one: monitored and unmonitored containers,
 // online and offline, a configuration warning, a failed check, a held-back
-// update, a container Docker could not inspect (null restarts), a container in
+// update. A container Docker could not inspect (null restarts). A container in
 // a crash loop, one nothing can check, and a compose drift held back, blocked
 // and unknown.
 const PAYLOAD = {
@@ -367,7 +367,7 @@ test("a failed poll is reported in the copy, not papered over", async () => {
 	const page = await load(PAYLOAD);
 	try {
 		// Same shape as a poll that fails after one has succeeded: the banner is
-		// up, and the containers under it are the last payload that arrived.
+		// up. The containers under it are the last payload that arrived.
 		page.win.fetch = (async () => ({
 			ok: false,
 			status: 500,
@@ -483,7 +483,7 @@ test("force update asks first, then posts the container", async () => {
 });
 
 // The container carries the enable label, reports no error and offers no
-// update, which is indistinguishable from an up-to-date one until the row says
+// update. This is indistinguishable from an up-to-date one until the row says
 // otherwise.
 test("a container nothing can check says so and counts as an error", async () => {
 	const page = await load(PAYLOAD);

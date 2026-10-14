@@ -22,7 +22,7 @@ func failedResult(name string, at time.Time) UpdateResult {
 }
 
 // The same failure every cycle is a frozen deployment, and the run is the only
-// thing that says so: one failure and the thousandth log the same line.
+// thing that says so. One failure and the thousandth log the same line.
 func TestStoreTracksAStuckRun(t *testing.T) {
 	s := newStore()
 	start := time.Now()
@@ -107,8 +107,8 @@ func TestReportStuckNamesTheAgeAndTheReason(t *testing.T) {
 	assert.Contains(t, line, "no such file or directory")
 }
 
-// The same "cannot be updated" reason every cycle is a frozen deployment too,
-// and it escalates the same way: the run's age and count on one ERROR line,
+// The same "cannot be updated" reason every cycle is a frozen deployment too.
+// It escalates the same way: the run's age and count on one ERROR line,
 // instead of one plain line repeated for a few days.
 func TestRepeatedUnmonitorableReasonEscalatesToStuck(t *testing.T) {
 	s := newStore()

@@ -42,8 +42,8 @@ const (
 )
 
 // containerEndpoint returns the container's own IP and the ID of the network it
-// belongs to -- the address docker-updater dials, and the network it has to
-// join to get there.
+// belongs to. The address docker-updater dials, and the network it has to join
+// to get there.
 func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) {
 	if inspect.NetworkSettings == nil {
 		return "", ""
@@ -77,7 +77,7 @@ func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
 
 // exposedTCPPorts returns the container's declared TCP ports, ascending. These
 // are the ports the image/compose file declares, not only published ones:
-// docker-updater dials the container directly on a network they share, so an
+// docker-updater dials the container directly on a network they share. An
 // unpublished port is reachable.
 func exposedTCPPorts(inspect types.ContainerJSON) []int {
 	if inspect.Config == nil {
@@ -122,8 +122,8 @@ func overrideLabels(info ContainerInfo) []string {
 
 // resolveWellKnown decides how a container's update checks are addressed this
 // cycle. Explicit check labels always win — that is the compatibility
-// contract with the opt-in setup — but they are reported as nonstandard so
-// a fleet can be migrated deliberately rather than by accident.
+// contract with the opt-in setup. However, they are reported as nonstandard
+// so a fleet can be migrated deliberately rather than by accident.
 func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	if set := overrideLabels(info); len(set) > 0 {
 		return wellKnownState{Warnings: []string{
@@ -143,7 +143,7 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	switch {
 	case reachErr != nil:
 		// No HTTP answer at all. Saying "implement the endpoint" here sends the
-		// operator to write code that may already exist: what is broken is the
+		// operator to write code that may already exist. What is broken is the
 		// route to the container, or the port being probed.
 		return wellKnownState{Warnings: []string{
 			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); " + fallbackPhrase(info) +

@@ -53,8 +53,8 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 //
 // Docker gives an endpoint an IP only while the container RUNS, so a container
 // that crash-loops looks exactly like one on host networking. Reporting the
-// network mode alone sends the operator to a label that would change nothing,
-// which is how one entry sat stuck for hours behind advice that did not apply.
+// network mode alone sends the operator to a label that would change nothing.
+// This is how one entry sat stuck for hours behind advice that did not apply.
 // A container that is not running is reported as what it is, with the line it
 // died on.
 func noEndpointError(ctx context.Context, cli DockerClient, containerID string, inspect types.ContainerJSON) error {
@@ -75,12 +75,12 @@ func noEndpointError(ctx context.Context, cli DockerClient, containerID string, 
 
 // rehostToNewContainer points a container-derived health URL at the container
 // the update started. The URL was built from the address of the container the
-// update destroyed, and Docker both gives the replacement its own IP and may
-// hand the one to an unrelated container. Only the host moves: a recreated
+// update destroyed. Docker both gives the replacement its own IP and may hand
+// the one to an unrelated container. Only the host moves: a recreated
 // container keeps the port and path it served on.
 //
-// An address it cannot resolve is a failure, never a fall back to the one:
-// polling a dead or recycled address either times out the gate or passes it
+// An address it cannot resolve is a failure, never a fall back to the one.
+// Polling a dead or recycled address either times out the gate or passes it
 // on somebody else's health.
 //
 // It also returns the time the new container started, so the gate can reject

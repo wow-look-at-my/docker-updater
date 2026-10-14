@@ -141,7 +141,7 @@ func newAuthResolver(cfg *dockerConfig) AuthResolver {
 //
 // All: true, because Docker lists only RUNNING containers by default and a
 // crash-looping container is the one that most needs a new image. Without it the
-// sweep cannot see such a container at all: it is never checked, never pulled
+// sweep cannot see such a container at all. It is never checked, never pulled
 // and never recreated, so a container broken by its own image stays broken until
 // a human notices. go-s3-server sat in that loop for many hours.
 func listMonitoredContainers(ctx context.Context, cli DockerClient, label string) ([]ContainerInfo, error) {
@@ -320,8 +320,8 @@ func runningRepoDigests(ctx context.Context, cli DockerClient, imageID string) [
 // the pull fetched new content.
 //
 // fetched is true only when the local image the reference resolves to changed
-// as a result of the pull: a pull that finds the image already up to date
-// downloads nothing and reports fetched=false. This distinguishes ".
+// as a result of the pull. This is a pull that finds the image already up to
+// date downloads nothing and reports fetched=false. This distinguishes ".
 func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (digest string, fetched bool, err error) {
 	// Never issue a pull/manifest request against a bare image ID (e.g.
 	// "sha256:...").

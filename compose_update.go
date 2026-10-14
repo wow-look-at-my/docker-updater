@@ -12,13 +12,14 @@ func composeManaged(info ContainerInfo) bool {
 	return info.ComposeService != "" && len(splitConfigFiles(info.ComposeConfigFiles)) > 0
 }
 
-// recreateViaCompose converges a compose-managed service onto the freshly pulled image with `docker compose up -d --no-deps`, so the recreate reads the compose file instead of replaying the container's stored config.
+// recreateViaCompose converges a compose-managed service onto the freshly pulled image with `docker compose up -d --no-deps`. The recreate reads the compose file instead of replaying the container's stored config.
 //
-// This is the difference between docker-updater and image-swapping updaters: cloning a container's HostConfig preserves whatever it was created with, so a compose file that gained a mount or an env var never takes effect and an image built to require it fails on every update. Letting compose own the container definition makes the file authoritative.
+// This is the difference between docker-updater and image-swapping updaters. Cloning a container's HostConfig preserves whatever it was created with, so a compose file that gained a mount. Otherwise, an env var never takes effect and an image built to require it fails on every update. Letting compose own the container definition makes the file
+// authoritative.
 //
 // --no-deps keeps the convergence scoped to the service. Recreating a dependency (a docker-in-docker daemon holding live containers, a database) merely because a sibling service took a new image would destroy state the update never intended to touch.
 //
-// The rollback contract of the raw-API path is preserved: the image is pinned by content ID before compose tears anything down, and any failure afterwards re-tags that image and converges the service back onto it, so a failed update never leaves the service down.
+// The rollback contract of the raw-API path is preserved. The image is pinned by content ID before compose tears anything down. Any failure afterwards re-tags that image and converges the service back onto it. A failed update never leaves the service down.
 func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo) error {
 	target := composeTargetFor(info)
 	if len(target.ConfigFiles) == 0 || target.Service == "" {
@@ -42,7 +43,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 		if oldImageID == "" {
 			return fmt.Errorf("%w; ROLLBACK FAILED, %s may be down: previous image unknown", cause, info.Name)
 		}
-		// Re-tag rather than pinning the bare ID: compose resolves the
+		// Re-tag rather than pinning the bare ID. Compose resolves the
 		// service's image reference from the file, and a digest-pinned or
 		// ID-only reference would never see updates again.
 		if hasRepository(oldImageRef) {
@@ -86,8 +87,9 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	return nil
 }
 
-// containerUnchanged reports whether the pre-update container is still there, still running, and still on the image it started with — i.e. the failed compose invocation was a no-op. Anything it cannot confirm (an inspect error, a gone container, a stopped one) reads as
-// changed, so an uncertain state still gets the rollback.
+// containerUnchanged reports whether the pre-update container is still there,
+// still running. This is and still on the image it started with — i.e. the
+// failed compose invocation was a no-op.
 func containerUnchanged(ctx context.Context, cli DockerClient, containerID, imageID string) bool {
 	if containerID == "" || imageID == "" {
 		return false

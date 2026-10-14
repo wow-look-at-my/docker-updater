@@ -63,14 +63,14 @@ const assetVersionLen = 12
 // request. Last-Modified is deliberately never sent (a zero modtime is
 // meaningless), leaving the ETag as the only — and sufficient — validator.
 //
-// Belt and suspenders on top of the validators: the served index.html is
+// Belt and suspenders on top of the validators. The served index.html is
 // rewritten at startup to reference its scripts as dashboard.js?v=<hash> /
 // dashboard.css?v=<hash> (a prefix of each asset's own content hash). A cache
 // that ignores no-cache — e.g. a cache-everything edge rule, whose default
-// cache key includes the query string — then stores every asset version under
-// a distinct key, so a given index.html can only ever resolve to the exact js
-// and css bytes it shipped with; an old-script/new-page pairing is impossible
-// by construction.
+// cache key includes the query string. Then stores every asset version under a
+// distinct key. A given index.html can only ever resolve to the exact js and
+// css bytes it shipped with. An old-script/new-page pairing is impossible by
+// construction.
 func staticAssetHandler() http.HandlerFunc {
 	read := func(name string) []byte {
 		body, err := dashboardAssets.ReadFile("dashboard/" + name)

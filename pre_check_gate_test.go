@@ -11,7 +11,7 @@ import (
 )
 
 // A pre-check URL that names the container by hostname resolves only from a
-// network docker-updater shares with it, so the gate is never asked from
+// network docker-updater shares with it. The gate is never asked from
 // outside that network.
 func TestPreCheckGateUnreachableHostnameRefuses(t *testing.T) {
 	reason := preCheckRefuses(context.Background(), nil, ContainerInfo{
@@ -26,7 +26,7 @@ func TestPreCheckGateUnreachableHostnameRefuses(t *testing.T) {
 
 // A container that is not running has nothing to drain. Asking its gate kept
 // webhook-runner crash-looping on a broken image for hours after the fixed one
-// was published: the gate lives in the container that cannot start.
+// was published. The gate lives in the container that cannot start.
 func TestPreCheckGateSkippedForAContainerThatIsNotRunning(t *testing.T) {
 	for _, state := range []string{"restarting", "exited", "dead", "created"} {
 		reason := preCheckRefuses(context.Background(), nil, ContainerInfo{
@@ -40,7 +40,7 @@ func TestPreCheckGateSkippedForAContainerThatIsNotRunning(t *testing.T) {
 }
 
 // The network a container sits on is known whether it holds an IP, so
-// docker-updater joins it before the container is back up and the hostname
+// docker-updater joins it before the container is back up. The hostname
 // resolves the moment it is.
 func TestContainerEndpointNamesTheNetworkWithoutAnIP(t *testing.T) {
 	inspect := types.ContainerJSON{NetworkSettings: &types.NetworkSettings{Networks: map[string]*network.EndpointSettings{

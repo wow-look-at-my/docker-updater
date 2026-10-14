@@ -100,8 +100,8 @@ func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
 	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo -p demo build --pull opencode")
 }
 
-// A compose file the updater cannot see is the containerized-updater footgun:
-// the label carries a host path, and without a matching bind mount the docker
+// A compose file the updater cannot see is the containerized-updater footgun.
+// The label carries a host path, and without a matching bind mount the docker
 // CLI fails with a bare "no such file or directory". Fail before exec'ing with
 // an error that names the actual fix.
 func TestComposeRunnerRejectsInvisibleComposeFile(t *testing.T) {

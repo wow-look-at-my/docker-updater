@@ -128,7 +128,7 @@ func selfUpdate(ctx context.Context, cli DockerClient, info ContainerInfo, newIm
 }
 
 // dockerSocketBinds returns bind specs referencing the Docker socket from the
-// container's host config (or, failing that, its resolved mounts), so the helper
+// container's host config (or, failing that, its resolved mounts). The helper
 // can be given the same socket the updater already uses.
 func dockerSocketBinds(inspect types.ContainerJSON) []string {
 	var binds []string

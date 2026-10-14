@@ -15,9 +15,9 @@ import (
 )
 
 // driftedContainer is a container configured with a registry image and started
-// from a local build of it: Config.Image names the registry, but the running
-// image carries no RepoDigests. This is the s3 container that sat unupdated for
-// a few days while the registry answered every manifest request.
+// from a local build of it: Config.Image names the registry. However, the
+// running image carries no RepoDigests. This is the s3 container that sat
+// unupdated for a few days while the registry answered every manifest request.
 func driftedContainer(pullErr error) (*mockDocker, *[]string) {
 	repo := "oci.pazer.build/go-s3-server"
 	localID := "sha256:" + strings.Repeat("4", 64)
@@ -79,7 +79,7 @@ func TestImageModeUpdatesADriftedLocalBuild(t *testing.T) {
 }
 
 // When the registry itself says the image is absent, the report carries the
-// registry's own words, and only then is build mode named as a remedy.
+// registry's own words. The report only then is build mode named as a remedy.
 func TestImageModePullFailureNamesTheRegistryError(t *testing.T) {
 	cli, _ := driftedContainer(errors.New("pull access denied for go-s3-server, repository does not exist or may require 'docker login'"))
 
@@ -91,7 +91,7 @@ func TestImageModePullFailureNamesTheRegistryError(t *testing.T) {
 	assert.Empty(t, results[0].Container.Unmonitorable, "a failed check is an error that the next cycle retries")
 }
 
-// A registry that cannot be reached is not a missing image: sending the
+// A registry that cannot be reached is not a missing image. Sending the
 // operator to build mode would hide a network fault behind a config change.
 func TestImageModePullFailureOnUnreachableRegistryDoesNotSuggestBuildMode(t *testing.T) {
 	cli, _ := driftedContainer(errors.New(`Get "https://oci.pazer.build/v2/": dial tcp: lookup oci.pazer.build: no such host`))

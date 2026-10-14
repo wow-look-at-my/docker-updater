@@ -84,10 +84,10 @@ func TestWellKnownWarnsWhenEndpointMissing(t *testing.T) {
 }
 
 // A container with NO Docker HEALTHCHECK does not fall back to one -- it falls
-// through waitHealthy to waitStaysRunning, so the update is verified by
-// nothing but the process not crashing immediately. Promising HEALTHCHECK
-// cover here tells an operator an update was checked when it was not, which is
-// the whole reason the sentence is computed per container.
+// through waitHealthy to waitStaysRunning. The update is verified by nothing
+// but the process not crashing immediately. Promising HEALTHCHECK cover here
+// tells an operator an update was checked when it was not. This is the whole
+// reason the sentence is computed per container.
 func TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck(t *testing.T) {
 	t.Run("endpoint missing", func(t *testing.T) {
 		info, _ := wellKnownServer(t, 0, 0)
@@ -118,7 +118,7 @@ func TestWellKnownWarnsThatNothingVerifiesWithoutAHealthcheck(t *testing.T) {
 
 // hasDockerHealthcheck must read the RUNTIME health, not the image config:
 // `docker run --no-healthcheck` (and a HEALTHCHECK NONE) leave the config
-// populated while State.Health stays nil, and State.Health is exactly what
+// populated while State.Health stays nil. State.Health is exactly what
 // waitHealthy branches on. Reading the config would re-introduce the lie in a
 // subtler place.
 func TestHasDockerHealthcheckReadsRuntimeState(t *testing.T) {
@@ -176,8 +176,8 @@ func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 }
 
 // Choosing a nonstandard check is a choice you are told about, and the opt-out
-// does not buy silence from it: well-known=false says "there are no standard
-// endpoints here", not "stop mentioning the override".
+// does not buy silence from it. The opt-out well-known=false says "there are
+// no standard endpoints here", not "stop mentioning the override".
 func TestOptOutDoesNotSilenceTheNonstandardWarning(t *testing.T) {
 	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"
@@ -321,8 +321,8 @@ func TestContainerEndpointIsTheContainersOwnIPAndNetwork(t *testing.T) {
 	assert.Empty(t, netID)
 }
 
-// Map iteration is randomized, so a multi-network container would otherwise
-// resolve to a different address on different cycles -- which makes the updater
+// Map iteration is randomized. A multi-network container would otherwise
+// resolve to a different address on different cycles. Which makes the updater
 // join a second network for nothing, and lets the post-update health gate
 // re-resolve onto a network it never probed.
 func TestContainerEndpointIsStableAcrossCycles(t *testing.T) {

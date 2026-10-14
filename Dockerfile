@@ -1,19 +1,19 @@
 # Build-mode rebuilds shell out to `docker compose ... build/up`, so the image
 # ships the Docker CLI and its compose/buildx plugins. They come from the
 # official CLI image (pinned to the 28.x line) and are statically linked Go
-# binaries (`file` reports "statically linked"; `ldd`: "not a dynamic
+# binaries (`file` reports "statically linked". `ldd`: "not a dynamic
 # executable"), so they run in this scratch-based image without a libc.
 FROM docker:28-cli AS dockercli
 
 # Directory skeleton for the scratch stage. scratch ships no filesystem at all
-# -- not even /tmp -- and compose/buildx hard-require a writable temp dir:
-# buildx materializes a compose `dockerfile_inline` into a temp directory
-# (os.MkdirTemp in buildx build/opt.go), and compose places its bake
-# metadata file under os.TempDir(). Without /tmp, every rebuild of a
-# dockerfile_inline service fails with "mkdir /tmp/dockerfileNNN: no such
-# file or directory" (surfaced by the updater only as "exit status 1" before
-# rebuild errors carried the compose output tail). /root backs $HOME so the
-# CLI has a place for ~/.docker without creating it at container runtime.
+# -- not even /tmp -- and compose/buildx hard-require a writable temp dir.
+# Buildx materializes a compose `dockerfile_inline` into a temp directory
+# (os.MkdirTemp in buildx build/opt.go), and compose places its bake metadata
+# file under os.TempDir(). Without /tmp, every rebuild of a dockerfile_inline
+# service fails with "mkdir /tmp/dockerfileNNN: no such file or directory"
+# (surfaced by the updater only as "exit status 1" before rebuild errors
+# carried the compose output tail). /root backs $HOME. So the CLI has a place
+# for ~/.docker without creating it at container runtime.
 RUN mkdir -p /skel/tmp /skel/root && chmod 1777 /skel/tmp && chmod 700 /skel/root
 
 # The APE trampoline is a shell script, and it shells out -- cksum, tr, mkdir,
@@ -21,10 +21,10 @@ RUN mkdir -p /skel/tmp /skel/root && chmod 1777 /skel/tmp && chmod 700 /skel/roo
 # another failed container start. The links are relative, because this directory
 # lands somewhere else in the final image.
 #
-# The busybox MUST be static. The final image is scratch and has no /lib, so a
-# busybox that names an ELF interpreter cannot start, and docker reports that
-# ENOENT against the ENTRYPOINT path instead of against the shell. The official
-# busybox image is static-pie. Alpine's is a PIE against
+# The busybox MUST be static. The final image is scratch. The final image has
+# no /lib. A busybox that names an ELF interpreter cannot start, and docker
+# reports that ENOENT against the ENTRYPOINT path instead of against the shell.
+# The official busybox image is static-pie. Alpine's is a PIE against
 # /lib/ld-musl-x86_64.so.1, so the docker CLI image above cannot supply it.
 FROM busybox:stable-musl AS shell
 RUN mkdir -p /shell && cp /bin/busybox /shell/busybox \
@@ -47,9 +47,9 @@ COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 # An APE starts through its own shell trampoline: the file is a polyglot whose
-# header is a shell script, and the kernel cannot exec it without either a
-# binfmt handler or a shell to interpret that header. scratch ships neither, so
-# the image carries the busybox of the shell stage above.
+# header is a shell script. The kernel cannot exec it without either a binfmt
+# handler or a shell to interpret that header. scratch ships neither, so the
+# image carries the busybox of the shell stage above.
 COPY --from=shell /shell /bin
 # The APE sits under /usr/local/lib and a shebang launcher takes its place at
 # the entrypoint path.
@@ -57,14 +57,14 @@ COPY --chmod=755 build/docker-updater /usr/local/lib/docker-updater/docker-updat
 COPY --chmod=755 scripts/image-launcher.sh /docker-updater
 
 # scratch defines no PATH, HOME, or TMPDIR: PATH lets the updater exec `docker`
-# for build-mode rebuilds; HOME points the CLI at the /root shipped above for
-# its config dir (~/.docker); TMPDIR pins temp usage to the /tmp shipped above
+# for build-mode rebuilds. HOME points the CLI at the /root shipped above for
+# its config dir (~/.docker). TMPDIR pins temp usage to the /tmp shipped above
 # (belt and braces -- Go's os.TempDir defaults to /tmp anyway).
 ENV PATH=/usr/local/bin:/bin
 ENV HOME=/root
 ENV TMPDIR=/tmp
 
-# This command runs in the final rootfs, so it proves the shipped shell loads
+# This command runs in the final rootfs. It proves the shipped shell loads
 # with no /lib present, and that both halves of the entrypoint are executable.
 # A shell that cannot start makes every container start fail, and the build is
 # the last place that failure is cheap.

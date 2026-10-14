@@ -17,7 +17,7 @@ import (
 // operator's own --entrypoint and the image's ENTRYPOINT read identically.
 //
 // So handing that config back to ContainerCreate with only Image changed pins
-// the image's defaults onto the NEW one, and a default the new image changed
+// the image's defaults onto the NEW one. A default the new image changed
 // never takes effect. A field cleared here is nil or empty, which is how
 // ContainerCreate is told to take the image's own value.
 func clearInheritedImageDefaults(config, img *container.Config) {
@@ -63,10 +63,10 @@ func clearInheritedImageDefaults(config, img *container.Config) {
 // clears what that image supplied.
 //
 // A missing old image (pruned, or a daemon that will not answer) leaves the
-// config as inspected, which is the behavior that predates this function: the
+// config as inspected, which is the behavior that predates this function. The
 // update still runs, and at worst carries a default forward. Saying so at error
 // level is the point -- an update that quietly pins an old image's entrypoint is
-// a container that will not start, and the log line is the only place that shows.
+// a container that will not start. The log line is the only place that shows.
 func clearInheritedDefaultsFor(ctx context.Context, cli DockerClient, config *container.Config, imageID, name string) {
 	if config == nil || imageID == "" {
 		return

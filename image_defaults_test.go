@@ -42,9 +42,9 @@ func captureLog(t *testing.T, fn func()) string {
 // the entrypoint of the image it was created from, ["buildhost"]. The image
 // later switched to an Portable Executable, whose header is a shell script
 // the kernel cannot exec. Every rolling update since cloned that entrypoint
-// onto the new image, the replacement exited 126 immediately, the update
-// rolled back, and the container -- with the stale entrypoint -- was never
-// replaced.
+// onto the new image. The replacement exited 126 immediately, the update
+// rolled back, and the container -- with the stale entrypoint. The update
+// was never replaced.
 func TestClearInheritedImageDefaultsDropsTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	config := &container.Config{
@@ -116,7 +116,7 @@ func TestClearInheritedImageDefaultsDropsOnlyTheImagesUnionEntries(t *testing.T)
 }
 
 // A healthcheck the image supplied has the same problem as an entrypoint: the
-// buildhost one named the APE directly, so it could never have reported healthy
+// buildhost one named the APE directly. It could never have reported healthy
 // against the fixed image either.
 func TestClearInheritedImageDefaultsDropsAnInheritedHealthcheck(t *testing.T) {
 	t.Serial()
@@ -133,8 +133,8 @@ func TestClearInheritedImageDefaultsDropsAnInheritedHealthcheck(t *testing.T) {
 	assert.Equal(t, []string{"NONE"}, config.Healthcheck.Test, "an operator's own healthcheck stays")
 }
 
-// A pruned old image leaves the config as inspected -- the update still runs --
-// but the operator has to be able to find out why a default did not apply.
+// A pruned old image leaves the config as inspected -- the update still runs.
+// However, the operator has to be able to find out why a default did not apply.
 func TestClearInheritedDefaultsForReportsAnUninspectableImage(t *testing.T) {
 	t.Serial()
 	config := &container.Config{Entrypoint: []string{"buildhost"}}
@@ -155,8 +155,8 @@ func TestClearInheritedDefaultsForReportsAnUninspectableImage(t *testing.T) {
 
 // The incident, as the deployment ran it. A buildhost container recorded the
 // entrypoint ["buildhost"], inherited from an image several generations back.
-// The image it was created from already spells that entrypoint differently, so
-// a diff against the preceding image finds no match and keeps the stale value.
+// The image it was created from already spells that entrypoint differently. A
+// diff against the preceding image finds no match and keeps the stale value.
 // The replacement then could not exec at all, and the update rolled back on
 // every cycle. Taking the new image's entrypoint is the only reading that
 // survives an ancestor nobody can inspect any more.

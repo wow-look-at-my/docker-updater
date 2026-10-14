@@ -38,7 +38,7 @@ func composeServiceInfo() ContainerInfo {
 }
 
 // composeDocker serves every update path from one fixture: the pre-update
-// container reports the config the raw-API paths clone, and any other
+// container reports the config the raw-API paths clone. Any other
 // container is the replacement reporting health. The compose path re-finds
 // its container by compose label, the raw paths health-check the one they
 // created, so neither needs to redefine inspection.
@@ -74,7 +74,7 @@ func composeDocker(health string) *mockDocker {
 }
 
 // recordCreates reports the names the client is asked to create containers
-// under, which is how the raw-API paths are told apart from a compose converge.
+// under. This is how the raw-API paths are told apart from a compose converge.
 func recordCreates(cli *mockDocker, names *[]string) {
 	cli.containerCreateFn = func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, name string) (container.CreateResponse, error) {
 		*names = append(*names, name)
@@ -83,7 +83,7 @@ func recordCreates(cli *mockDocker, names *[]string) {
 }
 
 // A compose-managed service must be converged with compose, never rebuilt
-// from the container's stored config: that is the only way an edited compose
+// from the container's stored config. That is the only way an edited compose
 // file (a newly added mount) reaches the running service.
 func TestUpdateContainerConvergesComposeServiceThroughCompose(t *testing.T) {
 	cli := composeDocker("healthy")
@@ -101,7 +101,7 @@ func TestUpdateContainerConvergesComposeServiceThroughCompose(t *testing.T) {
 	assert.Equal(t, []string{serviceComposeDir}, runner.upNoDepsDirs)
 }
 
-// Converging one service must never sweep its dependencies along: the compose
+// Converging one service must never sweep its dependencies along. The compose
 // invocation carries --no-deps so a docker-in-docker daemon holding live
 // containers is not recreated because a sibling took a new image.
 func TestComposeConvergeIsScopedToTheServiceAlone(t *testing.T) {
@@ -178,8 +178,8 @@ func TestRollingUpdateStaysOnRawPathForComposeService(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "compose up would stop the old container first, breaking zero downtime")
 }
 
-// Git mode recreates a container whose image and compose config are unchanged,
-// so it must not be routed through a converge that would be a no-op.
+// Git mode recreates a container whose image and compose config are unchanged.
+// It must not be routed through a converge that would be a no-op.
 func TestGitModeKeepsForcedRecreate(t *testing.T) {
 	cli := composeDocker("healthy")
 	var creates []string
@@ -237,8 +237,8 @@ func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T
 }
 
 // composeDockerStillRunning is composeDocker with the pre-update container
-// reporting what it looks like when compose failed without touching it: still
-// running, still on its original image.
+// reporting what it looks like. This happens when compose failed without
+// touching it: still running, still on its original image.
 func composeDockerStillRunning() *mockDocker {
 	cli := composeDocker("healthy")
 	inner := cli.containerInspectFn
@@ -291,9 +291,10 @@ func TestComposeConvergeStillRollsBackWhenContainerStopped(t *testing.T) {
 
 // Compose must be addressed with the project name off the container's own
 // label. Letting compose derive it from the working directory resolves a
-// DIFFERENT project for any stack deployed with an explicit -p (Komodo,
-// Portainer) or a compose file with a top-level `name:` — compose finds no
-// container for the service, CREATES one, and dies on the name already in use:
+// DIFFERENT project for any stack. That stack is deployed with an explicit -p
+// (Komodo, Portainer) or a compose file with a top-level `name:`. Compose
+// finds no container for the service, CREATES one, and dies on the name
+// already in use:
 //
 //	Conflict. The container name "/s3" is already in use by container "b1af870..."
 func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {

@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// forceServer is a dashboard server with a force queue, and a store in which
+// forceServer is a dashboard server with a force queue. A store in which
 // "held" has an update pending, "drifted" has a queued recreate held back by
-// its gate, "unqueued" drifted with nothing queued, "self" drifted where the
-// updater cannot apply it, and "current" has nothing to do.
+// its gate. "unqueued" drifted with nothing queued, "self" drifted where the
+// updater cannot apply it. "current" has nothing to do.
 func forceServer(t *testing.T, depth int) (*dashboardServer, chan string) {
 	t.Helper()
 	store := newStore()

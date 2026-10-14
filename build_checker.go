@@ -75,7 +75,7 @@ func (t composeTarget) run(ctx context.Context, args ...string) error {
 
 // checkComposeFilesVisible verifies every compose file is readable by THIS
 // process before the docker CLI is exec'd. The paths come from the container's
-// com.docker.compose.project.config_files label and are HOST paths; a
+// com.docker.compose.project.config_files label and are HOST paths. A
 // containerized docker-updater sees them only if the compose tree is
 // bind-mounted at the identical path. Without this the operator gets compose's
 // bare "no such file or directory" with no hint that the file exists and the
@@ -128,8 +128,8 @@ func runDockerCompose(ctx context.Context, args []string) error {
 
 // runLoggedCommand runs name with args, streaming the child's combined output
 // to the updater's own log while retaining a bounded tail. On a non-zero exit
-// the tail is folded into the returned error, so the dashboard and webhooks
-// name the actual cause instead of a bare "exit status 1".
+// the tail is folded into the returned error. The dashboard and webhooks name
+// the actual cause instead of a bare "exit status 1".
 func runLoggedCommand(ctx context.Context, name string, args []string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 
@@ -263,8 +263,8 @@ func resolveBaseImage(info ContainerInfo, readFile func(string) (string, error))
 }
 
 // isRegistryBase reports whether a parsed FROM base is a watchable registry
-// image, as opposed to `scratch` or a build-local stage alias that failed to
-// resolve.
+// image, as opposed to `scratch`. Otherwise, a build-local stage alias that
+// failed to resolve.
 func isRegistryBase(base string) bool {
 	if base == "" || strings.EqualFold(base, "scratch") {
 		return false
@@ -311,7 +311,7 @@ func readDockerfile(path string) (string, error) {
 	return string(b), nil
 }
 
-// checkBuildUpdate reports whether a build-mode container's derived image is stale relative to its base image. It pulls ONLY the base image (never the local derived tag), then determines staleness from ground truth: an image built FROM a base starts with exactly the base's RootFS layers, so the base being a layer prefix of the derived image means the derived image extends the CURRENT base. This needs no persisted state -- it survives updater restarts and detects staleness that predates this process (the failure mode of the first-seen-digest baseline, which silently adopted whatever the registry served on the first cycle after every restart).
+// checkBuildUpdate reports whether a build-mode container's derived image is stale relative to its base image. It pulls ONLY the base image (never the local derived tag), then determines staleness from ground truth. An image built FROM a base starts with exactly the base's RootFS layers. The base being a layer prefix of the derived image means the derived image extends the CURRENT base. This needs no persisted state -- it survives updater restarts and detects staleness that predates this process (the failure mode of the first-seen-digest baseline, which silently adopted whatever the registry served on the first cycle after every restart).
 //
 // newBase is non-empty when a rebuild is warranted. oldBase is the previously-recorded base identity for reporting (may be empty when staleness is detected on the first cycle after a restart). verified is true when the outcome came from the layer check rather than the digest fallback.
 func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo, resolveAuth AuthResolver) (oldBase, newBase string, verified bool, err error) {
@@ -352,11 +352,8 @@ func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo,
 	return prev, "", false, nil
 }
 
-// derivedImageStale is the layer-prefix ground-truth check: it inspects the
-// freshly pulled base image and the image the service's container runs, and
-// reports the container's image stale when the base's layers are not a prefix
-// of its layers. ok is false when either side's layers cannot be determined,
-// in which case the caller must fall back to digest comparison.
+// derivedImageStale is the layer-prefix ground-truth check. It inspects the freshly pulled base image and the image the service's container runs, and reports the container's image stale. This happens when the base's layers are not a prefix of its layers. ok is false when either side's layers cannot be determined, in which
+// case the caller must fall back to digest comparison.
 func derivedImageStale(ctx context.Context, cli DockerClient, info ContainerInfo) (stale, ok bool) {
 	baseLayers := imageLayersByRef(ctx, cli, info.BaseImage)
 	derivedLayers := imageLayersByRef(ctx, cli, runningImageID(ctx, cli, info))
@@ -410,8 +407,8 @@ func lookupBaseDigest(key string) (string, bool) {
 }
 
 // recordBuiltBase records the base identity the derived image was built from
-// (or verified against), so later cycles can report the old->new transition
-// and the digest fallback compares against it.
+// (or verified against), so later cycles can report the old->new transition.
+// The digest fallback compares against it.
 func recordBuiltBase(info ContainerInfo, baseDigest string) {
 	if baseDigest == "" {
 		return
@@ -422,9 +419,10 @@ func recordBuiltBase(info ContainerInfo, baseDigest string) {
 	baseDigestStore.Unlock()
 }
 
-// rebuildAndRecreate rebuilds the service's image via `docker compose build --pull` and, only if the rebuild produced a different image than the one the container runs, recreates the service via `docker compose up -d`. Mirrors the "only recreate on real change" behavior of image mode: a cache-hit rebuild that yields the same image is a no-op (no churn). After a successful rebuild it records the new base identity so the next cycle is a no-op.
+// rebuildAndRecreate rebuilds the service's image. Via `docker compose build --pull` and, only if the rebuild produced a different image than the one the container runs, recreates the service via `docker compose up -d`. Mirrors the "only recreate on real change" behavior of image mode: a cache-hit rebuild that yields the same image is a no-op (no churn). After a successful rebuild it records the new base identity so the next cycle is a
+// no-op.
 //
-// verifyPrefix is true when the rebuild was triggered by the layer-prefix check; in that case a completed rebuild whose image STILL does not extend the base proves the build is prefix-incapable, and the service is switched to digest tracking so the layer check cannot rebuild it in a loop.
+// verifyPrefix is true when the rebuild was triggered by the layer-prefix check. In that case a completed rebuild whose image STILL does not extend the base proves the build is prefix-incapable. The service is switched to digest tracking so the layer check cannot rebuild it in a loop.
 //
 // It honors the post-update health check by polling the recreated container; rolling back is delegated to compose (re-running up -d with the prior image is not generically possible here; instead we report a health failure).
 func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, newBase string, verifyPrefix bool) (changed bool, err error) {
@@ -484,9 +482,9 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 }
 
 // serviceContainerState inspects the service's current container once and
-// returns both the content ID of the image it runs ("" if undeterminable)
-// and the image reference it was created with (e.g. "opencode:local", the
-// tag `compose build` re-points; falls back to info.Image).
+// returns. Both the content ID of the image it runs ("" if undeterminable)
+// and the image reference it was created with (e.g. "opencode:local". The tag
+// `compose build` re-points. Falls back to info.Image).
 func serviceContainerState(ctx context.Context, cli DockerClient, info ContainerInfo) (runningID, imageRef string) {
 	imageRef = info.Image
 	inspect, err := cli.ContainerInspect(ctx, currentServiceContainerID(ctx, cli, info))

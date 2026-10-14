@@ -9,7 +9,7 @@ const UPDATED_HIGHLIGHT_MAX_ALPHA = 0.22;
 const GREEN_RGB = "63,185,80";
 
 // ApiContainer mirrors the JSON emitted by apiContainer in dashboard.go. Keeping
-// it in sync is the whole point of the TypeScript rewrite: a renamed or
+// it in sync is the whole point of the TypeScript rewrite. A renamed or
 // wrong-typed field here is a compile error instead of a silent `undefined`.
 interface ApiContainer {
   name: string;
@@ -147,7 +147,7 @@ function uptimeText(c: ApiContainer): string | null {
 
 // The text of each table cell lives in its own function, and both the cell
 // builder and stateSnapshot() call it. Anything the table draws is therefore
-// reachable by the copy button by construction — a value the snapshot could
+// reachable by the copy button by construction. A value the snapshot could
 // omit is a value no column can render either.
 
 // stateIndicator is the colour of the row's state dot: the reported health
@@ -207,7 +207,7 @@ function monitoringText(c: ApiContainer): string {
 }
 
 // autoUpdateCell says who keeps the container current. Reporting watchtower's
-// containers as "Manual" was the defect: they ARE updated, so the empty columns
+// containers as "Manual" was the defect. They ARE updated, so the empty columns
 // beside them read as neglect and send the operator after a missing label.
 function autoUpdateCell(c: ApiContainer): HTMLElement {
   if (c.updater === "both") {
@@ -477,8 +477,8 @@ function errored(c: ApiContainer): boolean {
 }
 
 // driftText states a compose drift with every fact needed to act on it: the
-// service, the files, both hashes or the error, and the command that applies
-// the file.
+// service and the files. This also covers both hashes or the error, and the
+// command that applies the file.
 function driftText(d: ApiComposeDrift): string {
   const where = "service " + d.service + " in " + d.config_files.join(", ");
   if (d.state === "unknown") {
@@ -492,8 +492,8 @@ function driftText(d: ApiComposeDrift): string {
 
 // errorReport renders every current error as plain text for pasting into an
 // issue or a chat. One block per container: what it is, what it was trying to
-// move to, and the full untruncated error the Upstream column can only show a
-// clipped version of.
+// move to, and the full untruncated error the Upstream. Column can only show
+// a clipped version of.
 function errorReport(data: ApiResponse): string {
   const rows = (data.containers || []).filter(errored);
   const header = "docker-updater — " + rows.length + " error" + (rows.length === 1 ? "" : "s") +
@@ -546,7 +546,7 @@ function stateSnapshot(state: DashboardState): string {
 }
 
 // copyText writes to the clipboard, falling back to a hidden textarea +
-// execCommand: the dashboard is normally served over plain http on a LAN, where
+// execCommand. The dashboard is normally served over plain http on a LAN, where
 // navigator.clipboard does not exist (non-secure context).
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -690,9 +690,9 @@ function expandedGroups(): Record<string, boolean> {
 }
 
 // updatedHighlight computes the fading green background for a container whose
-// last update was applied within UPDATED_HIGHLIGHT_MS: full strength when
-// fresh, linearly down to zero at the end of the window. Returns null once the
-// window has passed (or when the container was never updated).
+// last update was applied within UPDATED_HIGHLIGHT_MS. This covers full
+// strength when fresh, linearly down to zero at the end of the window. Returns
+// null once the window has passed (or when the container was never updated).
 function updatedHighlight(c: ApiContainer, now: number): { background: string; title: string } | null {
   if (!c.last_updated) return null;
   const then = new Date(c.last_updated).getTime();
@@ -764,9 +764,10 @@ function driftLine(c: ApiContainer, ui: UiState): HTMLElement[] {
   return [line, list];
 }
 
-// logsLink opens the container's own output. A container in a restart loop
-// explains itself there and nowhere else, and the row used to end at
-// "Restarting (126)" — a status that names the failure and hides the reason.
+// logsLink opens the container's own output. Consider a container in a restart
+// loop. That container explains itself there and nowhere else, and the row
+// used to end at "Restarting (126)" — a status that names the failure. It
+// hides the reason.
 function logsLink(c: ApiContainer): HTMLElement {
   const a = el("button", { class: "logs-link", type: "button", title: "Show this container's recent output" }, "logs");
   a.addEventListener("click", (ev) => {
@@ -824,9 +825,9 @@ function setText(id: string, text: string | number): void {
 }
 
 // render draws the state. Everything it puts on screen is derived here, from
-// that one object — nothing is read back out of the DOM, and nothing it draws
-// is stored. Given the same state it produces the same page, which is what
-// makes a copied snapshot reproducible.
+// that one object. Nothing is read back out of the DOM, and nothing it draws is
+// stored. Given the same state it produces the same page, which is what makes a
+// copied snapshot reproducible.
 function render(state: DashboardState): void {
   const data: ApiResponse = state;
   const ui = state.ui;
@@ -882,7 +883,7 @@ function render(state: DashboardState): void {
 
   // Row contents, summary counts, the hidden class, and the open state change
   // per render. Applying `open` from the state is what makes a re-render
-  // reproduce the page; in normal use it writes back the value it was read
+  // reproduce the page. In normal use it writes back the value it was read
   // from, so an expand/collapse survives every poll.
   for (const g of GROUPS) {
     const members = visible.filter(g.match);
@@ -1009,7 +1010,7 @@ const REQUIRED_IDS: string[] = [
 // renderOutOfSyncBanner replaces the cryptic "replaceChildren of null" crash
 // with a readable full-width explanation of what happened. Inline styles on
 // purpose: in the mixed-asset scenario the stylesheet may be from yet another
-// build, so the banner cannot rely on any class existing.
+// build. The banner cannot rely on any class existing.
 function renderOutOfSyncBanner(missing: string[]): void {
   const banner = el(
     "div",

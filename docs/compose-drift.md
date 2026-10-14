@@ -47,7 +47,7 @@ The list is unavailable when compose fails, or when it wants another write befor
 
 ## The recreate
 
-The `recreate` button queues a recreate of the file the dashboard shows. The queue is in memory, and a restart of docker-updater forgets it. At the next check the recreate runs:
+The `recreate` button queues a recreate of the file the dashboard shows. The queue is in memory, and a start of docker-updater forgets it. At the next check the recreate runs:
 
 ```sh
 docker compose -f <config_files...> --project-directory <working_dir> -p <project> up -d --no-deps <service>

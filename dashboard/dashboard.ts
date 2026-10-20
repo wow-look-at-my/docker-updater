@@ -855,7 +855,6 @@ function render(state: DashboardState): void {
 
   document.getElementById("dry-run-badge")!.classList.toggle("hidden", !data.dry_run);
   // Derived from the state so a page drawn from a copy shows the same note.
-  // With a source configured the poller owns this badge instead.
   if (!data.stats_url) setStatsNote("no stats source (DOCKER_UPDATER_STATS_URL unset)", "badge-dim");
   setText("cfg-interval", data.interval || "—");
   setText("cfg-label", data.label || "—");
@@ -1083,18 +1082,10 @@ if (missingIds.length > 0) {
   initDashboard();
 }
 
-// -- Resource graphs ----------------------------------------------------------
+// -- Resource graphs
 //
-// Host cpu/ram/disk/net/gpu in the top bar and one strip per container row,
-// every number from the simple-stats-api named by the payload's stats_url.
-// This page measures nothing: it polls that API on the API's own interval and
-// pushes values into <perf-graph> elements (js-snippets, loaded at runtime).
-// Strips are cached per container name and MOVED into each new row, so the
-// five-second re-render never drops a graph's history.
-//
-// Honesty: no stats_url says so in the top bar; an unreachable source dims the
-// strips and shows a badge; a metric the source does not report keeps its
-// gauge empty behind a tooltip. Nothing draws a flat zero.
+// Host cpu/ram/disk/net/gpu in the top bar and one strip per container row, every number from the simple-stats-api. That simple-stats-api is named by the payload's
+// stats_url.
 
 const PERF_GRAPH_URL = "https://sites.pazer.build/js-snippets/branch/library/ui/perf-graph.js";
 const STATS_SEED_HISTORY = 300;
@@ -1253,8 +1244,7 @@ class StatStrip {
 }
 
 // Per-container strips outlive rows: row() asks for the strip by name and the
-// node moves into the new row. A container the source stops reporting keeps
-// its strip dimmed with the reason, until the container itself leaves the page.
+// node moves into the new row.
 const containerStrips = new Map<string, StatStrip>();
 let hostStrip: StatStrip | null = null;
 let latestStats: StatsResponse | null = null;
@@ -1305,8 +1295,7 @@ function applyStats(r: StatsResponse, seed: boolean): void {
   for (const name of containerStrips.keys()) if (!onPage.has(name)) containerStrips.delete(name);
 }
 
-// tsc is configured with module "none", which rejects a dynamic import in
-// source; the browser supports it in a classic script, so it goes through Function.
+// tsc is configured with module "none", which rejects a dynamic import in source; the browser supports it in a classic script.
 const importModule = new Function("u", "return import(u)") as (u: string) => Promise<unknown>;
 
 async function loadPerfGraphForever(): Promise<void> {

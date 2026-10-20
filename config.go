@@ -18,9 +18,7 @@ type Config struct {
 	ConfigPath    string
 	DashboardAddr string
 
-	// StatsURL is the base URL of a simple-stats-api instance. The dashboard
-	// polls it from the browser for host and per-container resource graphs.
-	// Empty means the dashboard says no stats source is configured.
+	// StatsURL is the base URL of a simple-stats-api instance.
 	StatsURL string
 
 	// SelfContainerID is the ID of docker-updater's own container.

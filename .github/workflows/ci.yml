@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: wow-look-at-my/go-toolchain@master
+      - uses: wow-look-at-my/go-toolchain@lkgb
         with:
           generate: 3c60da638b28
 
@@ -54,7 +54,7 @@ jobs:
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@lkgb
         with:
           project: dats
       # go-toolchain hands build/ over through the org cache, and the image copies the binary from there.
@@ -73,7 +73,7 @@ jobs:
 
   publish-ghcr:
     needs: [test, image-e2e]
-    uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
+    uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@lkgb
 
   # image-e2e is the only job that executes the APE these bytes are.
   publish-buildhost:
@@ -88,6 +88,6 @@ jobs:
         with:
           name: go-build-test.broot
           path: build/
-      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@lkgb
         with:
           path: build

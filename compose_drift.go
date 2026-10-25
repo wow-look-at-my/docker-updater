@@ -1,3 +1,5 @@
+// composeConfigHashLabel holds the service hash compose stamps on each container it creates.
+
 package main
 
 import (
@@ -6,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -40,6 +43,29 @@ type ComposeDrift struct {
 	Differences []ComposeDifference `json:"differences,omitempty"`
 	// DifferencesError says why the differences could not be listed.
 	DifferencesError string `json:"differences_error,omitempty"`
+	// MissingImage is the image the file names when the daemon does not have it. The recreate pulls it.
+	MissingImage string `json:"missing_image,omitempty"`
+}
+
+// noSuchImage finds the image in the daemon's "No such image" error.
+var noSuchImage = regexp.MustCompile(`No such image: ([^\s"'\\]+)`)
+
+// fileImage is the image the compose file names, when the drift knows it and
+// it is not running. It is "" otherwise.
+func (d *ComposeDrift) fileImage(running string) string {
+	if d == nil {
+		return ""
+	}
+	img := d.MissingImage
+	for _, diff := range d.Differences {
+		if diff.Field == "Config.Image" {
+			img = strings.Trim(diff.File, `"`)
+		}
+	}
+	if img == "" || img == running || img == none {
+		return ""
+	}
+	return img
 }
 
 // applies reports whether the updater can recreate this container from its
@@ -116,6 +142,11 @@ func checkComposeDrift(ctx context.Context, cli DockerClient, runner composeRunn
 		var err error
 		if d.Differences, err = driftDifferences(ctx, cli, runner, info, target); err != nil {
 			d.DifferencesError = err.Error()
+			// The capture never pulls. An image the daemon lacks is no fault of the file.
+			if m := noSuchImage.FindStringSubmatch(err.Error()); m != nil {
+				d.MissingImage = m[1]
+				d.DifferencesError = m[1] + " is not pulled yet; the recreate pulls it"
+			}
 		}
 	}
 	log.Print(d.logLine(info.Name))
@@ -165,6 +196,10 @@ func (d ComposeDrift) logLine(name string) string {
 // an operator queued that and the check found no update to do it. It goes
 // through the same pre-update gate and dry-run mode as an update. A held-back
 // update keeps the drift: the update applies the file when it goes.
+//
+// A check that failed does not hold the recreate back. The file can name an
+// image other than the one nobody can check, and then the recreate is the fix.
+// A failed update does hold it back.
 func applyComposeDrift(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, cfg Config, result UpdateResult) UpdateResult {
 	if !info.ComposeRecreateQueued || !result.Drift.applies() {
 		return result
@@ -174,7 +209,7 @@ func applyComposeDrift(ctx context.Context, cli DockerClient, runner composeRunn
 		result.Drift = nil
 		return result
 	}
-	if result.NewRef != "" || result.Error != nil || result.Skipped || result.Container.Unmonitorable != "" {
+	if result.NewRef != "" || (result.Error != nil && !result.CheckFailed) || result.Skipped || result.Container.Unmonitorable != "" {
 		return result
 	}
 
@@ -192,18 +227,40 @@ func applyComposeDrift(ctx context.Context, cli DockerClient, runner composeRunn
 	}
 	if err := resyncViaCompose(ctx, cli, runner, info); err != nil {
 		result.Error = err
+		result.CheckFailed = false
 		log.Printf("container %s: error recreating from the compose file: %v", info.Name, err)
 		return result
 	}
+	// The container now runs what the file names, so the failed check is about a container that is gone.
+	result.Error = nil
+	result.CheckFailed = false
 	result.Updated = true
 	result.Drift = nil
 	return result
 }
 
+// explainCheckFailure adds the way out to a failed check of a container whose
+// compose file names another image: a recreate from the file.
+func explainCheckFailure(info ContainerInfo, result UpdateResult) UpdateResult {
+	if !result.CheckFailed || result.Error == nil || !result.Drift.applies() {
+		return result
+	}
+	img := result.Drift.fileImage(info.Image)
+	if img == "" {
+		return result
+	}
+	if info.ComposeRecreateQueued {
+		result.Error = fmt.Errorf("%w. The compose file names %s, and the queued recreate from the compose file moves the container to it", result.Error, img)
+		return result
+	}
+	result.Error = fmt.Errorf("%w. The compose file names %s: queue a recreate from the compose file on the dashboard to move the container off this image", result.Error, img)
+	return result
+}
+
 // resyncViaCompose recreates a compose service from its compose file with
-// `docker compose up -d --no-deps`. The image stays the same. Compose keeps
-// no copy of the config, so a failure after compose replaced the container
-// cannot roll back.
+// `docker compose up -d --no-deps`. Compose pulls the image the file names
+// when the daemon does not have it. Compose keeps no copy of the config, so a
+// failure after compose replaced the container cannot roll back.
 func resyncViaCompose(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo) error {
 	target := composeTargetFor(info)
 	inspect, err := cli.ContainerInspect(ctx, info.ID)

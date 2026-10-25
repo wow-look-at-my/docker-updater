@@ -1,3 +1,5 @@
+// selfAttacher puts docker-updater on a network of every container it monitors.
+
 package main
 
 import (

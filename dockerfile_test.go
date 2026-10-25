@@ -1,5 +1,7 @@
 package main
 
+import _ "embed"
+
 import (
 	"testing"
 
@@ -12,41 +14,19 @@ func TestParseBaseImageSingleStage(t *testing.T) {
 }
 
 func TestParseBaseImageWithComments(t *testing.T) {
-	df := `# syntax=docker/dockerfile:1
-# this is a comment
-FROM golang:1.25 AS builder
-RUN go build
-
-# final stage
-FROM gcr.io/distroless/static:nonroot
-COPY --from=builder /app /app
-`
+	df := testParseBaseImageWithCommentsDockerfile
 	// Final stage base is the distroless image, not the builder alias.
 	assert.Equal(t, "gcr.io/distroless/static:nonroot", parseBaseImageFromDockerfile(df))
 }
 
 func TestParseBaseImageMultiStageWatchesFinal(t *testing.T) {
-	df := `FROM node:22 AS frontend
-RUN build-frontend
-
-FROM golang:1.25 AS backend
-RUN build-backend
-
-FROM debian:bookworm-slim
-COPY --from=backend /server /server
-`
+	df := testParseBaseImageMultiStageWatchesFinalDockerfile
 	assert.Equal(t, "debian:bookworm-slim", parseBaseImageFromDockerfile(df))
 }
 
 func TestParseBaseImageFinalStageReferencesEarlierStage(t *testing.T) {
-	// A final `FROM builder` (an AS-name) must resolve back to builder's own
-	// registry base, not the build-local alias.
-	df := `FROM ghcr.io/org/base:1.2 AS builder
-RUN make
-
-FROM builder
-CMD ["/run"]
-`
+	// A final `FROM builder` (an AS-name) must resolve back to builder's own registry base, not the build-local alias.
+	df := testParseBaseImageFinalStageReferencesEarlierStageDockerfile
 	assert.Equal(t, "ghcr.io/org/base:1.2", parseBaseImageFromDockerfile(df))
 }
 
@@ -92,3 +72,12 @@ func TestIsRegistryBase(t *testing.T) {
 	assert.False(t, isRegistryBase("${BASE_IMAGE}"))
 	assert.False(t, isRegistryBase("$BASE"))
 }
+
+//go:embed testdata/test-parse-base-image-with-comments.dockerfile
+var testParseBaseImageWithCommentsDockerfile string
+
+//go:embed testdata/test-parse-base-image-multi-stage-watches-final.dockerfile
+var testParseBaseImageMultiStageWatchesFinalDockerfile string
+
+//go:embed testdata/test-parse-base-image-final-stage-references-earlier-stage.dockerfile
+var testParseBaseImageFinalStageReferencesEarlierStageDockerfile string

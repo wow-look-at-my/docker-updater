@@ -1,3 +1,5 @@
+// rollingNextSuffix names the container a rolling update starts before it stops the one it replaces.
+
 package main
 
 import (

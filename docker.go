@@ -1,3 +1,5 @@
+// DockerClient defines the Docker API methods we use, allowing test mocks.
+
 package main
 
 import (

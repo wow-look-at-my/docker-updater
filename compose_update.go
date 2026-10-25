@@ -1,3 +1,5 @@
+// composeManaged reports whether a container was created by docker compose and carries enough project metadata.
+
 package main
 
 import (

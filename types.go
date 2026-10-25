@@ -1,3 +1,5 @@
+// UpdateMode determines how a container is checked for updates.
+
 package main
 
 import "time"
@@ -80,11 +82,13 @@ type UpdateResult struct {
 	NewCommit    string
 	NewCommitURL string
 	Error        error
-	CheckedAt    time.Time
-	DryRun       bool
-	Skipped      bool
-	SkipReason   string
-	Pulled       bool // a registry pull was performed during this check
+	// CheckFailed marks Error as a failure to check for an update. No update was tried.
+	CheckFailed bool
+	CheckedAt   time.Time
+	DryRun      bool
+	Skipped     bool
+	SkipReason  string
+	Pulled      bool // a registry pull was performed during this check
 	// Warnings are operator-actionable notes about how this container is configured.
 	Warnings []string
 	// Drift is set when a compose-managed container no longer matches its compose file, or when the comparison failed.

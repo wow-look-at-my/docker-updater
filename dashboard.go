@@ -1,3 +1,5 @@
+// dashboardServer serves the status dashboard and its JSON API.
+
 package main
 
 import (

@@ -1,3 +1,5 @@
+# The go:generate directives in dashboard.go compile dashboard.js, which the embed needs and which is not committed.
+
 name: CI
 
 on:
@@ -28,7 +30,7 @@ jobs:
           node-version: '22'
       - uses: wow-look-at-my/go-toolchain@lkgb
         with:
-          generate: 3c60da638b28
+          generate: 5ad8eacfc541
 
   dashboard:
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}

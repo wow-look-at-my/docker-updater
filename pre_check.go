@@ -1,3 +1,5 @@
+// The standard pre-update endpoint is optional and discovered, not declared: an unreachable container means "nothing to ask".
+
 package main
 
 import (

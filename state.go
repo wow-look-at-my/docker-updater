@@ -1,3 +1,5 @@
+// ContainerStatus is the updater's tracked knowledge about a single monitored container, captured after each update-check cycle.
+
 package main
 
 import (
@@ -160,6 +162,9 @@ func (s *Store) record(results []UpdateResult) {
 		switch {
 		case r.Error != nil:
 			st.LastError = r.Error.Error()
+			// A failed check can still hold back a queued recreate from the compose file.
+			st.Skipped = r.Skipped
+			st.SkipReason = r.SkipReason
 			if r.NewRef != "" {
 				st.UpdateAvailable = true
 				st.AvailableRef = shortRef(r.NewRef)

@@ -1,3 +1,5 @@
+// Watchtower is the other updater a host commonly runs, and the dashboard used to report everything it manages as "Manual".
+
 package main
 
 // Watchtower is the other updater a host commonly runs, and the dashboard

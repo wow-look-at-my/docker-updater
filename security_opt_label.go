@@ -1,3 +1,5 @@
+// securityOptLabel names the security options an image needs, one --security-opt value per whitespace-separated word.
+
 package main
 
 import (

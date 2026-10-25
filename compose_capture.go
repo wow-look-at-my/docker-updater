@@ -1,3 +1,5 @@
+// createPath matches the Docker API call that creates a container, with or without a version prefix.
+
 package main
 
 import (

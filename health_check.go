@@ -1,3 +1,5 @@
+// healthCheckPollInterval is the polling interval for HTTP and exec health checks.
+
 package main
 
 import (

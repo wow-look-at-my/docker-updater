@@ -1,3 +1,5 @@
+// Config holds the service configuration parsed from environment variables.
+
 package main
 
 import (

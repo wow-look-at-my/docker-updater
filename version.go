@@ -1,3 +1,5 @@
+// version is an explicit build identifier, settable at link time: go build -ldflags "-X main.version=<sha>" It is empty by default.
+
 package main
 
 import "runtime/debug"

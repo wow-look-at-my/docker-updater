@@ -1,3 +1,5 @@
+// resolveImageRef determines the registry reference to poll for updates, independent of whether the running image still carries a repo tag.
+
 package main
 
 import (

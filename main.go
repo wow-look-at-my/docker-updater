@@ -1,3 +1,5 @@
+// Hidden subcommand: the detached helper a self-update spawns runs `/docker-updater finish-self-update ...`.
+
 package main
 
 import (

@@ -24,6 +24,10 @@ Put the label `docker-updater.enable=true` on each container to monitor. The ser
 
 The dashboard lists every container on this host, its update state, and any error from the last cycle. A held-back update has a "force update" button: after a confirmation, it applies the update past the pre-check and dry-run mode. Put the dashboard behind a reverse proxy with access control.
 
+Set `DOCKER_UPDATER_STATS_URL` to the base URL of a [simple-stats-api](https://github.com/wow-look-at-my/simple-stats-api) instance to get resource graphs. The top cpu of the bar shows host, ram, disk, net and gpu. Every container row gets the same gauges for that container. The browser polls that API directly. It must be reachable from the browser. It needs the Docker socket mounted for the per-container figures.
+
+Without the variable the top bar says no stats source is configured. docker-updater measures nothing itself.
+
 A container can carry the label and still be impossible to check. It runs a bare image ID, or image mode finds an image that is in no registry. The dashboard gives the reason and counts the container as an error. Such a container is never up to date, because nothing looked.
 
 ## Update-check endpoints

@@ -20,6 +20,9 @@ type Config struct {
 	ConfigPath    string
 	DashboardAddr string
 
+	// StatsURL is the base URL of a simple-stats-api instance.
+	StatsURL string
+
 	// SelfContainerID is the ID of docker-updater's own container.
 	SelfContainerID string
 
@@ -80,6 +83,7 @@ func loadConfig() (Config, error) {
 	if v, ok := os.LookupEnv("DOCKER_UPDATER_DASHBOARD_ADDR"); ok {
 		c.DashboardAddr = v
 	}
+	c.StatsURL = os.Getenv("DOCKER_UPDATER_STATS_URL")
 
 	// Inbound GitHub webhook (opt-in: disabled unless an address is given).
 	c.GitHubWebhookAddr = os.Getenv("DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR")

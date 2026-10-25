@@ -1,3 +1,5 @@
+// composeRunner runs `docker compose ...` invocations.
+
 package main
 
 import (

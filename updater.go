@@ -1,3 +1,5 @@
+// runUpdateCheck checks all monitored containers for updates and applies them. queue holds the recreates from the compose file that an operator asked for.
+
 package main
 
 import (
@@ -103,6 +105,7 @@ func checkContainers(ctx context.Context, cli DockerClient, cfg Config, resolveA
 			log.Printf("container %s cannot be updated: %s", info.Name, result.Container.Unmonitorable)
 		}
 		result = applyComposeDrift(ctx, cli, defaultComposeRunner, info, cfg, result)
+		result = explainCheckFailure(info, result)
 		settleQueuedRecreate(queue, info.Name, result.Drift)
 
 		results = append(results, result)
@@ -117,6 +120,7 @@ func checkAndUpdateImage(ctx context.Context, cli DockerClient, runner composeRu
 	newDigest, fetched, err := checkImageUpdate(ctx, cli, info, resolveAuth)
 	if err != nil {
 		result.Error = err
+		result.CheckFailed = true
 		log.Printf("container %s: error checking image: %v", info.Name, err)
 		return result
 	}
@@ -160,6 +164,7 @@ func checkAndUpdateGit(ctx context.Context, cli DockerClient, runner composeRunn
 	newSHA, err := checkGitUpdate(info)
 	if err != nil {
 		result.Error = err
+		result.CheckFailed = true
 		log.Printf("container %s: error checking git: %v", info.Name, err)
 		return result
 	}
@@ -212,6 +217,7 @@ func checkAndUpdateBuild(ctx context.Context, cli DockerClient, runner composeRu
 	oldBase, newBase, verified, err := checkBuildUpdate(ctx, cli, info, resolveAuth)
 	if err != nil {
 		result.Error = err
+		result.CheckFailed = true
 		log.Printf("container %s: error checking base image: %v", info.Name, err)
 		return result
 	}

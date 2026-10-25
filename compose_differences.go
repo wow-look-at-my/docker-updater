@@ -1,3 +1,5 @@
+// none marks a value one side does not set.
+
 package main
 
 import (

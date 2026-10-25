@@ -1,3 +1,5 @@
+// parseBaseImageFromDockerfile extracts the base image of the *final* build stage from a Dockerfile's text.
+
 package main
 
 import (

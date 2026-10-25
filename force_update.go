@@ -1,3 +1,5 @@
+// forceQueueDepth is how many force-update requests can wait for the loop.
+
 package main
 
 import (

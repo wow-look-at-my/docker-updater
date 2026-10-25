@@ -1,3 +1,5 @@
+// The standardized update-liveness contract a monitored container serves on its own HTTP port.
+
 package main
 
 import (

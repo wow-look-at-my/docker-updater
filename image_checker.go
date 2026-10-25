@@ -1,3 +1,5 @@
+// checkImageUpdate pulls the latest image and compares digests.
+
 package main
 
 import (

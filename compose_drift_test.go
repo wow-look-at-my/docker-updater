@@ -394,7 +394,7 @@ func TestApplyComposeDriftLeavesOtherOutcomesAlone(t *testing.T) {
 		{"blocked drift", UpdateResult{Container: info, Drift: &ComposeDrift{State: driftFound, Blocked: selfDriftBlocked}}, true},
 		{"an applied update applied the file", UpdateResult{Container: info, Drift: drift, Updated: true, NewRef: "sha256:new"}, false},
 		{"a held update applies the file when it goes", UpdateResult{Container: info, Drift: drift, NewRef: "sha256:new", Skipped: true}, true},
-		{"a failed check", UpdateResult{Container: info, Drift: drift, Error: errors.New("pull failed")}, true},
+		{"a failed update", UpdateResult{Container: info, Drift: drift, Error: errors.New("compose up failed")}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

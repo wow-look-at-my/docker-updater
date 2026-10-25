@@ -1,3 +1,5 @@
+// clearInheritedImageDefaults removes from a container's config every value the image it was created from supplied.
+
 package main
 
 import (

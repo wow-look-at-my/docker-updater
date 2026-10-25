@@ -1,3 +1,5 @@
+// maxWebhookBody caps how much of a webhook request body we read.
+
 package main
 
 import (

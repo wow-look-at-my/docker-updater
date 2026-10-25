@@ -45,6 +45,8 @@ Every value shows in full, environment values included. A seccomp profile shows 
 
 The list is unavailable when compose fails, or when it wants another write before the create. One example is a dependent service with `restart: true`, which compose stops first. The drift line then says why.
 
+The capture never pulls. When the file names an image the daemon does not have, the drift line says `<image> is not pulled yet; the recreate pulls it`. The `recreate` button stays available.
+
 ## The recreate
 
 The `recreate` button queues a recreate of the file the dashboard shows. The queue is in memory, and a start of docker-updater forgets it. At the next check the recreate runs:
@@ -53,7 +55,11 @@ The `recreate` button queues a recreate of the file the dashboard shows. The que
 docker compose -f <config_files...> --project-directory <working_dir> -p <project> up -d --no-deps <service>
 ```
 
+With the default pull policy, compose pulls the image the file names when the daemon does not have it.
+
 It waits on the same gates as an update. The pre-update check and dry-run mode hold it back. `force recreate` skips both and runs it now. `cancel` drops it. The post-update health check runs on the new container.
+
+A failed check of the running image does not hold the recreate back. One example is a locally built image that is in no registry. The file can name another image, and then the recreate is what moves the container off the image nobody can check. A successful recreate clears the error and ends the `STUCK` run. While the check fails and the file names another image, the error says to queue the recreate. A failed update is different: an update that tried and failed holds the queued recreate back.
 
 The queue names the file hash the operator approved. If the file changes again before the recreate runs, the entry is dropped and the dashboard offers `recreate` again.
 

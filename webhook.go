@@ -1,3 +1,5 @@
+// sendWebhookNotifications sends update results to the configured webhook.
+
 package main
 
 import (

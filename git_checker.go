@@ -1,3 +1,5 @@
+// gitRefStore tracks the last-seen commit SHA for each container+ref pair.
+
 package main
 
 import (

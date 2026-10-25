@@ -1,3 +1,5 @@
+// docker-updater cannot update its own container the way it updates any other one.
+
 package main
 
 import (

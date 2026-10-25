@@ -1,3 +1,5 @@
+// A container that fails to start says why in its own logs, and nowhere else.
+
 package main
 
 import (

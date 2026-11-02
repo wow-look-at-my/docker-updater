@@ -20,9 +20,7 @@ import (
 // Config.Image (or RepoDigests) instead, and never pull a bare image ID.
 
 func TestListMonitoredContainersUntaggedRunningImage(t *testing.T) {
-	// Reproduces the production failure: RepoTags is empty, but RepoDigests and
-	// a tagged Config.Image are present. The resolved pull reference must be the
-	// repo:tag, never the bare image ID.
+	// Reproduces the production failure: RepoTags is empty, but RepoDigests and a tagged Config.Image are present.
 	bareID := "sha256:" + strings.Repeat("3", 64)
 	runningManifest := "sha256:" + strings.Repeat("a", 64)
 	repoDigest := "ghcr.io/wow-look-at-my/buildhost@" + runningManifest
@@ -60,15 +58,12 @@ func TestListMonitoredContainersUntaggedRunningImage(t *testing.T) {
 	c := containers[0]
 	assert.Equal(t, "ghcr.io/wow-look-at-my/buildhost:latest", c.Image)
 	assert.NotEqual(t, bareID, c.Image)
-	// The running digest is the manifest digest recovered from RepoDigests,
-	// not the bare content ID, and does not require a tag.
+	// The running digest is the manifest digest recovered from RepoDigests, not the bare content ID.
 	assert.Equal(t, runningManifest, c.ImageDigest)
 }
 
 func TestListMonitoredContainersUnresolvableSkipped(t *testing.T) {
-	// A locally-built image with no registry origin: Config.Image is a bare ID
-	// and there are no RepoDigests. It cannot be polled, so it is reported as
-	// unmonitorable rather than dropped, and it does not error the whole loop.
+	// A locally-built image with no registry origin: Config.Image is a bare ID and there are no RepoDigests.
 	bareID := "sha256:" + strings.Repeat("4", 64)
 	cli := &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
@@ -100,8 +95,7 @@ func TestListMonitoredContainersUnresolvableSkipped(t *testing.T) {
 }
 
 func TestListMonitoredContainersConfigImageBareFallsBackToRepoDigest(t *testing.T) {
-	// Config.Image is itself a bare ID (container created from a raw image ID),
-	// but the running image carries RepoDigests, so the repository is recovered.
+	// Config.Image is itself a bare ID (container created from a raw image ID).
 	bareID := "sha256:" + strings.Repeat("5", 64)
 	manifest := "sha256:" + strings.Repeat("b", 64)
 	repoDigest := "ghcr.io/wow-look-at-my/buildhost@" + manifest
@@ -151,10 +145,7 @@ func TestPullImageRejectsBareImageID(t *testing.T) {
 }
 
 func TestRunUpdateCheckUntaggedImageUpdates(t *testing.T) {
-	// End-to-end coverage of the production scenario: the running image lost its
-	// RepoTags (bare ID in the list view), but the container is still checked
-	// correctly and an update is detected when the registry tag advances. DryRun
-	// avoids the recreate handoff.
+	// End-to-end coverage of the production scenario: the running image lost its RepoTags (bare ID in the list view).
 	bareID := "sha256:" + strings.Repeat("3", 64)
 	oldManifest := "sha256:" + strings.Repeat("a", 64)
 	newManifest := "sha256:" + strings.Repeat("b", 64)

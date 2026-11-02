@@ -29,8 +29,7 @@ func TestResetToImageDefaults(t *testing.T) {
 	assert.Empty(t, cfg.User)
 	assert.Empty(t, cfg.WorkingDir)
 	assert.Nil(t, cfg.Healthcheck)
-	// Env and Image are not process fields: the daemon unions Env with the
-	// image's, and Image is the whole point of the update.
+	// Env and Image are not process fields: the daemon unions Env with the image's.
 	assert.Equal(t, []string{"KEEP=me"}, cfg.Env)
 	assert.Equal(t, "myapp:latest", cfg.Image)
 
@@ -38,14 +37,14 @@ func TestResetToImageDefaults(t *testing.T) {
 	assert.False(t, resetToImageDefaults(nil))
 }
 
-// wedgedInspect answers the first inspect with a container whose command an
-// operator set by hand, so clearInheritedImageDefaults cannot attribute it, and
-// answers every later inspect as healthy.
+// wedgedInspect answers the first inspect with a container whose command.
+// An operator set by hand, so clearInheritedImageDefaults cannot attribute
+// it, and answers every later inspect as healthy.
 //
-// The wedge is the COMMAND rather than the entrypoint. The entrypoint now comes
-// from the new image on every update, so it can never reach a start; the command
-// is still cleared only when it matches the old image's, which is what leaves a
-// value nothing can attribute in place.
+// The wedge is the COMMAND rather than the entrypoint. The entrypoint now
+// comes from the new image on every update. It can never reach a start.
+// The command is still cleared only when it matches the image's, which is
+// what leaves a value nothing can attribute in place.
 func wedgedInspect(cmd []string) func(context.Context, string) (types.ContainerJSON, error) {
 	n := 0
 	return func(_ context.Context, _ string) (types.ContainerJSON, error) {
@@ -70,11 +69,11 @@ func wedgedInspect(cmd []string) func(context.Context, string) (types.ContainerJ
 	}
 }
 
-// The wedge this fixes: the container carries a command the new image does not
-// have, and it is not the old image's either, so clearing what the old image
-// supplied leaves it in place. The kernel cannot exec it. Without the retry the
-// updater rolls back on this cycle and every later one, and the deployment stays
-// on the version it already runs.
+// The wedge this fixes: the container carries a command the new image does
+// not have. It is not the image's either, so clearing what the image
+// supplied leaves it in place. The kernel cannot exec it. Without the retry
+// the updater rolls back on this cycle and every later one, and the
+// deployment stays on the version it already runs.
 func TestRollingUpdateRetriesOnTheImagesOwnDefaults(t *testing.T) {
 	t.Serial()
 	var configs []container.Config
@@ -83,7 +82,7 @@ func TestRollingUpdateRetriesOnTheImagesOwnDefaults(t *testing.T) {
 	cli := &mockDocker{
 		containerInspectFn: wedgedInspect([]string{"/gone-from-this-image"}),
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
-			// The old image's command differs, so nothing is cleared.
+			// The image's command differs, so nothing is cleared.
 			return types.ImageInspect{Config: &container.Config{Cmd: []string{"serve"}}}, nil, nil
 		},
 		containerCreateFn: func(_ context.Context, config *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
@@ -133,7 +132,7 @@ func TestRollingUpdateReportsTheFirstCauseWhenTheRetryFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "retry on the image's own defaults also failed")
 }
 
-// A container carrying nothing of its own has nothing to strip, so a failure is
+// A container carrying nothing of its own has nothing to strip. A failure is
 // the image's and the updater must not spend a second start on it.
 func TestRollingUpdateDoesNotRetryWhenThereIsNothingToStrip(t *testing.T) {
 	t.Serial()

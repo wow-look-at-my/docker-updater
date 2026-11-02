@@ -1,3 +1,5 @@
+// health_check.go holds the health check code.
+
 package main
 
 import (
@@ -15,19 +17,17 @@ import (
 )
 
 // healthCheckPollInterval is the polling interval for HTTP and exec health checks.
-// Overridden in tests to keep the suite fast.
 var healthCheckPollInterval = 2 * time.Second
 
 // execPollInterval is the polling interval when waiting for an exec to finish.
-// Overridden in tests to keep the suite fast.
 var execPollInterval = 100 * time.Millisecond
 
-// waitPostUpdateHealthy verifies the new container is healthy after an update.
-// If info.HealthCheckURL is set, it polls via HTTP GET.
-// If info.HealthCheckCommand is set, it polls via exec inside the container.
-// Otherwise it falls back to Docker's HEALTHCHECK status with a budget derived
-// from the container's healthcheck configuration; a container with no
-// HEALTHCHECK at all just has to stay running through a short grace period.
+// waitPostUpdateHealthy verifies the new container is healthy after an
+// update. If info.HealthCheckURL is set, it polls via HTTP GET. If
+// info.HealthCheckCommand is set, it polls via exec inside the container.
+// Otherwise it falls back to Docker's HEALTHCHECK status with a budget
+// derived from the container's healthcheck configuration. A container with
+// no. HEALTHCHECK at all has to stay running through a short grace period.
 func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID string, info ContainerInfo) error {
 	if info.HealthCheckURL != "" {
 		url := info.HealthCheckURL
@@ -44,8 +44,7 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 		log.Printf("container %s: waiting for exec health check: %s", info.Name, info.HealthCheckCommand)
 		return waitExecHealthy(ctx, cli, containerID, info.HealthCheckCommand, info.HealthCheckTimeout)
 	}
-	// No health-check label: fall back to Docker's HEALTHCHECK status. waitHealthy
-	// derives its own budget from the container's healthcheck config.
+	// No health-check label: fall back to Docker's HEALTHCHECK status.
 	return waitHealthy(ctx, cli, containerID)
 }
 
@@ -53,8 +52,8 @@ func waitPostUpdateHealthy(ctx context.Context, cli DockerClient, containerID st
 //
 // Docker gives an endpoint an IP only while the container RUNS, so a container
 // that crash-loops looks exactly like one on host networking. Reporting the
-// network mode alone sends the operator to a label that would change nothing,
-// which is how one entry sat stuck for hours behind advice that did not apply.
+// network mode alone sends the operator to a label that would change nothing.
+// This is how one entry sat stuck for hours behind advice that did not apply.
 // A container that is not running is reported as what it is, with the line it
 // died on.
 func noEndpointError(ctx context.Context, cli DockerClient, containerID string, inspect types.ContainerJSON) error {
@@ -74,14 +73,14 @@ func noEndpointError(ctx context.Context, cli DockerClient, containerID string, 
 }
 
 // rehostToNewContainer points a container-derived health URL at the container
-// the update just started. The URL was built from the address of the container
-// the update destroyed, and Docker both gives the replacement its own IP and
-// may hand the old one to an unrelated container. Only the host moves: a
-// recreated container keeps the port and path it served on.
+// the update started. The URL was built from the address of the container the
+// update destroyed. Docker both gives the replacement its own IP and may hand
+// the one to an unrelated container. Only the host moves: a recreated
+// container keeps the port and path it served on.
 //
-// An address it cannot resolve is a failure, never a fall back to the old one:
-// polling a dead or recycled address either times out the gate or passes it on
-// somebody else's health.
+// An address it cannot resolve is a failure, never a fall back to the one.
+// Polling a dead or recycled address either times out the gate or passes it
+// on somebody else's health.
 func rehostToNewContainer(ctx context.Context, cli DockerClient, containerID, rawURL string) (string, error) {
 	if containerID == "" {
 		return "", fmt.Errorf("health check address: no container found after the update to resolve %s against", rawURL)

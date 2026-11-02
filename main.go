@@ -1,3 +1,5 @@
+// main.go holds the main code.
+
 package main
 
 import (
@@ -14,7 +16,7 @@ func main() {
 
 	// Hidden subcommand: the detached helper a self-update spawns runs
 	// `/docker-updater finish-self-update ...` to recreate the updater's own
-	// container on the new image. It is a one-shot and never starts the loop.
+	// container on the new image.
 	if len(os.Args) > 1 && os.Args[1] == finishSelfUpdateCommand {
 		finishSelfUpdate(os.Args[2:])
 		return
@@ -42,12 +44,7 @@ func main() {
 	}
 	log.Printf("connected to Docker %s (%s)", info.ServerVersion, info.Name)
 
-	// Determine our own container ID. Two things need it: a self-update can't
-	// recreate its own container inline (that would kill this process
-	// mid-swap), so updateContainer routes it through a detached helper; and
-	// attaching to a monitored container's network means naming the container
-	// to connect. An explicit DOCKER_UPDATER_CONTAINER_ID wins; otherwise we
-	// auto-detect.
+	// Determine our own container ID.
 	if cfg.SelfContainerID == "" {
 		cfg.SelfContainerID = detectOwnContainerID()
 	}
@@ -72,10 +69,7 @@ func main() {
 
 	store := newStore()
 
-	// Inbound GitHub webhook (opt-in): a valid delivery requests an immediate
-	// check via this channel. Buffered with depth 1 and filled non-blockingly,
-	// so a burst of deliveries coalesces into at most one pending check. nil
-	// when disabled, in which case runLoop simply never selects on it.
+	// Inbound GitHub webhook (opt-in): a valid delivery requests an immediate check via this channel.
 	var trigger chan struct{}
 	if cfg.GitHubWebhookAddr != "" {
 		trigger = make(chan struct{}, 1)

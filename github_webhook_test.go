@@ -21,9 +21,9 @@ func sign(secret, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-// TestValidSignatureGitHubVector checks our HMAC against the exact known-answer
-// vector published in GitHub's "validating webhook deliveries" docs, proving the
-// scheme is implemented compatibly with what GitHub actually sends.
+// TestValidSignatureGitHubVector checks our HMAC against the exact
+// known-answer vector published in GitHub's "validating webhook deliveries"
+// docs, proving the scheme is implemented compatibly with what GitHub sends.
 func TestValidSignatureGitHubVector(t *testing.T) {
 	secret := []byte("It's a Secret to Everybody")
 	body := []byte("Hello, World!")

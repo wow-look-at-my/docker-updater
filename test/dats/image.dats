@@ -18,7 +18,7 @@ shared:
 			WORK="$(dirname "$ENV_FILE")"
 			test -n "${DU_IMAGE:-}" || { echo "DU_IMAGE is not set" >&2; exit 1; }
 			# A registered APE binfmt handler makes the kernel run any APE
-			# through a shell, so a bare exec of one succeeds and these tests
+			# through a shell. A bare exec of one succeeds and these tests
 			# stop being able to fail. The handler is host-wide and containers
 			# inherit it, so refuse to report a green nobody earned.
 			for h in /proc/sys/fs/binfmt_misc/*; do
@@ -67,8 +67,8 @@ tests:
 			- "restarts=0"
 
 	# The defect this suite exists for. Every executable in the image is checked,
-	# not just the shell, because the next file added to a scratch image has the
-	# same failure mode and the same misleading error message.
+	# not just the shell. This is because the next file added to a scratch image
+	# has the same failure mode and the same misleading error message.
 	- desc: nothing the image ships asks for an ELF interpreter
 	  cmd: |
 		set -eu
@@ -86,7 +86,7 @@ tests:
 		fi
 		# A vacuous pass is the failure mode of a check like this one: an empty
 		# rootfs would also match no interpreter. The image ships busybox, the
-		# docker CLI and its two plugins.
+		# docker CLI and its plugins.
 		found="$(wc -l < "$WORK/elf.txt")"
 		test "$found" -ge 4 || { echo "expected at least 4 ELF files, found $found" >&2; exit 1; }
 		echo "all-static elf=$found"
@@ -107,8 +107,8 @@ tests:
 		stdout:
 			- "shell-ok"
 
-	# A rolling update creates the replacement from the OLD container's config,
-	# so the entrypoint an old container recorded is the one the new image is
+	# A rolling update creates the replacement from the OLD container's config.
+	# The entrypoint an old container recorded is the one the new image is
 	# started with. It must stay a path the kernel can exec: a bare exec of the
 	# APE is exit 126.
 	- desc: the recorded entrypoint is the launcher, and it still starts the binary
@@ -125,7 +125,7 @@ tests:
 
 	# The launcher must forward its arguments. A self-update spawns a detached
 	# helper as `/docker-updater finish-self-update ...`, and a launcher that
-	# dropped "$@" would start the update loop instead, so the updater could
+	# dropped "$@" would start the update loop instead. The updater could
 	# never replace its own container.
 	- desc: the launcher forwards arguments to the hidden self-update subcommand
 	  cmd: |

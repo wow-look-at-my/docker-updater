@@ -48,9 +48,7 @@ func TestCheckImageUpdateChanged(t *testing.T) {
 }
 
 func TestCheckImageUpdateReportsFetched(t *testing.T) {
-	// fetched is threaded from the pull: it is true when the local image the tag
-	// resolves to changed across the pull, independent of whether the result
-	// differs from the running container's digest.
+	// fetched is threaded from the pull: it is true when the local image the tag resolves to changed across the pull.
 	var inspects int
 	cli := &mockDocker{
 		imageInspectFn: func(_ context.Context, _ string) (types.ImageInspect, []byte, error) {
@@ -71,8 +69,7 @@ func TestCheckImageUpdateReportsFetched(t *testing.T) {
 }
 
 func TestCheckImageUpdateUntaggedUsesRepoDigests(t *testing.T) {
-	// The running image is untagged; the comparison is by registry manifest
-	// digest (RepoDigests) and detects the advanced tag.
+	// The running image is untagged.
 	repo := "ghcr.io/wow-look-at-my/buildhost"
 	oldManifest := "sha256:" + strings.Repeat("a", 64)
 	newManifest := "sha256:" + strings.Repeat("b", 64)

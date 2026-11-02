@@ -1,3 +1,5 @@
+// stuck.go holds the stuck code.
+
 package main
 
 import (
@@ -7,7 +9,7 @@ import (
 )
 
 // reportStuck says, once per cycle, which containers the updater could not
-// move: an update they did not take, a check that keeps failing, or no
+// move: an update they did not take. A check that keeps failing, or no
 // possible check.
 //
 // The per-container failure line is already logged where the failure happens.
@@ -16,7 +18,7 @@ import (
 // age, which is the part an operator can act on.
 //
 // printf is where the lines go. A test passes its own rather than redirect the
-// global logger, which two tests running at once cannot share.
+// global logger, which tests running at once cannot share.
 func reportStuck(snap Snapshot, now time.Time, printf func(string, ...any)) {
 	if printf == nil {
 		printf = log.Printf

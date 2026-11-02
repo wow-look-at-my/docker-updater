@@ -105,7 +105,6 @@ func TestBuildSlackPayload(t *testing.T) {
 	blocks, ok := p["blocks"].([]any)
 	require.True(t, ok)
 
-	// Header + 1 section
 	require.Equal(t, 2, len(blocks))
 
 	header := blocks[0].(map[string]any)

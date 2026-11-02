@@ -1,3 +1,5 @@
+// wellknown.go holds the wellknown code.
+
 package main
 
 import (
@@ -17,26 +19,21 @@ import (
 	"time"
 )
 
-// The standardized update-liveness contract a monitored container serves on its
-// own HTTP port. Both endpoints answer GET and carry meaning in the status code
-// alone; see docs/well-known-endpoints.md for the full contract.
+// The standardized update-liveness contract a monitored container serves on
+// its own HTTP port.
 const (
 	wellKnownPrefix    = "/.well-known/docker-updater/"
 	wellKnownHealth    = wellKnownPrefix + "health"
 	wellKnownPreUpdate = wellKnownPrefix + "pre-update"
 )
 
-// Labels that steer discovery. The port override matters for a container
-// exposing several ports (there is no way to guess which one speaks the
-// contract); the opt-out silences the warning for containers that legitimately
-// serve no HTTP at all (a database, a queue worker).
+// Labels that steer discovery.
 const (
 	wellKnownPortLabel   = "docker-updater.well-known.port"
 	wellKnownEnableLabel = "docker-updater.well-known"
 )
 
-// wellKnownProbeTimeout bounds the discovery GET. It targets a container on the
-// local host, so this is generous. Var so tests can shrink it.
+// wellKnownProbeTimeout bounds the discovery GET. It targets a container on the local host, so this is generous.
 var wellKnownProbeTimeout = 3 * time.Second
 
 // Default budgets for the update checks, applied to both the label-configured
@@ -46,32 +43,9 @@ const (
 	defaultHealthCheckTimeout = 60 * time.Second
 )
 
-// containerEndpoint returns the container's own IP and the ID of the network it
-// belongs to -- the address docker-updater dials, and the network it has to
+// containerEndpoint returns the container's own IP and the ID of the network
+// it belongs to. The address docker-updater dials, and the network it has to
 // join to get there.
-//
-// The address is empty when the container has no IP of its own. That is host,
-// none or container: network mode -- and equally a container that is not
-// RUNNING, since Docker assigns an endpoint IP only while one is up, and every
-// IPAddress in a stopped container's inspect output is the empty string. A
-// caller reporting the emptiness must not name the first cause alone: a
-// crash-looping container reads as a network-mode problem and the real failure
-// goes unlooked-at.
-//
-// The network ID is still returned for a container that has one and no IP. A
-// pre-check URL that names the container by hostname resolves only from that
-// network, and the container gets its IP back the moment it is up.
-// There is no substitute to fall back on:
-// 127.0.0.1 is docker-updater's OWN loopback, so probing it reports on the
-// wrong process entirely and can pass a post-update health gate against
-// docker-updater itself. Such a container needs an absolute
-// docker-updater.health-check.url instead.
-//
-// Networks are considered in name order because Go randomizes map iteration: a
-// multi-network container must resolve to the SAME endpoint every cycle, or the
-// updater joins a second network for nothing and the address the health gate
-// re-resolves after an update belongs to a different network than the one it
-// probed before it.
 func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) {
 	if inspect.NetworkSettings == nil {
 		return "", ""
@@ -94,15 +68,8 @@ func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) 
 	return "", ""
 }
 
-// hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker
-// HEALTHCHECK. It reads State.Health, which is exactly what waitHealthy
-// branches on -- so a warning built from this can never promise a fallback the
-// gate will not actually take. Reading the image's Config.Healthcheck instead
-// would over-report: `--no-healthcheck` and a `["NONE"]` test both leave the
-// config populated while the runtime has no health at all.
-// State is promoted through the embedded *ContainerJSONBase, so the base has
-// to be checked before it -- reaching straight for .State panics on a
-// zero-value inspect.
+// hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker.
+// HEALTHCHECK.
 func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
 	if inspect.ContainerJSONBase == nil || inspect.State == nil {
 		return false
@@ -112,7 +79,7 @@ func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
 
 // exposedTCPPorts returns the container's declared TCP ports, ascending. These
 // are the ports the image/compose file declares, not only published ones:
-// docker-updater dials the container directly on a network they share, so an
+// docker-updater dials the container directly on a network they share. An
 // unpublished port is reachable.
 func exposedTCPPorts(inspect types.ContainerJSON) []int {
 	if inspect.Config == nil {
@@ -131,9 +98,7 @@ func exposedTCPPorts(inspect types.ContainerJSON) []int {
 	return ports
 }
 
-// wellKnownState is the resolved outcome of discovery for one container: the
-// endpoint URLs to use (empty when unavailable) and any warnings to surface on
-// the dashboard and in the log.
+// wellKnownState is the resolved outcome of discovery for one container.
 type wellKnownState struct {
 	HealthURL    string
 	PreUpdateURL string
@@ -159,7 +124,7 @@ func overrideLabels(info ContainerInfo) []string {
 
 // resolveWellKnown decides how a container's update checks are addressed this
 // cycle. Explicit check labels always win — that is the compatibility contract
-// with the original opt-in setup — but they are reported as nonstandard so a
+// with the original opt-in setup. However, they are reported as nonstandard so a
 // fleet can be migrated deliberately rather than by accident.
 func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	if set := overrideLabels(info); len(set) > 0 {
@@ -180,8 +145,8 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	switch {
 	case reachErr != nil:
 		// No HTTP answer at all. Saying "implement the endpoint" here sends the
-		// operator to write code that may already exist: what is actually
-		// broken is the route to the container, or the port being probed.
+		// operator to write code that may already exist. What is broken is the
+		// route to the container, or the port being probed.
 		return wellKnownState{Warnings: []string{
 			"cannot reach " + base + wellKnownHealth + " (" + reachErr.Error() + "); " + fallbackPhrase(info) +
 				". docker-updater must be attached to a network the container is on, and " +
@@ -193,20 +158,12 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 				". Implement the endpoint, or set " + wellKnownEnableLabel + "=false to silence this",
 		}}
 	}
-	// A container answering /health is assumed to speak the contract. The
-	// pre-update endpoint is optional and never probed separately: gating
-	// treats a 404 there as "not implemented, go ahead", so a second discovery
-	// request would buy nothing.
+	// A container answering /health is assumed to speak the contract.
 	return wellKnownState{HealthURL: base + wellKnownHealth, PreUpdateURL: base + wellKnownPreUpdate}
 }
 
-// fallbackPhrase names the post-update gate this container will ACTUALLY get
-// once the standard endpoint is out of the picture, which is not the same
-// sentence for every container: waitPostUpdateHealthy falls through to
-// waitHealthy, and waitHealthy only waits for a health STATUS when the
-// container has one. Without a HEALTHCHECK the gate degrades to "it stayed
-// running", and an operator told they still have HEALTHCHECK cover would
-// believe an update was verified when nothing verified it.
+// fallbackPhrase names the post-update gate this container will get once the
+// standard endpoint is out of the picture, which is not the same sentence.
 func fallbackPhrase(info ContainerInfo) string {
 	if info.DockerHealthcheck {
 		return "post-update liveness falls back to Docker HEALTHCHECK"
@@ -260,14 +217,7 @@ func joinPorts(ports []int) string {
 }
 
 // probeWellKnown reports whether the endpoint exists, and separately whether
-// the container answered at all. Any HTTP answer other than 404/501 counts as
-// implemented: a container that is merely unhealthy right now still speaks the
-// contract, and reporting it as unconfigured would send the operator to fix the
-// wrong thing.
-//
-// A returned error means no answer arrived — refused, timed out, unroutable.
-// That is a different fault with a different fix, and collapsing it into "not
-// implemented" makes a network problem read as missing code.
+// the container answered at all.
 func probeWellKnown(ctx context.Context, url string) (implemented bool, reachErr error) {
 	ctx, cancel := context.WithTimeout(ctx, wellKnownProbeTimeout)
 	defer cancel()
@@ -304,24 +254,20 @@ func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []s
 	if state.HealthURL != "" && info.HealthCheckURL == "" && info.HealthCheckCommand == "" {
 		info.HealthCheckURL = state.HealthURL
 		info.HealthCheckTimeout = defaultHealthCheckTimeout
-		// Built from this container's address, which the update replaces --
-		// see waitPostUpdateHealthy.
+		// Built from this container's address, which the update replaces -- see waitPostUpdateHealthy.
 		info.HealthCheckURLFromContainer = true
 	}
 	if state.PreUpdateURL != "" && info.PreCheckURL == "" && info.PreCheckCommand == "" {
 		info.PreCheckURL = state.PreUpdateURL
 		info.PreCheckTimeout = defaultPreCheckTimeout
-		// The standard pre-update endpoint is optional, so its absence must
-		// never block an update -- see runPreCheck.
+		// The standard pre-update endpoint is optional, so its absence must never block an update -- see runPreCheck.
 		info.PreCheckStandard = true
 	}
 
 	return info, state.Warnings
 }
 
-// warnedOnce keeps a container's warning out of the log on every cycle: it is
-// logged when first seen and again only if it changes (the dashboard shows the
-// live state regardless).
+// warnedOnce keeps a container's warning out of the log on every cycle: it is logged when first seen and again only if it changes.
 var warnedOnce sync.Map
 
 func logContainerWarnings(name string, warnings []string) {

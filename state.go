@@ -1,3 +1,5 @@
+// state.go holds the state code.
+
 package main
 
 import (
@@ -17,19 +19,15 @@ type ContainerStatus struct {
 	LastPulled  time.Time // zero if the updater has never pulled this image
 	LastUpdated time.Time // zero if the updater has never applied an update
 
-	// UpdateAvailable is true when a newer image digest or git commit was
-	// detected but is not (yet) the running version: either dry-run is on, the
-	// pre-check skipped the update, or applying it errored.
+	// UpdateAvailable is true when a newer image digest or git commit was detected but is not (yet) the running version.
 	UpdateAvailable bool
 	CurrentRef      string // current digest or commit (short form)
 	AvailableRef    string // newer digest or commit (short form), if available
-	// The commit the available image was built from, and its page. Empty when
-	// the image carries no commit.
+	// The commit the available image was built from, and its page. Empty when the image carries no commit.
 	AvailableCommit    string
 	AvailableCommitURL string
 
-	// Warnings about how the container is configured for update checks
-	// (missing standard endpoints, nonstandard label overrides).
+	// Warnings about how the container is configured for update checks.
 	Warnings []string
 
 	LastError  string // last error message, if the most recent check failed
@@ -38,30 +36,17 @@ type ContainerStatus struct {
 	DryRun     bool
 
 	// Unmonitorable is why this container can never be checked as configured.
-	// No check ran, so it offers no update; it still continues the stuck run,
-	// because a container nothing can check is as frozen as one that refuses.
 	Unmonitorable string
 
-	// StuckCycles counts the consecutive cycles that left this container on
-	// the version it runs against the updater's will: an update it did not
-	// take, a check that failed, or no possible check. StuckSince is when
-	// that run began.
-	//
-	// One failure is ordinary. The same one every cycle for weeks is a
-	// deployment frozen where it stands, and the per-cycle log line reads the
-	// same on the first cycle as on the thousandth. Counting the run is what
-	// separates the two.
+	// StuckCycles counts the consecutive cycles that left this container on the version it runs against the updater's will: an update it did not take.
 	StuckCycles int
 	StuckSince  time.Time
 }
 
-// Stuck reports whether this container has been unable to move for more than
-// one cycle.
+// Stuck reports whether this container has been unable to move for more than one cycle.
 func (s ContainerStatus) Stuck() bool { return s.StuckCycles > 1 }
 
-// Store holds the latest snapshot of the updater's per-container knowledge. It
-// is safe for concurrent use by the update loop (writer) and dashboard server
-// (reader).
+// Store holds the latest snapshot of the updater's per-container knowledge.
 type Store struct {
 	mu        sync.RWMutex
 	statuses  map[string]ContainerStatus
@@ -109,9 +94,7 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.AvailableCommit, st.AvailableCommitURL = "", ""
 		st.CurrentRef = shortRef(r.OldRef)
 
-		// A cycle that could not move the container continues the run. A clean
-		// cycle ends it, including one with nothing to apply: the version the
-		// container runs is then the one that was offered.
+		// A cycle that could not move the container continues the run.
 		stuck := r.Error != nil || r.Skipped || r.Container.Unmonitorable != ""
 		switch {
 		case !stuck:

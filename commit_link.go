@@ -1,3 +1,5 @@
+// commit_link.go holds the commit link code.
+
 package main
 
 import (

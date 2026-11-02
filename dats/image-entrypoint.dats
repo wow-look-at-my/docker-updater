@@ -3,18 +3,18 @@
 #
 # go-toolchain builds one fat APE, so the image no longer copies a per-platform
 # ELF. The kernel cannot exec an APE: the header is a shell script. A rolling
-# update creates the replacement from the OLD container's config, so the
+# update creates the replacement from the OLD container's config. The
 # entrypoint an old container recorded is the one the new image gets started
-# with. /docker-updater must therefore stay a path the kernel can exec.
+# with. /docker-updater must therefore stay a path. The kernel can exec.
 #
 # The final image is scratch and ships no /lib, so a busybox that names an ELF
 # interpreter cannot start either. Docker reports that ENOENT against the
 # ENTRYPOINT path, so the message names a file that is present.
 #
-# These assertions read the Dockerfile, which is where both defects are spelled,
+# These assertions read the Dockerfile. This is where both defects are spelled,
 # and go-toolchain runs them sandboxed on every build with no host and no
-# docker. test/dats/image.dats asks the same questions of a running container
-# and catches what a spelling cannot: whether the paths resolve and whether the
+# docker. test/dats/image.dats asks the same questions of a running container.
+# It catches what a spelling cannot: whether the paths resolve and whether the
 # binary starts.
 
 tests:

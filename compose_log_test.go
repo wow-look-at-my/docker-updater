@@ -30,8 +30,7 @@ func TestRunLoggedCommandFailureErrorCarriesOutputTail(t *testing.T) {
 		[]string{"-c", "echo building step 1; echo 'mkdir /tmp/dockerfile123: no such file or directory' >&2; exit 1"})
 
 	require.Error(t, err)
-	// The error names the command, the exit status, AND the actual cause from
-	// the child's output -- never a bare "exit status 1".
+	// The error names the command, the exit status, AND the actual cause from the child's output.
 	assert.Contains(t, err.Error(), "sh -c")
 	assert.Contains(t, err.Error(), "exit status 1")
 	assert.Contains(t, err.Error(), "mkdir /tmp/dockerfile123: no such file or directory")
@@ -68,8 +67,6 @@ func TestRunLoggedCommandTailTrimmedToLastLines(t *testing.T) {
 	t.Serial()
 	captureComposeLog(t)
 
-	// 60 numbered lines, then fail: only the last composeErrTailLines lines may
-	// appear in the error.
 	err := runLoggedCommand(context.Background(), "sh",
 		[]string{"-c", "i=1; while [ $i -le 60 ]; do echo line-$i; i=$((i+1)); done; exit 1"})
 
@@ -96,16 +93,15 @@ func TestRunDockerComposeErrorMentionsDockerCommand(t *testing.T) {
 	t.Serial()
 	captureComposeLog(t)
 
-	// No real docker CLI needed: whether the binary is missing or the args are
-	// rejected, the error must identify the full docker command line.
+	// No real docker CLI needed: whether the binary is missing or the args are rejected, the error must identify the full docker command line.
 	err := runDockerCompose(context.Background(), composeArgs(composeTarget{ConfigFiles: []string{"/srv/demo/docker-compose.yml"}, WorkingDir: "/srv/demo", Project: "demo"}, "build", "--pull", "opencode"))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "docker compose -f /srv/demo/docker-compose.yml --project-directory /srv/demo -p demo build --pull opencode")
 }
 
-// A compose file the updater cannot see is the containerized-updater footgun:
-// the label carries a host path, and without a matching bind mount the docker
+// A compose file the updater cannot see is the containerized-updater footgun.
+// The label carries a host path, and without a matching bind mount the docker
 // CLI fails with a bare "no such file or directory". Fail before exec'ing with
 // an error that names the actual fix.
 func TestComposeRunnerRejectsInvisibleComposeFile(t *testing.T) {

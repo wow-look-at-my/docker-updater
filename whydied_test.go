@@ -13,8 +13,8 @@ import (
 )
 
 // A gate that says only "it restarted" leaves the operator to read the logs of
-// a container the rollback has already replaced. Two entries sat stuck for
-// hours that way, with the reason sitting in a log line nobody was shown.
+// a container the rollback has already replaced. Entries sat stuck for hours
+// that way, with the reason sitting in a log line nobody was shown.
 func TestWaitStaysRunning_ReportsWhyItDied(t *testing.T) {
 	t.Serial()
 	cli := &mockDocker{

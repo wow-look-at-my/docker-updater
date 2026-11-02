@@ -51,7 +51,7 @@ func TestSelfAttacherJoinsTheContainersNetwork(t *testing.T) {
 	assert.Equal(t, [2]string{"net-app", "self123456789"}, (*connects)[0])
 }
 
-// The whole point is that an operator never wires this up: a container on a
+// The whole point is that an operator never wires this up. A container on a
 // network docker-updater is already on must not produce a redundant connect
 // (Docker rejects it, which would read as a failure).
 func TestSelfAttacherSkipsNetworkItIsAlreadyOn(t *testing.T) {
@@ -74,8 +74,8 @@ func TestSelfAttacherJoinsEachNetworkOnce(t *testing.T) {
 }
 
 // A container with no IP of its own (host/none/container: network mode) has no
-// network to join -- attaching to nothing must not be attempted or warned about,
-// because the address warning already names that case.
+// network to join -- attaching to nothing must not be attempted or warned about.
+// This is because the address warning already names that case.
 func TestSelfAttacherIgnoresContainerWithoutNetwork(t *testing.T) {
 	a, connects := attacherFor(t, selfOn("net-updater"), nil)
 
@@ -83,8 +83,8 @@ func TestSelfAttacherIgnoresContainerWithoutNetwork(t *testing.T) {
 	assert.Empty(t, *connects)
 }
 
-// A failed join is what makes the probe that follows unreachable, so it must
-// name itself rather than leaving the operator to explain a refused connection.
+// A failed join is what makes the probe that follows unreachable. It must name
+// itself rather than leaving the operator to explain a refused connection.
 func TestSelfAttacherWarnsWhenJoinFails(t *testing.T) {
 	a, _ := attacherFor(t, selfOn("net-updater"), errors.New("network net-app not found"))
 
@@ -94,7 +94,7 @@ func TestSelfAttacherWarnsWhenJoinFails(t *testing.T) {
 	assert.Contains(t, warning, "network net-app not found")
 }
 
-// A retry next cycle is the correct behavior for a transient failure: the
+// A retry next cycle is the correct behavior for a transient failure. The
 // network must not be recorded as joined when the join did not happen.
 func TestSelfAttacherRetriesAfterAFailedJoin(t *testing.T) {
 	a, _ := attacherFor(t, selfOn("net-updater"), errors.New("boom"))

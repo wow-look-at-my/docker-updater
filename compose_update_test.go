@@ -38,10 +38,10 @@ func composeServiceInfo() ContainerInfo {
 }
 
 // composeDocker serves every update path from one fixture: the pre-update
-// container reports the config the raw-API paths clone, and any other container
-// is the replacement reporting health. The compose path re-finds its container
-// by compose label, the raw paths health-check the one they just created, so
-// neither needs to redefine inspection.
+// container reports the config the raw-API paths clone. Any other
+// container is the replacement reporting health. The compose path re-finds
+// its container by compose label, the raw paths health-check the one they
+// created, so neither needs to redefine inspection.
 func composeDocker(health string) *mockDocker {
 	return &mockDocker{
 		containerListFn: func(_ context.Context, _ container.ListOptions) ([]types.Container, error) {
@@ -74,7 +74,7 @@ func composeDocker(health string) *mockDocker {
 }
 
 // recordCreates reports the names the client is asked to create containers
-// under, which is how the raw-API paths are told apart from a compose converge.
+// under. This is how the raw-API paths are told apart from a compose converge.
 func recordCreates(cli *mockDocker, names *[]string) {
 	cli.containerCreateFn = func(_ context.Context, _ *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, name string) (container.CreateResponse, error) {
 		*names = append(*names, name)
@@ -82,8 +82,8 @@ func recordCreates(cli *mockDocker, names *[]string) {
 	}
 }
 
-// A compose-managed service must be converged with compose, never rebuilt from
-// the old container's stored config: that is the only way an edited compose
+// A compose-managed service must be converged with compose, never rebuilt
+// from the container's stored config. That is the only way an edited compose
 // file (a newly added mount) reaches the running service.
 func TestUpdateContainerConvergesComposeServiceThroughCompose(t *testing.T) {
 	cli := composeDocker("healthy")
@@ -101,7 +101,7 @@ func TestUpdateContainerConvergesComposeServiceThroughCompose(t *testing.T) {
 	assert.Equal(t, []string{serviceComposeDir}, runner.upNoDepsDirs)
 }
 
-// Converging one service must never sweep its dependencies along: the compose
+// Converging one service must never sweep its dependencies along. The compose
 // invocation carries --no-deps so a docker-in-docker daemon holding live
 // containers is not recreated because a sibling took a new image.
 func TestComposeConvergeIsScopedToTheServiceAlone(t *testing.T) {
@@ -161,7 +161,7 @@ func TestUpdateContainerKeepsRawRecreateWithoutComposeLabels(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "a non-compose container has no compose file to converge")
 }
 
-// Rolling updates must keep starting the replacement before draining the old
+// Rolling updates must keep starting the replacement before draining the
 // container: compose cannot express that, so they stay on the raw-API path.
 func TestRollingUpdateStaysOnRawPathForComposeService(t *testing.T) {
 	cli := composeDocker("healthy")
@@ -178,8 +178,8 @@ func TestRollingUpdateStaysOnRawPathForComposeService(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "compose up would stop the old container first, breaking zero downtime")
 }
 
-// Git mode recreates a container whose image and compose config are unchanged,
-// so it must not be routed through a converge that would be a no-op.
+// Git mode recreates a container whose image and compose config are unchanged.
+// It must not be routed through a converge that would be a no-op.
 func TestGitModeKeepsForcedRecreate(t *testing.T) {
 	cli := composeDocker("healthy")
 	var creates []string
@@ -194,7 +194,7 @@ func TestGitModeKeepsForcedRecreate(t *testing.T) {
 	assert.Zero(t, runner.upNoDepsCalls, "`up -d` would skip a recreate when nothing drifted")
 }
 
-// Compose metadata must be captured for every mode, not just build mode:
+// Compose metadata must be captured for every mode, not build mode:
 // image-mode services are the common case and need it to converge.
 func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T) {
 	cli := &mockDocker{
@@ -237,8 +237,8 @@ func TestListMonitoredContainersCapturesComposeMetadataForImageMode(t *testing.T
 }
 
 // composeDockerStillRunning is composeDocker with the pre-update container
-// reporting what it actually looks like when compose failed without touching
-// it: still running, still on its original image.
+// reporting what it looks like. This happens when compose failed without
+// touching it: still running, still on its original image.
 func composeDockerStillRunning() *mockDocker {
 	cli := composeDocker("healthy")
 	inner := cli.containerInspectFn
@@ -254,10 +254,10 @@ func composeDockerStillRunning() *mockDocker {
 }
 
 // A compose invocation that fails before replacing the container (unreadable
-// compose file, invalid config) leaves the service exactly as it was. Claiming
-// "ROLLBACK FAILED, <service> may be down" then sends operators chasing a
-// service that never went down — and the rollback just re-runs the same
-// failing command.
+// compose file, invalid config) leaves the service exactly as it was.
+// Claiming "ROLLBACK FAILED, <service> may be down" then sends operators
+// chasing a service that never went down — and the rollback re-runs the
+// same failing command.
 func TestComposeConvergeSkipsRollbackWhenContainerUntouched(t *testing.T) {
 	runner := &fakeComposeRunner{upNoDepsErr: errors.New("compose file not visible to docker-updater")}
 
@@ -291,9 +291,10 @@ func TestComposeConvergeStillRollsBackWhenContainerStopped(t *testing.T) {
 
 // Compose must be addressed with the project name off the container's own
 // label. Letting compose derive it from the working directory resolves a
-// DIFFERENT project for any stack deployed with an explicit -p (Komodo,
-// Portainer) or a compose file with a top-level `name:` — compose finds no
-// container for the service, CREATES one, and dies on the name already in use:
+// DIFFERENT project for any stack. That stack is deployed with an explicit -p
+// (Komodo, Portainer) or a compose file with a top-level `name:`. Compose
+// finds no container for the service, CREATES one, and dies on the name
+// already in use:
 //
 //	Conflict. The container name "/s3" is already in use by container "b1af870..."
 func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {
@@ -318,8 +319,8 @@ func TestComposeConvergeAddressesTheContainersOwnProject(t *testing.T) {
 		"the compose invocation must carry -p from com.docker.compose.project")
 }
 
-// The project name reaches the argv, not just the runner: -p must be in the
-// command line compose actually receives.
+// The project name reaches the argv, not the runner: -p must be in the
+// command line compose receives.
 func TestComposeArgsCarryProjectName(t *testing.T) {
 	args := composeArgs(composeTargetFor(composeServiceInfo()), "up", "-d", "--no-deps", "server")
 

@@ -1,3 +1,5 @@
+// git_checker.go holds the git checker code.
+
 package main
 
 import (

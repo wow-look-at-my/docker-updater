@@ -4,6 +4,10 @@ on:
   push:
     branches: ['**']
 
+concurrency:
+  group: gha_${{ github.repository }}_${{ github.workflow }}_${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 permissions:
   id-token: write
   contents: write
@@ -15,19 +19,19 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # The go:generate directives in dashboard.go compile dashboard.js, which the embed needs and which is not committed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: wow-look-at-my/go-toolchain@master
+      - uses: wow-look-at-my/go-toolchain@lkgb
         with:
           generate: 86bbd283414e
 
   dashboard:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: dashboard
@@ -38,19 +42,20 @@ jobs:
           # 22 for native TypeScript type stripping: snapshot.test.mts runs as authored, with no build step.
           node-version: '22'
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
+      # The commands live in dashboard/justfile, so npm's scripts are gone. Run the same binaries npm ci installed.
+      - run: ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/tsc -p tsconfig.test.json
+      - run: ./node_modules/.bin/tsc
       # Runs against the compiled dashboard.js, not source nobody ships.
-      - run: npm test
+      - run: node --test snapshot.test.mts
 
   # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:
     needs: test
     # A self-hosted runner carries a registered APE binfmt handler, which makes the kernel run any APE through a shell and masks this defect.
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER_DIND || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@master
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-download@lkgb
         with:
           project: dats
       # go-toolchain hands build/ over through the org cache, and the image copies the binary from there.
@@ -63,16 +68,16 @@ jobs:
       - run: docker build -t docker-updater:ci .
       - env:
           DU_IMAGE: docker-updater:ci
-        run: sh "$RUNNER_TEMP/dats" --no-sandbox -v test test/dats/image.dats
+        run: sh "${{ runner.temp }}/dats" --no-sandbox -v test test/dats/image.dats
 
   publish-ghcr:
     needs: [test, image-e2e]
-    uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@master
+    uses: wow-look-at-my/actions/.github/workflows/publish-ghcr.yml@lkgb
 
   # image-e2e is the only job that executes the APE these bytes are.
   publish-buildhost:
     needs: [test, image-e2e]
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,6 +87,6 @@ jobs:
         with:
           name: go-build-test.broot
           path: build/
-      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@master
+      - uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish@lkgb
         with:
           path: build

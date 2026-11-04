@@ -1,4 +1,4 @@
-// watchtower.go holds the watchtower code.
+// Watchtower is the other updater a host commonly runs, and the dashboard used to report everything it manages as "Manual".
 
 package main
 

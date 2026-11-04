@@ -1,4 +1,4 @@
-// github_webhook.go holds the github webhook code.
+// maxWebhookBody caps how much of a webhook request body we read.
 
 package main
 
@@ -21,8 +21,7 @@ import (
 const maxWebhookBody = 1 << 20
 
 // githubWebhookServer is an authenticated, publicly-reachable HTTP endpoint
-// that lets GitHub notify the updater that a package (a ghcr image) was
-// published or updated.
+// that lets GitHub notify the updater that a package.
 type githubWebhookServer struct {
 	addr   string
 	secret []byte

@@ -308,7 +308,6 @@ func TestRecreateContainerFallbackDockerHealthy(t *testing.T) {
 		ID:    "old123456789",
 		Name:  "myapp",
 		Image: "myapp:latest",
-		// no HealthCheckURL / HealthCheckCommand -> Docker status fallback
 	}
 
 	err := recreateContainer(context.Background(), cli, info, "myapp:latest")

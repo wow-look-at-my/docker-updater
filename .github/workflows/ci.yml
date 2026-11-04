@@ -1,3 +1,5 @@
+# The go:generate directives in dashboard.go compile dashboard.js, which the embed needs and which is not committed.
+
 name: CI
 
 on:
@@ -28,7 +30,7 @@ jobs:
           node-version: '22'
       - uses: wow-look-at-my/go-toolchain@lkgb
         with:
-          generate: 86bbd283414e
+          generate: 5ad8eacfc541
 
   dashboard:
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -39,14 +41,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # 22 for native TypeScript type stripping: snapshot.test.mts runs as authored, with no build step.
           node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y just
       - run: npm ci
-      # The commands live in dashboard/justfile, so npm's scripts are gone. Run the same binaries npm ci installed.
-      - run: ./node_modules/.bin/tsc --noEmit && ./node_modules/.bin/tsc -p tsconfig.test.json
-      - run: ./node_modules/.bin/tsc
+      - run: just typecheck
+      - run: just build
       # Runs against the compiled dashboard.js, not source nobody ships.
-      - run: node --test snapshot.test.mts
+      - run: just test
 
   # Publishing waits on this: an image that cannot start is the one defect the unit tests structurally cannot see.
   image-e2e:
@@ -64,6 +65,8 @@ jobs:
           name: go-build-test.broot
           path: build/
       - run: chmod +x build/docker-updater
+      # The suite runs docker compose, and the dind runner image ships no compose plugin.
+      - run: sudo apt-get update && sudo apt-get install -y docker-compose-v2 && docker compose version
       # Building the image is not an assertion. Every assertion is in the suite.
       - run: docker build -t docker-updater:ci .
       - env:

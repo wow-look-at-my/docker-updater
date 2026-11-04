@@ -1,4 +1,4 @@
-// main.go holds the main code.
+// Hidden subcommand: the detached helper a self-update spawns runs `/docker-updater finish-self-update ...`.
 
 package main
 
@@ -15,8 +15,7 @@ func main() {
 	log.SetPrefix("[docker-updater] ")
 
 	// Hidden subcommand: the detached helper a self-update spawns runs
-	// `/docker-updater finish-self-update ...` to recreate the updater's own
-	// container on the new image.
+	// `/docker-updater finish-self-update ...`.
 	if len(os.Args) > 1 && os.Args[1] == finishSelfUpdateCommand {
 		finishSelfUpdate(os.Args[2:])
 		return
@@ -78,8 +77,12 @@ func main() {
 		log.Print("github webhook disabled (DOCKER_UPDATER_GITHUB_WEBHOOK_ADDR is empty)")
 	}
 
+	var force chan string
 	if cfg.DashboardAddr != "" {
-		go newDashboardServer(cli, cfg, store).run(ctx)
+		force = make(chan string, forceQueueDepth)
+		srv := newDashboardServer(cli, cfg, store)
+		srv.force = force
+		go srv.run(ctx)
 	} else {
 		log.Print("dashboard disabled (DOCKER_UPDATER_DASHBOARD_ADDR is empty)")
 	}
@@ -87,5 +90,5 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	runLoop(ctx, cli, cfg, sigCh, resolveAuth, store, trigger)
+	runLoop(ctx, cli, cfg, sigCh, resolveAuth, store, trigger, force)
 }

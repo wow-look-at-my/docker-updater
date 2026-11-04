@@ -76,7 +76,7 @@ func TestPullImageError(t *testing.T) {
 }
 
 func TestPullImageSurfacesMidStreamError(t *testing.T) {
-	// The daemon reports mid-pull failures (registry 429/5xx, dropped connections) as in-band error records in a cleanly terminated stream.
+	// The daemon reports mid-pull failures (registry 429/5xx, dropped connections) as in-band error records.
 	inspects := 0
 	cli := &mockDocker{
 		imagePullFn: func(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {

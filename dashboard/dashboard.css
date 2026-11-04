@@ -115,6 +115,14 @@ body {
 /* In a summary card the button sits under the count and takes the card's colour. */
 .card .copy-btn { margin-top: 6px; align-self: flex-start; }
 .card-error .copy-btn:hover:not(:disabled) { border-color: var(--red); }
+/* The force-update button sits under a held-back update's detail lines. */
+.force { margin-top: 6px; }
+.force-btn:hover:not(:disabled) { border-color: var(--amber); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cancel-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+/* A recreate from the compose file is purple, apart from an image update's amber. */
+.force-btn-drift { color: var(--purple); border-color: rgba(188,140,255,0.45); }
+.force-btn-drift:hover:not(:disabled) { border-color: var(--purple); color: var(--purple); }
 
 main { padding: 0 24px 24px; }
 
@@ -150,6 +158,9 @@ tbody tr:hover { background: var(--bg-row); }
    accent make the affected rows scannable without hunting the Upstream column. */
 tr.row-pending { background: rgba(210,153,34,0.07); }
 tr.row-pending td:first-child { box-shadow: inset 3px 0 0 0 var(--amber); }
+/* A row out of sync with its compose file, with no image update behind it. */
+tr.row-drift { background: rgba(188,140,255,0.07); }
+tr.row-drift td:first-child { box-shadow: inset 3px 0 0 0 var(--purple); }
 @keyframes row-flash {
   from { background: rgba(59,158,255,0.30); }
   to { background: rgba(210,153,34,0.07); }
@@ -199,10 +210,26 @@ a.commit:hover { color: var(--accent); text-decoration: underline; }
    restarting. */
 .up-available,
 .restarts-warn { color: var(--amber); font-weight: 600; }
+.up-drift { color: var(--purple); font-weight: 600; }
 
+.warn,
+.drift { font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
 /* Per-container configuration warnings (missing or nonstandard update-check
    endpoints). Amber, not red: the update path still works. */
-.warn { color: var(--amber); font-size: 11px; margin-top: 2px; max-width: 420px; word-break: break-word; white-space: normal; }
+.warn { color: var(--amber); }
+/* Compose drift is red when only the operator can apply the file, and purple
+   when the updater recreates the container from it. */
+.drift { color: var(--red); }
+.drift-applies { color: var(--purple); }
+/* The toggle and the list of differences are monospace facts, not prose. */
+.diff-toggle { color: inherit; text-decoration: underline dotted; }
+.drift-diff {
+  margin: 4px 0 0; padding: 6px 8px 6px 22px; max-width: 420px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  overflow-wrap: anywhere; white-space: normal;
+}
+.drift-diff-head { list-style: none; margin-left: -14px; color: var(--text-dim); }
 
 /* The last line a failing container logged, under its name. Red because it is
    the container's own account of why it is not running, not a config note. */
@@ -301,3 +328,33 @@ footer {
 footer code { background: var(--bg-elev); padding: 1px 5px; border-radius: 4px; }
 
 .hidden { display: none; }
+
+/* Resource graphs: <perf-graph> draws on its own canvas; these rules size the
+   strips and theme the element to the page palette. A strip dims while its
+   source is unreachable, and a gauge the source does not report keeps its
+   empty readout behind a tooltip. One stable hue per gauge. */
+.host-stats { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; overflow-x: auto; }
+.stat-strip { display: flex; gap: 4px; }
+.stat-strip perf-graph {
+  width: 120px;
+  flex: 0 0 auto;
+  --perf-graph-bg: var(--bg);
+  --perf-graph-grid: rgba(230, 237, 243, 0.06);
+  --perf-graph-text: var(--text-dim);
+  --perf-graph-value: var(--text);
+  --perf-graph-font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.stat-strip perf-graph[label="cpu"]  { --perf-graph-line: var(--accent); --perf-graph-fill: rgba(59, 158, 255, 0.12); }
+.stat-strip perf-graph[label="ram"]  { --perf-graph-line: var(--purple); --perf-graph-fill: rgba(188, 140, 255, 0.12); }
+.stat-strip perf-graph[label="disk"] { --perf-graph-line: var(--amber); --perf-graph-fill: rgba(210, 153, 34, 0.12); }
+.stat-strip perf-graph[label="net"]  { --perf-graph-line: var(--green); --perf-graph-fill: rgba(63, 185, 80, 0.12); }
+.stat-strip perf-graph[label="gpu"]  { --perf-graph-line: var(--red); --perf-graph-fill: rgba(248, 81, 73, 0.12); }
+.stat-strip perf-graph.absent { opacity: 0.45; }
+.stat-strip.stale { opacity: 0.35; }
+/* The Resources column takes a third of a fixed-layout table; its five gauges
+   share that width evenly instead of holding the strip's 120px each. */
+.stats-th { width: 34%; }
+.stats-cell { vertical-align: top; padding-left: 8px; padding-right: 8px; }
+.stats-cell perf-graph { flex: 1 1 0; width: auto; min-width: 0; }
+.badge-dim { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); }
+.badge-error { background: rgba(248, 81, 73, 0.15); color: var(--red); }

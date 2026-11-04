@@ -1,4 +1,4 @@
-// image_defaults.go holds the image defaults code.
+// clearInheritedImageDefaults removes from a container's config every value the image it was created from supplied.
 
 package main
 
@@ -11,15 +11,17 @@ import (
 )
 
 // clearInheritedImageDefaults removes from a container's config every value
-// the image it was created from supplied. ContainerInspect reports a
-// container's RESOLVED config. The API records the entrypoint, command,
-// environment, labels, healthcheck, ports and volumes the container runs
-// with, and records nothing about where each came from. An operator's own
-// --entrypoint and the image's ENTRYPOINT read identically. So handing that
-// config back to ContainerCreate with only Image changed pins the image's
-// defaults onto the NEW one. A default the new image changed never takes
-// effect. A field cleared here is nil or empty, which is how. ContainerCreate
-// is told to take the image's own value.
+// the image it was created from supplied.
+//
+// ContainerInspect reports a container's RESOLVED config. The API records the
+// entrypoint, command, environment, labels, healthcheck, ports and volumes
+// the container runs with, and records nothing about where each came from. An
+// operator's own --entrypoint and the image's ENTRYPOINT read identically.
+//
+// So handing that config back to ContainerCreate with only Image changed pins
+// the image's defaults onto the NEW one. A default the new image changed
+// never takes effect. A field cleared here is nil or empty, which is how
+// ContainerCreate is told to take the image's own value.
 func clearInheritedImageDefaults(config, img *container.Config) {
 	if config == nil || img == nil {
 		return
@@ -81,9 +83,6 @@ func clearInheritedDefaultsFor(ctx context.Context, cli DockerClient, config *co
 
 // resetToImageDefaults strips the process fields from config so the new
 // image's own apply, and reports whether it had anything to strip.
-// clearInheritedImageDefaults is the first line and it is not always enough.
-// It clears a field only when the container's value EQUALS the image's, so a
-// value it cannot attribute survives.
 func resetToImageDefaults(config *container.Config) bool {
 	if config == nil {
 		return false

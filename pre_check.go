@@ -1,4 +1,4 @@
-// pre_check.go holds the pre check code.
+// The standard pre-update endpoint is optional and discovered, not declared: an unreachable container means "nothing to ask".
 
 package main
 
@@ -36,8 +36,7 @@ func runHTTPCheck(ctx context.Context, info ContainerInfo) error {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		// The standard pre-update endpoint is optional and discovered, not
-		// declared: an unreachable container means "nothing to ask", never "hold
-		// every update forever".
+		// declared: an unreachable container means "nothing to ask".
 		if info.PreCheckStandard {
 			return nil
 		}

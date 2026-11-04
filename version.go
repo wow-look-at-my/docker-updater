@@ -1,10 +1,10 @@
-// version.go holds the version code.
+// version is an explicit build identifier, settable at link time: go build -ldflags "-X main.version=<sha>" It is empty by default.
 
 package main
 
 import "runtime/debug"
 
-// version is an explicit build identifier, settable at link time:.
+// version is an explicit build identifier, settable at link time: go build -ldflags "-X main.version=<sha>" It is empty by default.
 var version = ""
 
 // buildVersion resolves the identifier of the build this binary came from.

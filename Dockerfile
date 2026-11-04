@@ -39,7 +39,6 @@ LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.description="Automatic Docker container updater service"
 
-# /tmp (a later mode) and /root (a later mode) from the skeleton above.
 COPY --from=dockercli /skel/ /
 COPY --from=gcr.io/distroless/static-debian12 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker

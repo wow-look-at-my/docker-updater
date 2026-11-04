@@ -1,4 +1,4 @@
-// logs.go holds the logs code.
+// A container that fails to start says why in its own logs, and nowhere else.
 
 package main
 
@@ -71,7 +71,7 @@ func containerLogTail(ctx context.Context, cli DockerClient, name string, tail i
 	}
 	defer rc.Close()
 
-	// Bounded by the tail count and a generous per-line allowance, so a container logging one enormous line cannot pull the dashboard over.
+	// Bounded by the tail count and a generous per-line allowance.
 	raw, err := io.ReadAll(io.LimitReader(rc, int64(tail)*8192))
 	if err != nil {
 		return nil, err
@@ -134,7 +134,8 @@ func logExcerpt(logs []byte) string {
 	return ""
 }
 
-// It leaves a line alone unless the first field parses as one, because a
+// stripLogTimestamp removes the leading RFC3339Nano stamp Timestamps adds. It
+// leaves a line alone unless the first field parses as one, because a
 // container's own first word is not a timestamp to be eaten.
 func stripLogTimestamp(line string) string {
 	first, rest, found := strings.Cut(line, " ")

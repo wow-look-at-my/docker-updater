@@ -1,4 +1,4 @@
-// image_checker.go holds the image checker code.
+// checkImageUpdate pulls the latest image and compares digests.
 
 package main
 

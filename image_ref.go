@@ -1,4 +1,4 @@
-// image_ref.go holds the image ref code.
+// resolveImageRef determines the registry reference to poll for updates, independent of whether the running image still carries a repo tag.
 
 package main
 
@@ -33,8 +33,7 @@ func hasRepository(ref string) bool {
 }
 
 // repositoryOf returns the normalized repository name of a reference (e.g.
-// "ghcr.io/wow-look-at-my/buildhost" or "docker.io/library/nginx"), or "" if
-// ref has no repository (a bare image ID/digest).
+// "ghcr.io/wow-look-at-my/buildhost" or "docker.io/library/nginx").
 func repositoryOf(ref string) string {
 	parsed, err := reference.ParseAnyReference(ref)
 	if err != nil {
@@ -47,8 +46,7 @@ func repositoryOf(ref string) string {
 	return named.Name()
 }
 
-// imageIdentity returns a stable, tag-independent identifier for an image:
-// the registry manifest digest from RepoDigests for the given repository.
+// imageIdentity returns a stable, tag-independent identifier for an image.
 func imageIdentity(repoDigests []string, contentID, repo string) string {
 	if d := matchRepoDigest(repoDigests, repo); d != "" {
 		return d

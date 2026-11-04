@@ -661,10 +661,10 @@ func TestRollingUpdateContainer(t *testing.T) {
 // A service alias is the load balancer's whole notion of "the service", and
 // Docker's DNS round-robins across every container holding one. Giving the
 // new container the alias at CREATE time therefore load-balances live traffic
-// across IMAGE VERSIONS for the entire health wait, tens of seconds. This
-// holds with a 30s-interval HEALTHCHECK. Clients get answers shaped by the
-// build being replaced. The alias must move only once the replacement is
-// healthy, and the container must keep serving until after it has.
+// across IMAGE VERSIONS for the entire health wait. Tens of seconds with a
+// 30s-interval HEALTHCHECK -- and clients get answers shaped by the build
+// being replaced. The alias must move only once the replacement is healthy,
+// and the container must keep serving until after it has.
 func TestRollingUpdateContainer_AliasMovesOnlyAfterHealthy(t *testing.T) {
 	var events []string
 	var createdAliases []string

@@ -1,14 +1,11 @@
-# The package's own binaries come first on PATH, as npm run puts them.
-export PATH := justfile_directory() + "/node_modules/.bin:" + env_var("PATH")
-
-# The npm script build.
+# Compiles dashboard.ts to the dashboard.js that the Go binary embeds.
 build:
-	tsc
+	npx tsc
 
-# The npm script typecheck.
 typecheck:
-	tsc --noEmit && tsc -p tsconfig.test.json
+	npx tsc --noEmit
+	npx tsc -p tsconfig.test.json
 
-# The npm script test.
+# Runs against the compiled dashboard.js, so build first.
 test:
 	node --test snapshot.test.mts

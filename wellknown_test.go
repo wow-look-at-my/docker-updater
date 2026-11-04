@@ -153,8 +153,8 @@ func TestWellKnownWarnsSeparatelyWhenUnreachable(t *testing.T) {
 		"nothing about an unanswered probe shows the endpoint is missing")
 }
 
-// Compatibility with the original opt-in setup: the check labels still win,
-// and are reported as nonstandard rather than silently honored.
+// Compatibility with the opt-in setup: the check labels still win, and are
+// reported as nonstandard rather than silently honored.
 func TestWellKnownLabelOverridesAreNonstandard(t *testing.T) {
 	info, _ := wellKnownServer(t, http.StatusOK, http.StatusOK)
 	info.Labels["docker-updater.health-check.url"] = "http://10.0.0.5:9000/healthz"

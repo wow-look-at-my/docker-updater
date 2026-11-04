@@ -1,4 +1,4 @@
-// stuck.go holds the stuck code.
+// reportStuck says, once per cycle, which containers the updater could not move: an update they did not take.
 
 package main
 
@@ -57,6 +57,8 @@ func stuckReason(st ContainerStatus) string {
 	switch {
 	case st.Unmonitorable != "":
 		return st.Unmonitorable
+	case st.LastError != "" && st.SkipReason != "":
+		return st.LastError + "; the queued recreate from the compose file waits: pre-check refused: " + st.SkipReason
 	case st.LastError != "":
 		return st.LastError
 	case st.SkipReason != "":

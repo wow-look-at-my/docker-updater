@@ -1,4 +1,4 @@
-// network_attach.go holds the network attach code.
+// selfAttacher puts docker-updater on a network of every container it monitors.
 
 package main
 

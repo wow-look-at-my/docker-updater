@@ -1,0 +1,9 @@
+{
+  "Env": [
+    "PATH=/bin"
+  ],
+  "Labels": {
+    "maintainer": "me"
+  },
+  "StopSignal": "SIGTERM"
+}

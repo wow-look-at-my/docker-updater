@@ -40,11 +40,11 @@ func captureLog(t *testing.T, fn func()) string {
 
 // The incident this guards: a buildhost container created in August carried
 // the entrypoint of the image it was created from, ["buildhost"]. The image
-// later switched to an Actually Portable Executable, whose header is a shell
-// script the kernel cannot exec. Every rolling update since cloned that
-// entrypoint onto the new image. The replacement exited 126 immediately, the
-// update rolled back, and the container -- with the stale entrypoint. The
-// update was never replaced.
+// later switched to an Portable Executable, whose header is a shell script
+// the kernel cannot exec. Every rolling update since cloned that entrypoint
+// onto the new image. The replacement exited 126 immediately, the update
+// rolled back, and the container -- with the stale entrypoint. The update
+// was never replaced.
 func TestClearInheritedImageDefaultsDropsTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	config := &container.Config{
@@ -215,6 +215,7 @@ func TestRollingUpdateDropsAStaleEntrypointNoImageSupplied(t *testing.T) {
 func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 	t.Serial()
 	var created *container.Config
+	var inspected []string
 
 	inspectCount := 0
 	cli := &mockDocker{
@@ -248,7 +249,10 @@ func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 			}, nil
 		},
 		imageInspectFn: func(_ context.Context, imageID string) (types.ImageInspect, []byte, error) {
-			require.Equal(t, "sha256:olddigest", imageID, "the config's defaults come from the image the container was created from")
+			inspected = append(inspected, imageID)
+			if imageID != "sha256:olddigest" {
+				return types.ImageInspect{Config: &container.Config{}}, nil, nil
+			}
 			return types.ImageInspect{Config: &container.Config{
 				Entrypoint: []string{"myapp"},
 				Cmd:        []string{"serve"},
@@ -262,6 +266,7 @@ func TestRollingUpdateDoesNotPinTheOldImagesEntrypoint(t *testing.T) {
 
 	info := ContainerInfo{ID: "old123456789", Name: "myapp", Image: "myapp:latest", Rolling: true}
 	require.Nil(t, rollingUpdateContainer(context.Background(), cli, info, "myapp:latest"))
+	assert.Contains(t, inspected, "sha256:olddigest", "the config's defaults come from the image the container was created from")
 
 	require.NotNil(t, created)
 	assert.Nil(t, created.Entrypoint, "the replacement must take the new image's entrypoint")

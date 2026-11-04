@@ -70,7 +70,7 @@ func TestImageModeUpdatesADriftedLocalBuild(t *testing.T) {
 	assert.Empty(t, containers[0].Unmonitorable, "a registry reference is never judged local from RepoDigests")
 	assert.Equal(t, "oci.pazer.build/go-s3-server:latest", containers[0].Image)
 
-	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil), nil)
 	require.Len(t, results, 1)
 	assert.Equal(t, []string{"oci.pazer.build/go-s3-server:latest"}, *pulled, "the configured reference is what the registry is asked about")
 	assert.Nil(t, results[0].Error)
@@ -83,7 +83,7 @@ func TestImageModeUpdatesADriftedLocalBuild(t *testing.T) {
 func TestImageModePullFailureNamesTheRegistryError(t *testing.T) {
 	cli, _ := driftedContainer(errors.New("pull access denied for go-s3-server, repository does not exist or may require 'docker login'"))
 
-	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil), nil)
 	require.Len(t, results, 1)
 	require.NotNil(t, results[0].Error)
 	assert.Contains(t, results[0].Error.Error(), "repository does not exist")
@@ -96,7 +96,7 @@ func TestImageModePullFailureNamesTheRegistryError(t *testing.T) {
 func TestImageModePullFailureOnUnreachableRegistryDoesNotSuggestBuildMode(t *testing.T) {
 	cli, _ := driftedContainer(errors.New(`Get "https://oci.pazer.build/v2/": dial tcp: lookup oci.pazer.build: no such host`))
 
-	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil))
+	results := runUpdateCheck(context.Background(), cli, Config{Label: "docker-updater.enable", DryRun: true}, newAuthResolver(nil), nil)
 	require.Len(t, results, 1)
 	require.NotNil(t, results[0].Error)
 	assert.Contains(t, results[0].Error.Error(), "no such host")

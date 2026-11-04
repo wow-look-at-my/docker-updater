@@ -1,4 +1,4 @@
-// wellknown.go holds the wellknown code.
+// The standardized update-liveness contract a monitored container serves on its own HTTP port.
 
 package main
 
@@ -20,7 +20,8 @@ import (
 )
 
 // The standardized update-liveness contract a monitored container serves on
-// its own HTTP port.
+// its own HTTP port. Both endpoints answer GET and carry meaning in the
+// status code.
 const (
 	wellKnownPrefix    = "/.well-known/docker-updater/"
 	wellKnownHealth    = wellKnownPrefix + "health"
@@ -36,16 +37,15 @@ const (
 // wellKnownProbeTimeout bounds the discovery GET. It targets a container on the local host, so this is generous.
 var wellKnownProbeTimeout = 3 * time.Second
 
-// Default budgets for the update checks, applied to both the label-configured
-// and the standard /.well-known/docker-updater/ endpoints.
+// Default budgets for the update checks.
 const (
 	defaultPreCheckTimeout    = 30 * time.Second
 	defaultHealthCheckTimeout = 60 * time.Second
 )
 
-// containerEndpoint returns the container's own IP and the ID of the network
-// it belongs to. The address docker-updater dials, and the network it has to
-// join to get there.
+// containerEndpoint returns the container's own IP and the ID of the network it
+// belongs to. The address docker-updater dials, and the network it has to join
+// to get there.
 func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) {
 	if inspect.NetworkSettings == nil {
 		return "", ""
@@ -68,7 +68,7 @@ func containerEndpoint(inspect types.ContainerJSON) (address, networkID string) 
 	return "", ""
 }
 
-// hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker.
+// hasDockerHealthcheck reports whether the container has an EFFECTIVE Docker
 // HEALTHCHECK.
 func hasDockerHealthcheck(inspect types.ContainerJSON) bool {
 	if inspect.ContainerJSONBase == nil || inspect.State == nil {
@@ -123,9 +123,9 @@ func overrideLabels(info ContainerInfo) []string {
 }
 
 // resolveWellKnown decides how a container's update checks are addressed this
-// cycle. Explicit check labels always win — that is the compatibility contract
-// with the original opt-in setup. However, they are reported as nonstandard so a
-// fleet can be migrated deliberately rather than by accident.
+// cycle. Explicit check labels always win — that is the compatibility
+// contract with the opt-in setup. However, they are reported as nonstandard
+// so a fleet can be migrated deliberately rather than by accident.
 func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 	if set := overrideLabels(info); len(set) > 0 {
 		return wellKnownState{Warnings: []string{
@@ -163,7 +163,7 @@ func resolveWellKnown(ctx context.Context, info ContainerInfo) wellKnownState {
 }
 
 // fallbackPhrase names the post-update gate this container will get once the
-// standard endpoint is out of the picture, which is not the same sentence.
+// standard endpoint is out of the picture.
 func fallbackPhrase(info ContainerInfo) string {
 	if info.DockerHealthcheck {
 		return "post-update liveness falls back to Docker HEALTHCHECK"
@@ -218,6 +218,10 @@ func joinPorts(ports []int) string {
 
 // probeWellKnown reports whether the endpoint exists, and separately whether
 // the container answered at all.
+//
+// A returned error means no answer arrived — refused, timed out, unroutable.
+// That is a different fault with a different fix, and collapsing it into "not
+// implemented" makes a network problem read as missing code.
 func probeWellKnown(ctx context.Context, url string) (implemented bool, reachErr error) {
 	ctx, cancel := context.WithTimeout(ctx, wellKnownProbeTimeout)
 	defer cancel()
@@ -267,7 +271,7 @@ func applyWellKnown(ctx context.Context, info ContainerInfo) (ContainerInfo, []s
 	return info, state.Warnings
 }
 
-// warnedOnce keeps a container's warning out of the log on every cycle: it is logged when first seen and again only if it changes.
+// warnedOnce keeps a container's warning out of the log on every cycle.
 var warnedOnce sync.Map
 
 func logContainerWarnings(name string, warnings []string) {

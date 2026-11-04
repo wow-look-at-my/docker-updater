@@ -1,4 +1,4 @@
-// git_checker.go holds the git checker code.
+// gitRefStore tracks the last-seen commit SHA for each container+ref pair.
 
 package main
 

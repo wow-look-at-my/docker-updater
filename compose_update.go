@@ -1,4 +1,4 @@
-// compose_update.go holds the compose update code.
+// composeManaged reports whether a container was created by docker compose and carries enough project metadata.
 
 package main
 
@@ -9,25 +9,19 @@ import (
 )
 
 // composeManaged reports whether a container was created by docker compose
-// and carries enough project metadata to converge it through the compose CLI.
+// and carries enough project metadata.
 func composeManaged(info ContainerInfo) bool {
 	return info.ComposeService != "" && len(splitConfigFiles(info.ComposeConfigFiles)) > 0
 }
 
-// recreateViaCompose converges a compose-managed service onto the freshly
-// pulled image with `docker compose up -d --no-deps`. The recreate reads the
-// compose file instead of replaying the container's stored config.
+// recreateViaCompose converges a compose-managed service onto the freshly pulled image with `docker compose up -d --no-deps`. The recreate reads the compose file instead of replaying the container's stored config.
 //
-// This is the difference between docker-updater and image-swapping updaters.
-// Cloning a container's HostConfig preserves whatever it was created with, so
-// a compose file that gained a mount or an env var never takes effect. And an
-// image built to require it fails on every update. Letting compose own the
-// container definition makes the file authoritative.
+// This is the difference between docker-updater and image-swapping updaters. Cloning a container's HostConfig preserves whatever it was created with, so a compose file that gained a mount. Otherwise, an env var never takes effect and an image built to require it fails on every update. Letting compose own the container definition makes the file
+// authoritative.
 //
-// --no-deps keeps the convergence scoped to the service. Recreating a
-// dependency (a docker-in-docker daemon holding live containers, a database)
-// merely because a sibling service took a new image would destroy state the
-// update never intended to touch.
+// --no-deps keeps the convergence scoped to the service. Recreating a dependency (a docker-in-docker daemon holding live containers, a database) merely because a sibling service took a new image would destroy state the update never intended to touch.
+//
+// The rollback contract of the raw-API path is preserved. The image is pinned by content ID before compose tears anything down. Any failure afterwards re-tags that image and converges the service back onto it. A failed update never leaves the service down.
 func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo) error {
 	target := composeTargetFor(info)
 	if len(target.ConfigFiles) == 0 || target.Service == "" {
@@ -71,8 +65,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	if err := runner.UpNoDeps(ctx, target); err != nil {
 		cause := fmt.Errorf("recreating service %s: %w", info.ComposeService, err)
 		// Compose that failed before replacing anything -- an unreadable compose
-		// file, an invalid config -- leaves the original container running on the
-		// original image.
+		// file, an invalid config -- leaves the container running on the image.
 		if containerUnchanged(ctx, cli, info.ID, oldImageID) {
 			log.Printf("container %s: compose failed before touching the container; still running on %s", info.Name, shortID(oldImageID))
 			return cause
@@ -80,7 +73,7 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 		return rollback(cause)
 	}
 
-	// Compose replaced the container.
+	// Compose replaced the container, so the ID is gone; re-find the service's current container before gating on health.
 	newID := currentServiceContainerID(ctx, cli, info)
 	if err := waitPostUpdateHealthy(ctx, cli, newID, info); err != nil {
 		log.Printf("container %s: post-update health check failed (%s), rolling back: %v", info.Name, shortID(newID), err)
@@ -88,11 +81,17 @@ func recreateViaCompose(ctx context.Context, cli DockerClient, runner composeRun
 	}
 
 	log.Printf("container %s updated and healthy via compose (%s)", info.Name, shortID(newID))
+	if newInspect, err := cli.ContainerInspect(ctx, newID); err == nil {
+		if msg := composeSecurityOptGap(ctx, cli, newInspect, info); msg != "" {
+			log.Print(msg)
+		}
+	}
 	return nil
 }
 
-// containerUnchanged reports whether the pre-update container is still there, still running. Still on the image it started with — i.e. the failed compose invocation was a no-op. Anything it cannot confirm (an inspect error, a gone container, a stopped one) reads as
-// changed, so an uncertain state still gets the rollback.
+// containerUnchanged reports whether the pre-update container is still there,
+// still running. This is and still on the image it started with — i.e. the
+// failed compose invocation was a no-op.
 func containerUnchanged(ctx context.Context, cli DockerClient, containerID, imageID string) bool {
 	if containerID == "" || imageID == "" {
 		return false

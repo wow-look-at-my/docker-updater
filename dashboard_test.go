@@ -382,7 +382,7 @@ func TestDashboardVersionStampedAssetURLs(t *testing.T) {
 		etag := resp.Header.Get("ETag")
 		require.Regexp(t, `^"[0-9a-f]{64}"$`, etag, asset)
 
-		// index.html references the asset stamped with a prefix of the hash the asset itself is served under — never the bare name.
+		// index.html references the asset stamped with a prefix of the hash the asset itself is served.
 		stampedRef := attr + `="` + asset + `?v=` + strings.Trim(etag, `"`)[:assetVersionLen] + `"`
 		assert.Contains(t, page, stampedRef, "index.html must reference %s stamped with its content hash", asset)
 		assert.NotContains(t, page, attr+`="`+asset+`"`, "bare (unstamped) %s reference must be gone", asset)
@@ -418,13 +418,13 @@ func TestDashboardServerRunShutsDown(t *testing.T) {
 }
 
 func TestUptimeTextHelperViaJSAssetExists(t *testing.T) {
-	// Guard against accidentally dropping the embedded JS that powers the UI, or shipping a stale dashboard.js compiled before a feature landed in dashboard.ts.
+	// Guard against accidentally dropping the embedded JS that powers the UI.
 	data, err := dashboardAssets.ReadFile("dashboard/dashboard.js")
 	require.Nil(t, err)
 	js := string(data)
 	for _, fn := range []string{
-		"function uptimeText",            // status-string helper (original canary)
-		"function isOnline",              // four-group split (managed/unmanaged × online/offline)
+		"function uptimeText", // status-string helper (original canary)
+		"function isOnline",
 		"function onUiChange",            // filter box + section expand/collapse handler
 		"function updatedHighlight",      // recently-updated green fade
 		"function renderOutOfSyncBanner", // mixed-asset startup guard

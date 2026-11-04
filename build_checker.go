@@ -1,4 +1,4 @@
-// build_checker.go holds the build checker code.
+// composeRunner runs `docker compose ...` invocations.
 
 package main
 
@@ -18,7 +18,8 @@ import (
 
 // composeRunner runs `docker compose ...` invocations. It is an interface so
 // build-mode tests can drive the rebuild/recreate decision without a real
-// Docker daemon or compose CLI.
+// Docker daemon or compose CLI. The real implementation shells out to the
+// `docker compose` plugin.
 type composeRunner interface {
 	// Build runs `docker compose <target> build --pull <service>`.
 	Build(ctx context.Context, t composeTarget) error
@@ -26,6 +27,10 @@ type composeRunner interface {
 	Up(ctx context.Context, t composeTarget) error
 	// UpNoDeps runs `docker compose <target> up -d --no-deps <service>`.
 	UpNoDeps(ctx context.Context, t composeTarget) error
+	// ConfigHash runs `docker compose <target> config --hash <service>`.
+	ConfigHash(ctx context.Context, t composeTarget) (string, error)
+	// CreateRequest returns the container create request `docker compose <target> up` would send for the service now.
+	CreateRequest(ctx context.Context, t composeTarget) ([]byte, error)
 }
 
 // composeTarget is the service a compose invocation acts on, addressed
@@ -113,8 +118,7 @@ func composeArgs(t composeTarget, rest ...string) []string {
 var composeLogWriter io.Writer = os.Stderr
 
 // Bounds for the output tail attached to a failed compose invocation's error:
-// the last composeErrTailLines lines or composeErrTailBytes bytes, whichever
-// is smaller.
+// the last composeErrTailLines lines.
 const (
 	composeErrTailLines = 20
 	composeErrTailBytes = 2048
@@ -131,7 +135,7 @@ func runDockerCompose(ctx context.Context, args []string) error {
 func runLoggedCommand(ctx context.Context, name string, args []string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 
-	// Stdout and Stderr share the writer value, so os/exec serializes writes to it.
+	// Stdout and Stderr share the writer value, so os/exec serializes writes to it (no interleaving corruption).
 	tail := &tailBuffer{max: composeErrTailBytes}
 	out := io.MultiWriter(composeLogWriter, tail)
 	cmd.Stdout = out
@@ -335,7 +339,6 @@ func checkBuildUpdate(ctx context.Context, cli DockerClient, info ContainerInfo,
 			}
 			return prev, baseDigest, true, nil
 		}
-		// Layers unavailable (container or image not inspectable right now).
 	}
 
 	if !seen {
@@ -418,19 +421,12 @@ func recordBuiltBase(info ContainerInfo, baseDigest string) {
 	baseDigestStore.Unlock()
 }
 
-// rebuildAndRecreate rebuilds the service's image. Via `docker compose build
-// --pull` and, only if the rebuild produced a different image than the one
-// the container runs, recreates the service via `docker compose up -d`.
-// Mirrors the "only recreate on real change" behavior of image mode: a
-// cache-hit rebuild that yields the same image is a no-op (no churn). After a
-// successful rebuild it records the new base identity so the next cycle is a
-// no-op. verifyPrefix is true when the rebuild was triggered by the
-// layer-prefix check. In that case a completed rebuild whose image STILL does
-// not extend the base proves the build is prefix-incapable. The service is
-// switched to digest tracking so the layer check cannot rebuild it in a loop.
-// It honors the post-update health check by polling the recreated container;
-// rolling back is delegated to compose (re-running up -d with the prior image
-// is not generically possible here; instead we report a health failure).
+// rebuildAndRecreate rebuilds the service's image. Via `docker compose build --pull` and, only if the rebuild produced a different image than the one the container runs, recreates the service via `docker compose up -d`. Mirrors the "only recreate on real change" behavior of image mode: a cache-hit rebuild that yields the same image is a no-op (no churn). After a successful rebuild it records the new base identity so the next cycle is a
+// no-op.
+//
+// verifyPrefix is true when the rebuild was triggered by the layer-prefix check. In that case a completed rebuild whose image STILL does not extend the base proves the build is prefix-incapable. The service is switched to digest tracking so the layer check cannot rebuild it in a loop.
+//
+// It honors the post-update health check by polling the recreated container; rolling back is delegated to compose (re-running up -d with the prior image is not generically possible here; instead we report a health failure).
 func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRunner, info ContainerInfo, newBase string, verifyPrefix bool) (changed bool, err error) {
 	target := composeTargetFor(info)
 	if len(target.ConfigFiles) == 0 {
@@ -440,7 +436,7 @@ func rebuildAndRecreate(ctx context.Context, cli DockerClient, runner composeRun
 		return false, fmt.Errorf("container %s: no compose service label", info.Name)
 	}
 
-	// Pin, before the rebuild, the image the container runs and the reference it was created with (the tag the build re-points).
+	// Pin, before the rebuild, the image the container runs and the reference it was created.
 	runningID, derivedRef := serviceContainerState(ctx, cli, info)
 
 	log.Printf("container %s: rebuilding service %s (base %s changed)", info.Name, info.ComposeService, shortID(newBase))
@@ -514,9 +510,9 @@ func runningImageID(ctx context.Context, cli DockerClient, info ContainerInfo) s
 }
 
 // currentServiceContainerID returns the container ID backing the build-mode
-// service. After a compose recreate the original info.ID is gone, so we
-// re-list and match on the compose project+service labels. Falls back to
-// info.ID when no match is found (e.g. before the first recreate).
+// service. After a compose recreate the info.ID is gone, so we re-list and
+// match on the compose project+service labels. Falls back to info.ID when no
+// match is found (e.g. before the first recreate).
 func currentServiceContainerID(ctx context.Context, cli DockerClient, info ContainerInfo) string {
 	list, err := listAllContainers(ctx, cli)
 	if err != nil {

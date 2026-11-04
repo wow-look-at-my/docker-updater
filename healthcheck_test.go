@@ -275,9 +275,7 @@ func TestHealthCheckTimeout(t *testing.T) {
 	t.Run("zero fields use defaults", func(t *testing.T) {
 		inspect := types.ContainerJSON{
 			Config: &container.Config{
-				Healthcheck: &container.HealthConfig{
-					// All zero — should use defaults: 30s interval, retries, 30s timeout
-				},
+				Healthcheck: &container.HealthConfig{},
 			},
 		}
 		assert.Equal(t, 2*time.Minute, healthCheckTimeout(inspect))
@@ -399,11 +397,11 @@ func TestRecreateContainerRollsBackOnUnhealthy(t *testing.T) {
 	assert.Equal(t, []string{"old123456789", "new123456789"}, stops)
 	assert.Equal(t, []string{"old123456789", "new123456789"}, removes)
 
-	// ...the image is re-tagged to the original reference so the restored container keeps resolving.
+	// ...the image is re-tagged to the reference so the restored container keeps resolving (and retrying).
 	assert.Equal(t, "sha256:olddigest", tagSource)
 	assert.Equal(t, "ghcr.io/org/app:latest", tagTarget)
 
-	// ...and a container on the image comes back up under the original name.
+	// ...and a container on the image comes back up under the name.
 	require.Equal(t, 2, len(creates))
 	assert.Equal(t, "ghcr.io/org/app:latest test-app", creates[1])
 	assert.Equal(t, []string{"new123456789", "restored90123"}, starts)

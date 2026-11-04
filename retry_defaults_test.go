@@ -108,8 +108,8 @@ func TestRollingUpdateRetriesOnTheImagesOwnDefaults(t *testing.T) {
 	assert.Nil(t, configs[0].Entrypoint, "the entrypoint never survives to a start")
 }
 
-// A retry that also fails reports the original cause. Inventing a second reason
-// for one failure sends the reader after the wrong thing.
+// A retry that also fails reports the cause. Inventing a second reason for
+// one failure sends the reader after the wrong thing.
 func TestRollingUpdateReportsTheFirstCauseWhenTheRetryFails(t *testing.T) {
 	t.Serial()
 	cli := &mockDocker{

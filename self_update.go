@@ -1,4 +1,4 @@
-// self_update.go holds the self update code.
+// docker-updater cannot update its own container the way it updates any other one.
 
 package main
 
@@ -15,9 +15,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// docker-updater cannot update its own container the way it updates any other one: recreateContainer stops and removes the target before creating the replacement.
+// docker-updater cannot update its own container the way it updates any other one.
 
-// finishSelfUpdateCommand is the hidden argv[1] the helper container runs to complete a self-update.
 const finishSelfUpdateCommand = "finish-self-update"
 
 // selfUpdateHelperLabel marks the helper container so it is never itself picked up as a monitored target.
@@ -69,7 +68,7 @@ func containerIDFromCgroup(cgroup string) string {
 	return ""
 }
 
-// sameContainer reports whether a and b.
+// sameContainer reports whether a and b refer to the same container.
 func sameContainer(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -174,9 +173,9 @@ func dockerHostEnv(inspect types.ContainerJSON) string {
 }
 
 // finishSelfUpdate is the helper container's entrypoint. It recreates the
-// original docker-updater container (--target) on the new image (--image),
-// reusing recreateContainer so the same rollback and health-gate guarantees
-// apply. It runs to completion then exits; the helper container is --rm'd.
+// docker-updater container (--target) on the new image (--image), reusing
+// recreateContainer so the same rollback and health-gate guarantees apply. It
+// runs to completion then exits; the helper container is --rm'd.
 func finishSelfUpdate(args []string) {
 	fs := flag.NewFlagSet(finishSelfUpdateCommand, flag.ExitOnError)
 	target := fs.String("target", "", "ID of the docker-updater container to replace")

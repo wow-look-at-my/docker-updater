@@ -1,4 +1,4 @@
-// state.go holds the state code.
+// ContainerStatus is the updater's tracked knowledge about a single monitored container, captured after each update-check cycle.
 
 package main
 
@@ -30,6 +30,9 @@ type ContainerStatus struct {
 	// Warnings about how the container is configured for update checks.
 	Warnings []string
 
+	// Drift is the compose drift the latest check found, or nil.
+	Drift *ComposeDrift
+
 	LastError  string // last error message, if the most recent check failed
 	Skipped    bool   // the most recent update was skipped by a pre-check
 	SkipReason string
@@ -38,7 +41,7 @@ type ContainerStatus struct {
 	// Unmonitorable is why this container can never be checked as configured.
 	Unmonitorable string
 
-	// StuckCycles counts the consecutive cycles that left this container on the version it runs against the updater's will: an update it did not take.
+	// StuckCycles counts the consecutive cycles that left this container on the version it runs against the updater's will.
 	StuckCycles int
 	StuckSince  time.Time
 }
@@ -50,26 +53,74 @@ func (s ContainerStatus) Stuck() bool { return s.StuckCycles > 1 }
 type Store struct {
 	mu        sync.RWMutex
 	statuses  map[string]ContainerStatus
+	recreates map[string]QueuedRecreate
 	lastCycle time.Time
+}
+
+// QueuedRecreate is a recreate from the compose file that an operator asked
+// for.
+type QueuedRecreate struct {
+	FileHash string
+	At       time.Time
 }
 
 // Snapshot is an immutable copy of the store's state for a reader.
 type Snapshot struct {
 	Statuses  map[string]ContainerStatus
+	Recreates map[string]QueuedRecreate
 	LastCycle time.Time
 }
 
 func newStore() *Store {
-	return &Store{statuses: make(map[string]ContainerStatus)}
+	return &Store{statuses: make(map[string]ContainerStatus), recreates: make(map[string]QueuedRecreate)}
 }
 
-// Record folds a cycle's update results into the store, preserving historical
-// timestamps (LastPulled, LastUpdated) for fields the current cycle did not
-// touch. It also marks the time the cycle completed.
+// QueueRecreate queues a recreate of the named container from the compose file that hashes to fileHash.
+func (s *Store) QueueRecreate(name, fileHash string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recreates[name] = QueuedRecreate{FileHash: fileHash, At: at}
+}
+
+// QueuedRecreate returns the file hash of the named container's queued recreate.
+func (s *Store) QueuedRecreate(name string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	q, ok := s.recreates[name]
+	return q.FileHash, ok
+}
+
+// DropRecreate removes the named container's queued recreate.
+func (s *Store) DropRecreate(name string) {
+	s.CancelRecreate(name)
+}
+
+// CancelRecreate removes the named container's queued recreate and reports whether one was queued.
+func (s *Store) CancelRecreate(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.recreates[name]
+	delete(s.recreates, name)
+	return ok
+}
+
+// Record folds a cycle's update results into the store.
 func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.record(results)
+	s.lastCycle = cycleEnd
+}
 
+// RecordContainers folds results that are not a full cycle, such as a forced
+// update of one container. The last-cycle time stays where it is.
+func (s *Store) RecordContainers(results []UpdateResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.record(results)
+}
+
+func (s *Store) record(results []UpdateResult) {
 	for _, r := range results {
 		name := r.Container.Name
 		st := s.statuses[name] // existing entry, or zero value for a new one
@@ -80,6 +131,7 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		st.LastChecked = r.CheckedAt
 		st.DryRun = r.DryRun
 		st.Warnings = r.Warnings
+		st.Drift = r.Drift
 		if r.Pulled {
 			st.LastPulled = r.CheckedAt
 		}
@@ -110,6 +162,9 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		switch {
 		case r.Error != nil:
 			st.LastError = r.Error.Error()
+			// A failed check can still hold back a queued recreate from the compose file.
+			st.Skipped = r.Skipped
+			st.SkipReason = r.SkipReason
 			if r.NewRef != "" {
 				st.UpdateAvailable = true
 				st.AvailableRef = shortRef(r.NewRef)
@@ -118,12 +173,12 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 		case r.Skipped:
 			st.Skipped = true
 			st.SkipReason = r.SkipReason
-			st.UpdateAvailable = true
+			st.UpdateAvailable = !r.Resync
 			st.AvailableRef = shortRef(r.NewRef)
 			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated && r.DryRun:
-			// Dry-run: an update is available but was deliberately not applied.
-			st.UpdateAvailable = true
+			// Dry-run: an update or a recreate from the compose file is due but was deliberately not applied. The held drift stays in st.Drift.
+			st.UpdateAvailable = !r.Resync
 			st.AvailableRef = shortRef(r.NewRef)
 			st.AvailableCommit, st.AvailableCommitURL = r.NewCommit, r.NewCommitURL
 		case r.Updated:
@@ -136,8 +191,6 @@ func (s *Store) Record(results []UpdateResult, cycleEnd time.Time) {
 
 		s.statuses[name] = st
 	}
-
-	s.lastCycle = cycleEnd
 }
 
 // Snapshot returns a deep copy of the current state for safe concurrent reads.
@@ -149,7 +202,11 @@ func (s *Store) Snapshot() Snapshot {
 	for k, v := range s.statuses {
 		statuses[k] = v
 	}
-	return Snapshot{Statuses: statuses, LastCycle: s.lastCycle}
+	recreates := make(map[string]QueuedRecreate, len(s.recreates))
+	for k, v := range s.recreates {
+		recreates[k] = v
+	}
+	return Snapshot{Statuses: statuses, Recreates: recreates, LastCycle: s.lastCycle}
 }
 
 // shortRef trims the digest algorithm prefix and shortens a digest or commit

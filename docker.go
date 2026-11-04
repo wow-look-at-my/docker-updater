@@ -1,4 +1,4 @@
-// docker.go holds the docker code.
+// DockerClient defines the Docker API methods we use, allowing test mocks.
 
 package main
 
@@ -323,18 +323,15 @@ func runningRepoDigests(ctx context.Context, cli DockerClient, imageID string) [
 //
 // fetched is true only when the local image the reference resolves to changed
 // as a result of the pull. This is a pull that finds the image already up to
-// date downloads nothing and reports fetched=false. This distinguishes "we
-// ran a pull check" (every cycle) from "we downloaded a newer image" (rare),
-// so callers can record when an image was genuinely pulled rather than merely
-// polled.
+// date downloads nothing and reports fetched=false. This distinguishes ".
 func pullImage(ctx context.Context, cli DockerClient, imageName string, resolveAuth AuthResolver) (digest string, fetched bool, err error) {
 	// Never issue a pull/manifest request against a bare image ID (e.g.
-	// "sha256:..."): it is not a registry repository.
+	// "sha256:...").
 	if !hasRepository(imageName) {
 		return "", false, fmt.Errorf("cannot pull %q: not a registry repository reference", imageName)
 	}
 
-	// Record the content ID the reference resolves to before pulling, so we can tell afterwards whether the pull fetched new content.
+	// Record the content ID the reference resolves to before pulling.
 	beforeID := ""
 	if before, _, e := cli.ImageInspectWithRaw(ctx, imageName); e == nil {
 		beforeID = before.ID

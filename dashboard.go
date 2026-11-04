@@ -1,4 +1,4 @@
-// dashboard.go holds the dashboard code.
+// dashboardServer serves the status dashboard and its JSON API.
 
 package main
 
@@ -18,19 +18,19 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// dashboard.js is tsc output from dashboard.ts.
-//
 //go:generate npm --prefix dashboard ci
-//go:generate dashboard/node_modules/.bin/tsc --project dashboard
+//go:generate dashboard/node_modules/.bin/tsc -p dashboard
 
 //go:embed dashboard/index.html dashboard/dashboard.css dashboard/dashboard.js dashboard/favicon.svg
 var dashboardAssets embed.FS
 
-// dashboardServer serves the read-only status dashboard and JSON API.
+// dashboardServer serves the status dashboard and its JSON API.
 type dashboardServer struct {
 	cli   DockerClient
 	cfg   Config
 	store *Store
+	// force queues force-update requests for the update loop. nil disables the force-update endpoint.
+	force chan<- string
 }
 
 func newDashboardServer(cli DockerClient, cfg Config, store *Store) *dashboardServer {
@@ -43,6 +43,8 @@ func (s *dashboardServer) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/containers", s.handleAPIContainers)
 	mux.HandleFunc("/api/logs", s.handleAPILogs)
+	mux.HandleFunc("/api/force-update", s.handleAPIForceUpdate)
+	mux.HandleFunc("/api/recreate", s.handleAPIRecreate)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/", staticAssetHandler())
 	return mux
@@ -58,16 +60,19 @@ type staticAsset struct {
 // assetVersionLen is how many hex chars of an asset's SHA-256 go into the ?v= stamp index.html references it by.
 const assetVersionLen = 12
 
-// staticAssetHandler serves the embedded dashboard files with a strong.
-// SHA-256 ETag and Cache-Control: no-cache. Embedded files carry a zero
-// modtime, so the http.FileServer emitted no validators at all. The
-// http.FileServer browsers and intermediary caches fell back to heuristic
-// caching. It could keep serving an old dashboard.js/dashboard.css against a
-// freshly deployed index.html. This then crashes on the markup's element ids.
-// A deploy changes the hashes and all assets flip atomically. Hashes are
-// computed once here, not per request. Last-Modified is deliberately never
-// sent (a zero modtime is meaningless), leaving the ETag as the only — and
-// sufficient — validator.
+// staticAssetHandler serves the embedded dashboard files with a strong SHA-256
+// ETag and Cache-Control: no-cache. Hashes are computed once here, not per
+// request. Last-Modified is deliberately never sent (a zero modtime is
+// meaningless), leaving the ETag as the only — and sufficient — validator.
+//
+// Belt and suspenders on top of the validators. The served index.html is
+// rewritten at startup to reference its scripts as dashboard.js?v=<hash> /
+// dashboard.css?v=<hash> (a prefix of each asset's own content hash). A cache
+// that ignores no-cache — e.g. a cache-everything edge rule, whose default
+// cache key includes the query string. Then stores every asset version under a
+// distinct key. A given index.html can only ever resolve to the exact js and
+// css bytes it shipped with. An old-script/new-page pairing is impossible by
+// construction.
 func staticAssetHandler() http.HandlerFunc {
 	read := func(name string) []byte {
 		body, err := dashboardAssets.ReadFile("dashboard/" + name)
@@ -185,7 +190,7 @@ type apiContainer struct {
 	Health    string `json:"health"`
 	Created   int64  `json:"created"`
 
-	// Restarts is Docker's RestartCount.
+	// Restarts is Docker's RestartCount: how many times the daemon's restart policy has restarted the container.
 	Restarts *int `json:"restarts,omitempty"`
 
 	AutoUpdate bool   `json:"auto_update"`
@@ -214,6 +219,10 @@ type apiContainer struct {
 	StuckSince  *time.Time `json:"stuck_since,omitempty"`
 	// Warnings describe how the container is configured for update checks -- no standard /.well-known/docker-updater/ endpoints.
 	Warnings []string `json:"warnings,omitempty"`
+	// ComposeDrift is set when the running config no longer matches the compose file, or when nothing could compare them.
+	ComposeDrift *ComposeDrift `json:"compose_drift,omitempty"`
+	// RecreateQueued is when an operator queued a recreate from the compose file. It is absent when none is queued.
+	RecreateQueued *time.Time `json:"recreate_queued,omitempty"`
 }
 
 // apiResponse is the top-level JSON payload served at /api/containers.
@@ -225,6 +234,7 @@ type apiResponse struct {
 	Version     string         `json:"version,omitempty"`
 	LastCycle   *time.Time     `json:"last_cycle,omitempty"`
 	NextCycle   *time.Time     `json:"next_cycle,omitempty"`
+	StatsURL    string         `json:"stats_url,omitempty"`
 	Containers  []apiContainer `json:"containers"`
 }
 
@@ -243,6 +253,7 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 		DryRun:      s.cfg.DryRun,
 		Label:       s.cfg.Label,
 		Version:     buildVersion(),
+		StatsURL:    s.cfg.StatsURL,
 	}
 	if !snap.LastCycle.IsZero() {
 		lc := snap.LastCycle
@@ -302,6 +313,10 @@ func (s *dashboardServer) handleAPIContainers(w http.ResponseWriter, r *http.Req
 			ac.LastUpdated = nonZeroTime(st.LastUpdated)
 			// Appended, not assigned: the both-updaters note above is about this container's labels.
 			ac.Warnings = append(ac.Warnings, st.Warnings...)
+			ac.ComposeDrift = st.Drift
+			if q, ok := snap.Recreates[name]; ok {
+				ac.RecreateQueued = nonZeroTime(q.At)
+			}
 			if st.Stuck() {
 				ac.StuckCycles = st.StuckCycles
 				ac.StuckSince = nonZeroTime(st.StuckSince)

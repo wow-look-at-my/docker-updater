@@ -34,6 +34,24 @@ type fakeComposeRunner struct {
 	upNoDepsProjects []string
 	buildTargets     []composeTarget
 	onUpNoDeps       func() // hook to mutate fixture state between converge attempts
+
+	// ConfigHash answers with configHash or configHashErr, and records each target.
+	configHash        string
+	configHashErr     error
+	configHashTargets []composeTarget
+
+	// CreateRequest answers with createRequest or createRequestErr.
+	createRequest    []byte
+	createRequestErr error
+}
+
+func (f *fakeComposeRunner) CreateRequest(_ context.Context, _ composeTarget) ([]byte, error) {
+	return f.createRequest, f.createRequestErr
+}
+
+func (f *fakeComposeRunner) ConfigHash(_ context.Context, t composeTarget) (string, error) {
+	f.configHashTargets = append(f.configHashTargets, t)
+	return f.configHash, f.configHashErr
 }
 
 func (f *fakeComposeRunner) Build(_ context.Context, t composeTarget) error {
@@ -135,13 +153,13 @@ func TestIsLayerPrefix(t *testing.T) {
 }
 
 // layeredFixture is a mockDocker environment for build-mode tests where the
-// base image.
+// base image, the running container's image.
 type layeredFixture struct {
 	cli          *mockDocker
-	baseManifest string   // manifest digest the base tag currently resolves.
+	baseManifest string
 	baseLayers   []string // RootFS layers of the pulled base image
 	runningID    string   // image ID the service's container currently runs
-	builtID      string   // image ID the derived tag currently points.
+	builtID      string
 	imageLayers  map[string][]string
 }
 
@@ -225,7 +243,7 @@ func TestCheckBuildUpdateLayerPrefixVerifiedCurrent(t *testing.T) {
 
 func TestCheckBuildUpdateDetectsPreExistingStaleOnFirstCycle(t *testing.T) {
 	t.Serial()
-	// The opencode scenario.
+	// The opencode scenario: the updater (re)starts with empty in-memory state while the container's image was built.
 	resetBuildState()
 	f := newLayeredFixture()
 	// The running image was built from an OLD base: its layers do not start with the current base's layers.

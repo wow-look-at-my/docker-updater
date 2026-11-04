@@ -1,4 +1,4 @@
-// webhook.go holds the webhook code.
+// sendWebhookNotifications sends update results to the configured webhook.
 
 package main
 

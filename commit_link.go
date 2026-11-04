@@ -1,4 +1,4 @@
-// commit_link.go holds the commit link code.
+// The OCI image annotations an image build stamps.
 
 package main
 

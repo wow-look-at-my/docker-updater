@@ -111,7 +111,7 @@ func (execComposeRunner) CreateRequest(ctx context.Context, t composeTarget) ([]
 		return nil, err
 	}
 	// This runs after srv.Close below. That call ends the requests in flight, and their connections are idle or closed by then.
-	_ = closeIdle
+	defer closeIdle()
 	ctx, cancel := context.WithTimeout(ctx, composeCaptureTimeout)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "docker-updater-capture-")

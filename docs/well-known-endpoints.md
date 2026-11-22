@@ -28,7 +28,7 @@ Neither endpoint needs a body, so a one-line handler is a complete implementatio
 
 docker-updater builds the base URL from the container's own Docker state. As a result, nothing is configured twice:
 
-- **Address** — the container's network IP. Discovery takes the networks in name order, so a multi-network container resolves to the same endpoint every cycle. The probe dials that IP directly, and it [attaches itself](#attaching-to-the-network) to the network first when it is not on it already. A container with no IP of its own cannot be discovered, so give it an absolute `docker-updater.health-check.url` instead. The `host`, `none` and `container:` network modes are the cases with no IP.
+- **Address** — the container's network IP. Discovery takes the networks in name order, so a multi-network container resolves to the same endpoint every cycle. The probe dials that IP directly, and it [attaches itself](#attaching-to-the-network) to the network first when it is not on it already. A container with no IP of its own cannot be discovered, so give it an absolute `docker-updater.health-check.url` instead.
 - **Port** — the container's single exposed TCP port. With several exposed ports there is no way to guess which one speaks HTTP. Discovery stops and warns until `docker-updater.well-known.port` names one.
 
 A container implements the contract when `health` answers with anything other than 404 or 501. A `503` from a container that is currently unhealthy still counts. That is a health problem, not a configuration one.
@@ -74,7 +74,7 @@ The Missing warning names the gate the container ACTUALLY gets, which is not the
 
 ## Compatibility with the label-configured checks
 
-The original opt-in labels still work and always win. Those labels are `docker-updater.pre-check.url` and `.command`, plus `docker-updater.health-check.url` and `.command`. Discovery fills in only what no label set, per check. A container can carry an explicit `health-check.command` and still use the standard `pre-update` endpoint. Any of those labels marks the container nonstandard.
+The original opt-in labels still work and always win. Discovery fills in only what no label set, per check. A container can carry an explicit `health-check.command` and still use the standard `pre-update` endpoint. Any of those labels marks the container nonstandard.
 
 To migrate: implement the endpoints, delete the labels, and the warning goes away on the next cycle.
 

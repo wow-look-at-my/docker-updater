@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,6 +21,8 @@ import (
 type daemonLog struct {
 	mu   sync.Mutex
 	seen []string
+	// open counts the connections the daemon holds.
+	open atomic.Int64
 }
 
 func (l *daemonLog) requests() []string {
@@ -40,10 +44,33 @@ func fakeDaemon(t *testing.T) *daemonLog {
 		log.mu.Unlock()
 		io.WriteString(w, `{"from":"daemon"}`)
 	})}
+	srv.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateNew:
+			log.open.Add(1)
+		case http.StateClosed, http.StateHijacked:
+			log.open.Add(-1)
+		}
+	}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 	t.Setenv("DOCKER_HOST", "unix://"+sock)
 	return log
+}
+
+// Each capture run opened a connection to the daemon and kept it. One run per check filled the daemon's descriptors.
+func TestCreateRequestLeavesNoConnectionToTheDaemon(t *testing.T) {
+	daemon := fakeDaemon(t)
+	file, _ := fakeCompose(t, `curl -s --unix-socket "$s" -X POST -d '{}' http://d/v1.47/containers/create; exit 1`)
+
+	for range 5 {
+		_, err := execComposeRunner{}.CreateRequest(context.Background(), composeTarget{ConfigFiles: []string{file}, Service: "web"})
+		require.NoError(t, err)
+	}
+
+	require.Len(t, daemon.requests(), 5, "every run read through the daemon")
+	assert.Eventually(t, func() bool { return daemon.open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
+		"%d connection(s) to the daemon stayed open after the runs", daemon.open.Load())
 }
 
 // fakeCompose stands in for `docker compose`. It reads through the socket it is given, as the real one does, then sends the requests in its script.

@@ -36,7 +36,7 @@ The socket passes reads to the daemon. It records the create request and answers
 
 Every key of `Config`, `HostConfig` and each network endpoint is compared. A few values get a rule:
 
-- The daemon fills in some fields when the request leaves them empty. Examples are `Hostname`, `ShmSize`, `IpcMode`, `MaskedPaths` and the logging driver. Only a value the request sets is compared.
+- The daemon fills in some fields when the request leaves them empty. Only a value the request sets is compared.
 - The image supplies the command, entrypoint, user and stop signal that the request leaves empty. The daemon merges the image's environment, labels, exposed ports and volumes with the request's.
 - compose's own labels change on every recreate. As a result, they are skipped.
 - The daemon assigns the address and the IDs of an endpoint when the container starts. As a result, they are skipped.

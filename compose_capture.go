@@ -18,7 +18,11 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
+
+// composeCaptureTimeout bounds one capture run. Compose only reads from the daemon here, so a longer run is a daemon that does not answer.
+const composeCaptureTimeout = 2 * time.Minute
 
 // createPath matches the Docker API call that creates a container, with or without a version prefix.
 var createPath = regexp.MustCompile(`^(/v[0-9.]+)?/containers/create$`)
@@ -61,18 +65,19 @@ func writeDockerError(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"message": msg})
 }
 
-// dockerUpstream is a reverse proxy to the daemon that DOCKER_HOST names, or to the default socket.
-func dockerUpstream() (http.Handler, error) {
+// dockerUpstream is a reverse proxy to the daemon that DOCKER_HOST names, or to the default socket. The caller must call
+// closeIdle when it is done: the transport keeps each connection to the daemon open until then.
+func dockerUpstream() (proxy http.Handler, closeIdle func(), err error) {
 	host := os.Getenv("DOCKER_HOST")
 	if host == "" {
 		host = "unix:///var/run/docker.sock"
 	}
 	u, err := url.Parse(host)
 	if err != nil {
-		return nil, fmt.Errorf("DOCKER_HOST %q: %w", host, err)
+		return nil, nil, fmt.Errorf("DOCKER_HOST %q: %w", host, err)
 	}
 	if os.Getenv("DOCKER_TLS_VERIFY") != "" {
-		return nil, fmt.Errorf("DOCKER_HOST %s needs TLS, which the compose config capture does not carry", host)
+		return nil, nil, fmt.Errorf("DOCKER_HOST %s needs TLS, which the compose config capture does not carry", host)
 	}
 	target := &url.URL{Scheme: "http", Host: u.Host}
 	transport := &http.Transport{}
@@ -85,12 +90,12 @@ func dockerUpstream() (http.Handler, error) {
 		}
 	case "tcp", "http":
 	default:
-		return nil, fmt.Errorf("DOCKER_HOST %s: the compose config capture supports unix and tcp only", host)
+		return nil, nil, fmt.Errorf("DOCKER_HOST %s: the compose config capture supports unix and tcp only", host)
 	}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = transport
-	proxy.FlushInterval = -1
-	return proxy, nil
+	rp := httputil.NewSingleHostReverseProxy(target)
+	rp.Transport = transport
+	rp.FlushInterval = -1
+	return rp, transport.CloseIdleConnections, nil
 }
 
 // CreateRequest runs the recreate `docker compose up` would do for the
@@ -101,10 +106,14 @@ func (execComposeRunner) CreateRequest(ctx context.Context, t composeTarget) ([]
 	if err := checkComposeFilesVisible(t.ConfigFiles); err != nil {
 		return nil, err
 	}
-	upstream, err := dockerUpstream()
+	upstream, closeIdle, err := dockerUpstream()
 	if err != nil {
 		return nil, err
 	}
+	// This runs after srv.Close below. That call ends the requests in flight, and their connections are idle or closed by then.
+	defer closeIdle()
+	ctx, cancel := context.WithTimeout(ctx, composeCaptureTimeout)
+	defer cancel()
 	dir, err := os.MkdirTemp("", "docker-updater-capture-")
 	if err != nil {
 		return nil, err
